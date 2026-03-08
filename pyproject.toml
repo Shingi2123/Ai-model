@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "virtual-ai-character-engine"
+version = "0.1.0"
+description = "Production-minded consistency engine for a virtual AI character / digital persona"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "AI Character Ops"}]
+dependencies = [
+  "pydantic>=2.7.0",
+  "pydantic-settings>=2.2.1",
+  "python-dotenv>=1.0.1",
+  "PyYAML>=6.0.1",
+  "requests>=2.32.0",
+  "tenacity>=8.2.3",
+]
+
+[project.optional-dependencies]
+telegram = ["python-telegram-bot>=21.0"]
+google = ["gspread>=6.0.0", "google-auth>=2.29.0"]
+llm = ["openai>=1.30.0"]
+dev = ["pytest>=8.2.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
