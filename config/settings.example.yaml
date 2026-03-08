@@ -1,0 +1,29 @@
+project:
+  name: "virtual-ai-character-engine"
+  timezone: "Europe/Paris"
+  default_city: "Paris"
+  data_dir: "data"
+  state_dir: "data/state"
+  output_dir: "data/outputs"
+  logs_dir: "data/logs"
+
+behavior:
+  planning:
+    history_window_days: 5
+    scene_count: 3
+    avoid_scene_repeat_days: 3
+  wardrobe:
+    default_cooldown_days: 3
+  continuity:
+    max_same_city_streak: 7
+    max_outfit_repeat_days: 2
+
+fallbacks:
+  weather:
+    condition: "mild_clouds"
+    temp_c: 18
+  city_coordinates:
+    Paris: [48.8566, 2.3522]
+    Rome: [41.9028, 12.4964]
+    Lisbon: [38.7223, -9.1393]
+    Vienna: [48.2082, 16.3738]

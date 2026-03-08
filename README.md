@@ -1,1 +1,172 @@
-# Ai-model
+# Virtual AI Character Engine (MVP+)
+
+Production-minded Python repository for managing a **transparent virtual AI character / digital persona** with strict continuity controls.
+
+> Ethical positioning: this system is designed for disclosed virtual characters only. It should not be used to impersonate real humans or mislead audiences.
+
+## What this project does
+
+The engine generates a daily content package for a virtual influencer while preserving continuity:
+- Character identity consistency (appearance, age, style boundaries)
+- City/time/weather realism
+- Outfit and wardrobe logic with cooldowns
+- Day dramaturgy (morning/afternoon/evening)
+- Prompt generation for photo/video
+- Captions and story lines
+- Continuity checks and conflict flags
+- Telegram delivery with resilient fallback
+
+## Architecture
+
+`main.py` + modular package `src/virtual_persona`:
+
+- `config` — runtime/env settings loader
+- `models` — Pydantic domain models
+- `storage` — local state backend + Google Sheets placeholder
+- `services`
+  - weather (`OpenWeather` + fallback)
+  - sun (`Sunrise-Sunset` + fallback)
+  - wardrobe selection and persistence
+- `pipeline`
+  - context builder
+  - daily planner
+  - content generator
+  - continuity checker
+  - orchestrator
+- `delivery`
+  - markdown package formatter
+  - Telegram sender
+- `llm`
+  - provider interface
+  - fallback/template provider
+  - optional OpenAI provider
+
+## Repository structure
+
+- `config/`
+  - `settings.example.yaml`
+  - `character_bible.example.json`
+  - `wardrobe.example.json`
+  - `prompt_templates.example.json`
+- `data/`
+  - `samples/` (calendar/history demo data)
+  - `state/` (runtime state)
+  - `outputs/` (daily package json/md)
+  - `logs/`
+- `scripts/`
+  - `bootstrap_google_sheet.py`
+  - `telegram_polling.py`
+- `cron/daily_pipeline.cron`
+- `docs/vps_deploy.md`
+- `tests/`
+
+## Setup
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+# optional extras:
+pip install '.[telegram,google,llm]'
+```
+
+Copy and configure environment:
+
+```bash
+cp .env.example .env
+```
+
+Fill at minimum:
+- `TIMEZONE`
+- `DEFAULT_CITY`
+- `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (for delivery)
+- `OPENWEATHER_API_KEY` (optional but recommended)
+
+## CLI commands
+
+```bash
+python main.py bootstrap
+python main.py generate-day
+python main.py generate-day --date 2026-01-12 --city Rome
+python main.py check-continuity
+python main.py send-telegram
+python main.py test-run
+```
+
+### Command behavior
+- `bootstrap` initializes local runtime folders
+- `generate-day` runs full pipeline and saves output json
+- `check-continuity` runs generation + prints continuity flags
+- `send-telegram` sends short summary from today's package
+- `test-run` generates and writes markdown package
+
+## Telegram bot commands (polling script)
+
+If you install telegram dependency:
+
+```bash
+python scripts/telegram_polling.py
+```
+
+Supported bot commands:
+- `/generate_day`
+- `/show_today`
+- `/show_history`
+- `/regenerate`
+- `/set_city <City>`
+- `/help`
+
+## Google Sheets schema
+
+Use `scripts/bootstrap_google_sheet.py` to initialize sheet tabs:
+
+- `character_profile`
+- `wardrobe`
+- `cities`
+- `scene_library`
+- `daily_calendar`
+- `content_history`
+- `continuity_flags`
+- `prompt_templates`
+- `run_log`
+
+Required env for bootstrap:
+- `GOOGLE_SERVICE_ACCOUNT_JSON_PATH`
+- `GOOGLE_SHEET_ID`
+
+## Continuity guarantees in MVP
+
+Checks currently implemented:
+- city jump detection without transfer day type
+- outfit repeat warning in recent history
+- weather vs scene clash (e.g. rain + bright sun)
+
+Fallbacks:
+- if weather API fails: safe configured weather fallback
+- if sun API fails: default local sunrise/sunset fallback
+- if Telegram fails: write markdown fallback in outputs
+- if Google Sheets unavailable: local state mode continues
+
+## OpenClaw integration
+
+OpenClaw is optional and treated as an orchestration/trigger bridge only.
+Core continuity logic and memory stay in Python modules and state files.
+
+## VPS deploy
+
+See `docs/vps_deploy.md` and `cron/daily_pipeline.cron`.
+
+## Testing
+
+```bash
+pytest
+```
+
+## Production notes
+
+Before production usage:
+- Replace all example config/data with your character canon
+- Add richer continuity rule set and scene library
+- Add stronger transport constraints between cities
+- Add content moderation and governance policy checks
+- Add structured monitoring/alerts around failed runs

@@ -1,0 +1,6 @@
+{
+  "photo_prompt": "{character_name}, {appearance_anchor}, {scene_description}, {city}, {weather_description}, {lighting}, outfit: {outfit_summary}, style: cinematic lifestyle photography, realistic, high detail",
+  "video_prompt": "Vertical short video of {character_name} in {city}: {scene_description}. Lighting: {lighting}. Outfit: {outfit_summary}. Motion: subtle natural movement, realistic travel ambiance.",
+  "post_caption": "{city} diary • {day_mood}. {short_story}\n\n#VirtualCharacter #AIGenerated #TravelLifestyle",
+  "story_caption": "{time_of_day} vibe in {city}: {story_line}"
+}
