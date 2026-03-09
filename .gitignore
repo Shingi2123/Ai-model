@@ -1,0 +1,15 @@
+# secrets
+.env
+
+# python
+venv/
+__pycache__/
+*.pyc
+
+# runtime data
+data/logs/
+data/outputs/
+data/state/
+
+# vscode
+.vscode/
