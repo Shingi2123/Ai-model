@@ -13,7 +13,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from virtual_persona.config.settings import AppSettings
 from virtual_persona.delivery.formatter import package_to_markdown
 from virtual_persona.pipeline.orchestrator import PipelineOrchestrator
-from virtual_persona.storage.state_store import LocalStateStore
 from virtual_persona.utils.logging import configure_logging
 
 

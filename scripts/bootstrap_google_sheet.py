@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import sys
 from pathlib import Path
 

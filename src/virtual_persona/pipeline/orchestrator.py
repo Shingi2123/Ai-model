@@ -12,13 +12,13 @@ from virtual_persona.pipeline.context_builder import ContextBuilder
 from virtual_persona.pipeline.continuity_checker import ContinuityChecker
 from virtual_persona.pipeline.daily_planner import DailyPlanner
 from virtual_persona.services.wardrobe import WardrobeManager
-from virtual_persona.storage.state_store import LocalStateStore
+from virtual_persona.storage.state_store import build_state_store
 
 
 class PipelineOrchestrator:
     def __init__(self, settings: AppSettings) -> None:
         self.settings = settings
-        self.state = LocalStateStore()
+        self.state = build_state_store(settings)
         self.context_builder = ContextBuilder(settings, self.state)
         self.planner = DailyPlanner()
         self.wardrobe = WardrobeManager()
@@ -56,9 +56,13 @@ class PipelineOrchestrator:
             content=content,
             continuity_issues=issues,
         )
+
         self.wardrobe.persist()
         self.state.save_content_package(package)
         self.state.append_history(package)
+        self.state.append_daily_calendar(package)
+        self.state.ensure_city_exists(package)
+        self.state.save_run_log("success", f"Generated package for {package.date} in {package.city}")
         return package
 
     def send_latest(self, package: DailyPackage) -> bool:
@@ -66,6 +70,9 @@ class PipelineOrchestrator:
         sent = self.delivery.send_message(payload_md)
         if not sent:
             self.delivery.save_fallback(payload_md)
+            self.state.save_run_log("warning", "Telegram delivery failed; fallback saved")
+        else:
+            self.state.save_run_log("success", "Telegram delivery succeeded")
         return sent
 
     def check_continuity(self, target_date: date | None = None) -> list:
