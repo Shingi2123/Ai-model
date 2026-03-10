@@ -1,74 +1,8 @@
 {
-  "items": [
-    {
-      "id": "coat_beige_wool",
-      "category": "outerwear",
-      "name": "Beige wool coat",
-      "styles": ["soft minimal", "smart travel"],
-      "colors": ["beige"],
-      "season": ["autumn", "winter", "spring"],
-      "temp_min_c": 3,
-      "temp_max_c": 17,
-      "weather_tags": ["cloudy", "windy", "rain_light"],
-      "cooldown_days": 4,
-      "last_used": null
-    },
-    {
-      "id": "knit_cream_sweater",
-      "category": "top",
-      "name": "Cream knit sweater",
-      "styles": ["cozy", "soft minimal"],
-      "colors": ["cream"],
-      "season": ["autumn", "winter", "spring"],
-      "temp_min_c": 5,
-      "temp_max_c": 20,
-      "weather_tags": ["cloudy", "clear", "rain_light"],
-      "cooldown_days": 2,
-      "last_used": null
-    },
-    {
-      "id": "trousers_charcoal_tailored",
-      "category": "bottom",
-      "name": "Charcoal tailored trousers",
-      "styles": ["smart travel", "european casual"],
-      "colors": ["charcoal"],
-      "season": ["all"],
-      "temp_min_c": 0,
-      "temp_max_c": 28,
-      "weather_tags": ["clear", "cloudy", "rain_light", "windy"],
-      "cooldown_days": 2,
-      "last_used": null
-    },
-    {
-      "id": "sneakers_white_clean",
-      "category": "shoes",
-      "name": "Clean white sneakers",
-      "styles": ["european casual", "smart travel"],
-      "colors": ["white"],
-      "season": ["all"],
-      "temp_min_c": 5,
-      "temp_max_c": 30,
-      "weather_tags": ["clear", "cloudy"],
-      "cooldown_days": 1,
-      "last_used": null
-    },
-    {
-      "id": "scarf_soft_green",
-      "category": "accessory",
-      "name": "Soft green scarf",
-      "styles": ["soft minimal", "cozy"],
-      "colors": ["green"],
-      "season": ["autumn", "winter", "spring"],
-      "temp_min_c": -5,
-      "temp_max_c": 14,
-      "weather_tags": ["windy", "cloudy"],
-      "cooldown_days": 3,
-      "last_used": null
-    }
-  ],
+  "items": [],
   "combination_rules": {
     "required_categories": ["top", "bottom", "shoes"],
     "optional_categories": ["outerwear", "accessory"],
-    "forbidden_color_pairs": [["neon pink", "neon green"]]
+    "forbidden_color_pairs": []
   }
 }

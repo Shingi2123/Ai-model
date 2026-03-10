@@ -22,8 +22,8 @@ def _load_dotenv(path: str = ".env") -> None:
 class AppSettings:
     app_env: str = "development"
     log_level: str = "INFO"
-    timezone: str = "Europe/Paris"
-    default_city: str = "Paris"
+    timezone: str = "Europe/Prague"
+    default_city: str = "Prague"
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     openweather_api_key: str | None = None
@@ -46,8 +46,8 @@ class AppSettings:
         return cls(
             app_env=os.getenv("APP_ENV", "development"),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
-            timezone=os.getenv("TIMEZONE", "Europe/Paris"),
-            default_city=os.getenv("DEFAULT_CITY", "Paris"),
+            timezone=os.getenv("TIMEZONE", "Europe/Prague"),
+            default_city=os.getenv("DEFAULT_CITY", "Prague"),
             telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID"),
             openweather_api_key=os.getenv("OPENWEATHER_API_KEY"),
@@ -72,6 +72,7 @@ def load_settings_yaml(path: str | Path = "config/settings.example.yaml") -> Dic
         "fallbacks": {
             "weather": {"condition": "mild_clouds", "temp_c": 18},
             "city_coordinates": {
+                "Prague": [50.0755, 14.4378],
                 "Paris": [48.8566, 2.3522],
                 "Rome": [41.9028, 12.4964],
                 "Lisbon": [38.7223, -9.1393],

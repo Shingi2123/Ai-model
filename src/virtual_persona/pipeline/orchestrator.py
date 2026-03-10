@@ -20,8 +20,8 @@ class PipelineOrchestrator:
         self.settings = settings
         self.state = build_state_store(settings)
         self.context_builder = ContextBuilder(settings, self.state)
-        self.planner = DailyPlanner()
-        self.wardrobe = WardrobeManager()
+        self.planner = DailyPlanner(self.state)
+        self.wardrobe = WardrobeManager(self.state)
         self.checker = ContinuityChecker()
         self.delivery = TelegramDelivery(settings)
 
@@ -29,7 +29,7 @@ class PipelineOrchestrator:
             llm = OpenAIProvider(settings.llm_api_key, settings.llm_model)
         else:
             llm = TemplateFallbackProvider()
-        self.content_generator = ContentGenerator(llm)
+        self.content_generator = ContentGenerator(llm, self.state)
 
     def generate_day(self, target_date: date | None = None, override_city: str | None = None) -> DailyPackage:
         context = self.context_builder.build(target_date=target_date, override_city=override_city)

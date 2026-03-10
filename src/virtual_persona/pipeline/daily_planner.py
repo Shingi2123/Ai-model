@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Any
 
 from virtual_persona.models.domain import DayScene
 
@@ -17,14 +17,95 @@ class DailyPlanner:
             ("afternoon", "airport terminal", "Check-in, lounge time, and runway view", "transit"),
             ("evening", "arrival hotel", "Late check-in and room settling ritual", "tired-cozy"),
         ],
+        "day_off": [
+            ("morning", "home", "Slow morning at home with coffee and light planning", "calm"),
+            ("afternoon", "city cafe", "Quiet time in a cafe with reading or notes", "soft"),
+            ("evening", "home", "Calm evening indoors after the day", "reflective"),
+        ],
+        "work_day": [
+            ("morning", "airport", "Early airport routine before the flight", "focused"),
+            ("afternoon", "aircraft", "Working flight hours with calm professional rhythm", "composed"),
+            ("evening", "hotel room", "Quiet rest after the flight and a short reset", "tired"),
+        ],
+        "layover_day": [
+            ("morning", "hotel room", "Slow hotel morning and getting ready for a short city break", "calm"),
+            ("afternoon", "city center", "A few quiet hours walking through the city during layover", "curious"),
+            ("evening", "cafe", "Light dinner or coffee before returning to the hotel", "soft"),
+        ],
+        "travel_day": [
+            ("morning", "airport", "Transit through the terminal with coffee and carry-on", "focused"),
+            ("afternoon", "airplane", "Travel hours between cities with a calm reflective mood", "quiet"),
+            ("evening", "hotel room", "Arrival, check-in and short rest after the trip", "tired"),
+        ],
     }
 
+    def __init__(self, state_store=None) -> None:
+        self.state_store = state_store
+
+    def _load_scenes_from_sheet(self, day_type: str) -> List[DayScene]:
+        if not self.state_store or not hasattr(self.state_store, "load_scene_library"):
+            return []
+
+        try:
+            rows = self.state_store.load_scene_library() or []
+        except Exception:
+            return []
+
+        matched_rows: List[Dict[str, Any]] = []
+        for row in rows:
+            row_day_type = str(row.get("day_type", "")).strip()
+            if row_day_type == day_type:
+                matched_rows.append(row)
+
+        if not matched_rows:
+            return []
+
+        time_order = {
+            "early_morning": 1,
+            "morning": 2,
+            "late_morning": 3,
+            "noon": 4,
+            "afternoon": 5,
+            "golden_hour": 6,
+            "evening": 7,
+            "night": 8,
+        }
+
+        matched_rows.sort(key=lambda r: time_order.get(str(r.get("time_block", "")).strip(), 99))
+
+        scenes: List[DayScene] = []
+        for row in matched_rows[:3]:
+            time_block = str(row.get("time_block", "")).strip() or "day"
+            location = str(row.get("location", "")).strip() or "unknown"
+            description = str(row.get("description", "")).strip() or "Lifestyle moment"
+            mood = str(row.get("mood", "")).strip() or "calm"
+
+            scenes.append(
+                DayScene(
+                    block=time_block,
+                    location=location,
+                    description=description,
+                    mood=mood,
+                    time_of_day=time_block,
+                )
+            )
+
+        return scenes
+
     def build_day(self, context: Dict) -> List[DayScene]:
-        template = self.DAYTYPE_TEMPLATES.get(context["day_type"], [
-            ("morning", "cozy cafe", "Breakfast coffee and notes for the route", "calm"),
-            ("afternoon", "old town street", "Unhurried city walk with architecture details", "curious"),
-            ("evening", "riverside", "Golden hour stroll and warm drink", "reflective"),
-        ])
+        sheet_scenes = self._load_scenes_from_sheet(context["day_type"])
+        if sheet_scenes:
+            return sheet_scenes
+
+        template = self.DAYTYPE_TEMPLATES.get(context["day_type"])
+
+        if not template:
+            template = [
+                ("morning", "home", "Slow morning at home with coffee and light planning", "calm"),
+                ("afternoon", "city cafe", "Quiet time in a cafe with reading or notes", "soft"),
+                ("evening", "home", "Calm evening indoors after the day", "reflective"),
+            ]
+
         return [
             DayScene(block=b, location=l, description=d, mood=m, time_of_day=b)
             for b, l, d, m in template

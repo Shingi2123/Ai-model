@@ -42,6 +42,21 @@ class LocalStateStore:
             self._read_json(Path("data/samples/content_history.sample.json"), []),
         )
 
+    def load_character_profile(self) -> Dict[str, Any]:
+        return {}
+
+    def load_cities(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "cities.json", [])
+
+    def load_wardrobe(self) -> List[Dict[str, Any]]:
+        return []
+
+    def load_scene_library(self) -> List[Dict[str, Any]]:
+        return []
+
+    def load_prompt_templates(self) -> Dict[str, str]:
+        return {}
+
     def save_content_package(self, package: DailyPackage) -> Path:
         output_path = Path("data/outputs") / f"{package.date.isoformat()}_package.json"
         self._write_json(output_path, package.to_dict())
@@ -141,6 +156,51 @@ class GoogleSheetsStateStore:
         if not self.available():
             return []
         return self._ws("content_history").get_all_records() or []
+
+    def load_character_profile(self) -> Dict[str, Any]:
+        if not self.available():
+            return {}
+
+        rows = self._ws("character_profile").get_all_records() or []
+        profile: Dict[str, Any] = {}
+
+        for row in rows:
+            field = row.get("field")
+            value = row.get("value")
+            if field:
+                profile[str(field).strip()] = value
+
+        return profile
+
+    def load_cities(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._ws("cities").get_all_records() or []
+
+    def load_wardrobe(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._ws("wardrobe").get_all_records() or []
+
+    def load_scene_library(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._ws("scene_library").get_all_records() or []
+
+    def load_prompt_templates(self) -> Dict[str, str]:
+        if not self.available():
+            return {}
+
+        rows = self._ws("prompt_templates").get_all_records() or []
+        templates: Dict[str, str] = {}
+
+        for row in rows:
+            key = row.get("key")
+            template = row.get("template")
+            if key:
+                templates[str(key).strip()] = template or ""
+
+        return templates
 
     def save_content_package(self, package: DailyPackage) -> Path:
         output_path = Path("data/outputs") / f"{package.date.isoformat()}_package.json"
