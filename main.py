@@ -13,6 +13,7 @@ from virtual_persona.config.settings import AppSettings
 from virtual_persona.delivery.formatter import package_to_markdown
 from virtual_persona.delivery.publishing_formatter import format_command_message
 from virtual_persona.pipeline.orchestrator import PipelineOrchestrator
+from virtual_persona.services.daily_scheduler import DailySchedulerService
 from virtual_persona.utils.logging import configure_logging
 
 
@@ -35,12 +36,20 @@ def cmd_send_telegram(args: argparse.Namespace, orchestrator: PipelineOrchestrat
     command = args.command_filter or "/today"
     sent = orchestrator.telegram_delivery_service.send_command_view(package, package.publishing_plan, command)
     if not sent:
-        text = format_command_message(package, package.publishing_plan, command)
+        persona_timezone = orchestrator.telegram_delivery_service._resolve_persona_timezone(package.city)
+        text = format_command_message(package, package.publishing_plan, command, persona_timezone, orchestrator.settings.user_timezone)
         fallback = orchestrator.delivery.save_fallback(text)
         print(f"Telegram failed; saved fallback to {fallback}")
     else:
         print(f"Sent plan to Telegram ({command}).")
 
+
+
+
+def cmd_run_daily(_: argparse.Namespace, orchestrator: PipelineOrchestrator) -> None:
+    scheduler = DailySchedulerService(orchestrator, orchestrator.settings.telegram_delivery_time)
+    print(f"Daily scheduler started (persona-local time {orchestrator.settings.telegram_delivery_time})")
+    scheduler.run_forever()
 
 def cmd_bootstrap(_: argparse.Namespace, __: PipelineOrchestrator) -> None:
     Path("data/state").mkdir(parents=True, exist_ok=True)
@@ -79,6 +88,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     t = sub.add_parser("test-run")
     t.set_defaults(func=cmd_test_run)
+
+    d = sub.add_parser("run-daily")
+    d.set_defaults(func=cmd_run_daily)
 
     return parser
 
