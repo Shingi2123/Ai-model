@@ -20,7 +20,11 @@ class HelperGoogleStore(GoogleSheetsStateStore):
         self.sheet_id = ""
         self.client = object()
         self.sheet = object()
+        self.last_error = ""
         self._sheet_cache = {}
+        self._ws_cache = {}
+        self._headers_ensured = set()
+        self._worksheet_fetch_count = 0
         self._ws_map = {
             "scene_memory": FakeWS(),
             "activity_memory": FakeWS(),
@@ -32,6 +36,27 @@ class HelperGoogleStore(GoogleSheetsStateStore):
 
     def _get_ws(self, title: str):
         return self._ws_map[title]
+
+
+class CacheWS:
+    def __init__(self):
+        self.rows = []
+
+    def get_all_records(self):
+        return []
+
+    def append_row(self, row):
+        self.rows.append(row)
+
+
+class CacheSheet:
+    def __init__(self):
+        self.calls = 0
+        self.ws = CacheWS()
+
+    def worksheet(self, _title: str):
+        self.calls += 1
+        return self.ws
 
 
 def test_google_store_scene_memory_saved_to_worksheet():
@@ -56,3 +81,23 @@ def test_google_store_activity_and_location_saved_to_worksheet():
     lws = store._ws_map["location_memory"]
     assert aws.cleared is True and aws.updated[1][0] == "a1"
     assert lws.cleared is True and lws.updated[1][0] == "l1"
+
+
+def test_google_store_reuses_cached_worksheet_handle():
+    store = GoogleSheetsStateStore.__new__(GoogleSheetsStateStore)
+    store.json_path = ""
+    store.sheet_id = ""
+    store.client = object()
+    store.sheet = CacheSheet()
+    store.last_error = ""
+    store._sheet_cache = {}
+    store._ws_cache = {}
+    store._headers_ensured = set()
+    store._worksheet_fetch_count = 0
+
+    ws_1 = store._get_ws("daily_calendar")
+    ws_2 = store._get_ws("daily_calendar")
+
+    assert ws_1 is ws_2
+    assert store.sheet.calls == 1
+    assert store._worksheet_fetch_count == 1
