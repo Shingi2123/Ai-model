@@ -510,14 +510,8 @@ class GoogleSheetsStateStore:
         return self._safe_records("scene_memory")
 
     def save_scene_memory(self, rows: List[Dict[str, Any]]) -> None:
-        if not self.available():
-            return
-        ws = self._get_ws("scene_memory")
         headers = ["scene_id", "last_used", "usage_count", "last_city", "last_day_type", "repeat_cooldown", "status", "notes"]
-        values = [headers] + [[str(row.get(h, "")) for h in headers] for row in rows]
-        self._with_retry(ws.clear, operation_name="clear sheet scene_memory")
-        self._with_retry(lambda: ws.update(values), operation_name="update sheet scene_memory")
-        self._invalidate_sheet_cache("scene_memory")
+        self._replace_records("scene_memory", headers, rows)
 
     def load_activity_memory(self) -> List[Dict[str, Any]]:
         if not self.available():
@@ -525,14 +519,8 @@ class GoogleSheetsStateStore:
         return self._safe_records("activity_memory")
 
     def save_activity_memory(self, rows: List[Dict[str, Any]]) -> None:
-        if not self.available():
-            return
-        ws = self._get_ws("activity_memory")
         headers = ["activity_id", "activity_type", "last_used", "usage_count", "context_tags", "status", "notes"]
-        values = [headers] + [[str(row.get(h, "")) for h in headers] for row in rows]
-        self._with_retry(ws.clear, operation_name="clear sheet activity_memory")
-        self._with_retry(lambda: ws.update(values), operation_name="update sheet activity_memory")
-        self._invalidate_sheet_cache("activity_memory")
+        self._replace_records("activity_memory", headers, rows)
 
     def load_location_memory(self) -> List[Dict[str, Any]]:
         if not self.available():
@@ -540,14 +528,8 @@ class GoogleSheetsStateStore:
         return self._safe_records("location_memory")
 
     def save_location_memory(self, rows: List[Dict[str, Any]]) -> None:
-        if not self.available():
-            return
-        ws = self._get_ws("location_memory")
         headers = ["location_id", "city", "location_type", "name", "usage_count", "visit_frequency", "last_used", "last_scene", "cooldown_days", "season_tags", "status", "notes"]
-        values = [headers] + [[str(row.get(h, "")) for h in headers] for row in rows]
-        self._with_retry(ws.clear, operation_name="clear sheet location_memory")
-        self._with_retry(lambda: ws.update(values), operation_name="update sheet location_memory")
-        self._invalidate_sheet_cache("location_memory")
+        self._replace_records("location_memory", headers, rows)
 
 
     def load_life_state(self) -> List[Dict[str, Any]]:
