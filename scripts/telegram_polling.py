@@ -24,7 +24,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from virtual_persona.config.settings import AppSettings
-from virtual_persona.delivery.publishing_formatter import filter_plan_items, format_command_message
+from virtual_persona.delivery.publishing_formatter import filter_plan_items, format_command_message, split_for_telegram
 from virtual_persona.pipeline.orchestrator import PipelineOrchestrator
 
 settings = AppSettings.from_env()
@@ -46,7 +46,10 @@ async def plan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     command = f"/{update.message.text.split()[0].lstrip('/').lower()}"
     package, items = _load_today_package_and_plan()
     filtered = filter_plan_items(items, command)
-    await update.message.reply_text(format_command_message(package, filtered, command)[:4096])
+    persona_timezone = orchestrator.telegram_delivery_service._resolve_persona_timezone(package.city)
+    text = format_command_message(package, filtered, command, persona_timezone, settings.user_timezone)
+    for part in split_for_telegram(text):
+        await update.message.reply_text(part)
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
