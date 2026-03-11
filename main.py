@@ -3,7 +3,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import argparse
-import json
 import sys
 from datetime import date
 from pathlib import Path
@@ -12,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from virtual_persona.config.settings import AppSettings
 from virtual_persona.delivery.formatter import package_to_markdown
+from virtual_persona.delivery.publishing_formatter import format_command_message
 from virtual_persona.pipeline.orchestrator import PipelineOrchestrator
 from virtual_persona.utils.logging import configure_logging
 
@@ -30,18 +30,16 @@ def cmd_check_continuity(args: argparse.Namespace, orchestrator: PipelineOrchest
         print(f"[{issue.level}] {issue.code}: {issue.message}")
 
 
-def cmd_send_telegram(_: argparse.Namespace, orchestrator: PipelineOrchestrator) -> None:
-    today_path = Path(f"data/outputs/{date.today().isoformat()}_package.json")
-    if not today_path.exists():
-        raise FileNotFoundError("No generated package for today. Run generate-day first.")
-    payload = json.loads(today_path.read_text(encoding="utf-8"))
-    text = f"Daily package for {payload['date']} in {payload['city']}\n\n{payload['summary']}"
-    sent = orchestrator.delivery.send_message(text)
+def cmd_send_telegram(args: argparse.Namespace, orchestrator: PipelineOrchestrator) -> None:
+    package = orchestrator.generate_day(target_date=date.today())
+    command = args.command_filter or "/today"
+    sent = orchestrator.telegram_delivery_service.send_command_view(package, package.publishing_plan, command)
     if not sent:
+        text = format_command_message(package, package.publishing_plan, command)
         fallback = orchestrator.delivery.save_fallback(text)
         print(f"Telegram failed; saved fallback to {fallback}")
     else:
-        print("Sent to Telegram.")
+        print(f"Sent plan to Telegram ({command}).")
 
 
 def cmd_bootstrap(_: argparse.Namespace, __: PipelineOrchestrator) -> None:
@@ -73,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     c.set_defaults(func=cmd_check_continuity)
 
     s = sub.add_parser("send-telegram")
+    s.add_argument("--command-filter", choices=["/today", "/plan", "/photo", "/video", "/captions", "/moments", "/debug"], help="Filter view to send")
     s.set_defaults(func=cmd_send_telegram)
 
     b = sub.add_parser("bootstrap")

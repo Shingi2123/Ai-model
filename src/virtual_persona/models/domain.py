@@ -138,6 +138,31 @@ class GeneratedContent:
 
 
 @dataclass
+class PublishingPlanItem:
+    publication_id: str
+    date: date
+    platform: str
+    post_time: str
+    content_type: str
+    city: str
+    day_type: str
+    narrative_phase: str
+    scene_moment: str
+    scene_source: str
+    scene_moment_type: str
+    moment_signature: str
+    visual_focus: str
+    activity_type: str
+    outfit_ids: List[str]
+    prompt_type: str
+    prompt_text: str
+    caption_text: str
+    short_caption: str
+    delivery_status: str = "planned"
+    notes: str = ""
+
+
+@dataclass
 class ContinuityIssue:
     level: str
     code: str
@@ -158,6 +183,7 @@ class DailyPackage:
     content: GeneratedContent
     continuity_issues: List[ContinuityIssue] = field(default_factory=list)
     life_state: Optional["LifeState"] = None
+    publishing_plan: List[PublishingPlanItem] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)

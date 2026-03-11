@@ -5,6 +5,7 @@ from datetime import datetime, date
 from virtual_persona.config.settings import AppSettings
 from virtual_persona.delivery.formatter import package_to_markdown
 from virtual_persona.delivery.telegram_bot import TelegramDelivery
+from virtual_persona.delivery.telegram_delivery_service import TelegramDeliveryService
 from virtual_persona.llm.provider import OpenAIProvider, TemplateFallbackProvider
 from virtual_persona.models.domain import DailyPackage
 from virtual_persona.narrative.life_narrative_engine import LifeNarrativeEngine
@@ -18,6 +19,7 @@ from virtual_persona.pipeline.life_diversity_engine import LifeDiversityEngine
 from virtual_persona.pipeline.scene_activity_engine import SceneActivityExpansionEngine
 from virtual_persona.pipeline.story_arc_engine import StoryArcEngine
 from virtual_persona.pipeline.scene_moment_engine import SceneMomentGenerator
+from virtual_persona.pipeline.publishing_plan_engine import PublishingPlanEngine
 from virtual_persona.pipeline.world_expansion_engine import WorldExpansionEngine
 from virtual_persona.pipeline.wardrobe_brain import WardrobeBrain
 from virtual_persona.services.wardrobe import WardrobeManager
@@ -42,6 +44,8 @@ class PipelineOrchestrator:
         self.scene_moment_engine = SceneMomentGenerator(self.state)
         self.checker = ContinuityChecker()
         self.delivery = TelegramDelivery(settings)
+        self.publishing_plan_engine = PublishingPlanEngine(self.state)
+        self.telegram_delivery_service = TelegramDeliveryService(settings, self.state)
 
         if settings.llm_provider.lower() == "openai" and settings.llm_api_key and settings.llm_model:
             llm = OpenAIProvider(settings.llm_api_key, settings.llm_model)
@@ -114,6 +118,8 @@ class PipelineOrchestrator:
             life_state=context.get("life_state"),
         )
 
+        publishing_plan = self.publishing_plan_engine.generate(package)
+
         self.wardrobe.persist()
         self.wardrobe_brain.apply_daily_strategy(context, outfit.item_ids)
         self.state.save_content_package(package)
@@ -138,6 +144,8 @@ class PipelineOrchestrator:
         self.asset_engine.run(package)
         self.state.ensure_city_exists(package)
         self.state.save_run_log("success", f"Generated package for {package.date} in {package.city}")
+        if publishing_plan:
+            self.telegram_delivery_service.send_daily_plan(package, publishing_plan)
         return package
 
     def send_latest(self, package: DailyPackage) -> bool:

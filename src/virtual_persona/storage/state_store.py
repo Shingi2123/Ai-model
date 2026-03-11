@@ -49,6 +49,27 @@ class LocalStateStore:
     def load_content_moment_memory(self) -> List[Dict[str, Any]]:
         return self._read_json(self.base_dir / "content_moment_memory.json", [])
 
+    def load_publishing_plan(self, target_date: str | None = None) -> List[Dict[str, Any]]:
+        rows = self._read_json(self.base_dir / "publishing_plan.json", [])
+        if target_date:
+            return [r for r in rows if str(r.get("date")) == target_date]
+        return rows
+
+    def append_publishing_plan(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "publishing_plan.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
+
+    def load_posting_rules(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "posting_rules.json", [])
+
+    def append_delivery_log(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "delivery_log.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
+
     def load_character_profile(self) -> Dict[str, Any]:
         return {}
 
@@ -320,6 +341,44 @@ class GoogleSheetsStateStore:
         if not self.available():
             return []
         return self._safe_records("content_moment_memory")
+
+    def load_publishing_plan(self, target_date: str | None = None) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        headers = [
+            "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
+            "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
+            "outfit_ids", "prompt_type", "prompt_text", "caption_text", "short_caption", "delivery_status", "notes",
+        ]
+        self._ensure_headers("publishing_plan", headers)
+        rows = self._safe_records("publishing_plan")
+        if target_date:
+            return [r for r in rows if str(r.get("date")) == target_date]
+        return rows
+
+    def append_publishing_plan(self, row: Dict[str, Any]) -> None:
+        headers = [
+            "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
+            "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
+            "outfit_ids", "prompt_type", "prompt_text", "caption_text", "short_caption", "delivery_status", "notes",
+        ]
+        self._ensure_headers("publishing_plan", headers)
+        self._append_dict_row("publishing_plan", headers, row)
+
+    def load_posting_rules(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        headers = [
+            "rule_id", "platform", "content_type", "preferred_time", "enabled", "priority", "min_per_day", "max_per_day",
+            "day_type_filter", "narrative_phase_filter", "city_filter", "weekday_filter", "notes",
+        ]
+        self._ensure_headers("posting_rules", headers)
+        return self._safe_records("posting_rules")
+
+    def append_delivery_log(self, row: Dict[str, Any]) -> None:
+        headers = ["date", "delivery_type", "status", "message_id", "error", "details"]
+        self._ensure_headers("delivery_log", headers)
+        self._append_dict_row("delivery_log", headers, row)
 
     def load_character_profile(self) -> Dict[str, Any]:
         if not self.available():
