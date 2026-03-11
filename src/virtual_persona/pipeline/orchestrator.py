@@ -12,6 +12,8 @@ from virtual_persona.pipeline.context_builder import ContextBuilder
 from virtual_persona.pipeline.continuity_checker import ContinuityChecker
 from virtual_persona.pipeline.daily_planner import DailyPlanner
 from virtual_persona.pipeline.asset_evolution_engine import AssetEvolutionEngine
+from virtual_persona.pipeline.scene_activity_engine import SceneActivityExpansionEngine
+from virtual_persona.pipeline.wardrobe_brain import WardrobeBrain
 from virtual_persona.services.wardrobe import WardrobeManager
 from virtual_persona.storage.state_store import build_state_store
 
@@ -24,6 +26,8 @@ class PipelineOrchestrator:
         self.planner = DailyPlanner(self.state)
         self.wardrobe = WardrobeManager(self.state)
         self.asset_engine = AssetEvolutionEngine(self.state)
+        self.scene_activity_engine = SceneActivityExpansionEngine(self.state)
+        self.wardrobe_brain = WardrobeBrain(self.state)
         self.checker = ContinuityChecker()
         self.delivery = TelegramDelivery(settings)
 
@@ -35,7 +39,11 @@ class PipelineOrchestrator:
 
     def generate_day(self, target_date: date | None = None, override_city: str | None = None) -> DailyPackage:
         context = self.context_builder.build(target_date=target_date, override_city=override_city)
+        generated_scenes, _ = self.scene_activity_engine.ensure_candidates(context)
         scenes = self.planner.build_day(context)
+        if not scenes and generated_scenes:
+            scenes = generated_scenes
+
         outfit = self.wardrobe.select_outfit(
             temp_c=context["weather"].temp_c,
             condition=context["weather"].condition,
@@ -45,7 +53,7 @@ class PipelineOrchestrator:
             city=context["city"],
             occasion=context["day_type"],
         )
-        content = self.content_generator.generate(context, scenes, outfit.summary)
+        content = self.content_generator.generate(context, scenes, outfit.summary, outfit.item_ids)
         issues = self.checker.run(context, scenes, outfit)
 
         package = DailyPackage(
@@ -64,6 +72,7 @@ class PipelineOrchestrator:
         )
 
         self.wardrobe.persist()
+        self.wardrobe_brain.apply_daily_strategy(context, outfit.item_ids)
         self.state.save_content_package(package)
         self.state.append_history(package)
         self.state.append_daily_calendar(package)

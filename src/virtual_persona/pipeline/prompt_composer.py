@@ -18,7 +18,7 @@ class PromptComposer:
                 pass
         return {}
 
-    def compose(self, context: Dict[str, Any], scene: Any, outfit_summary: str, content_type: str) -> str:
+    def compose(self, context: Dict[str, Any], scene: Any, outfit_summary: str, content_type: str, outfit_item_ids: List[str] | None = None) -> str:
         blocks = self.load_blocks()
         life_state = context.get("life_state")
 
@@ -30,9 +30,16 @@ class PromptComposer:
         ]
 
         scene_desc = getattr(scene, "description", "daily lifestyle moment")
+        scene_activity = getattr(scene, "activity", "")
+        scene_source = getattr(scene, "source", "library")
+        outfit_ids = ",".join(outfit_item_ids or [])
         scene_loc = getattr(scene, "location", context.get("city", "city"))
         scene_mood = getattr(scene, "mood", "calm")
-        scene_part = f"Scene: {scene_desc}. Location: {scene_loc}. Mood: {scene_mood}. Outfit: {outfit_summary}. City: {context.get('city')}"
+        scene_part = (
+            f"Scene: {scene_desc}. Location: {scene_loc}. Mood: {scene_mood}. "
+            f"Activity: {scene_activity}. Scene source: {scene_source}. "
+            f"Outfit: {outfit_summary}. Outfit items: {outfit_ids}. City: {context.get('city')}"
+        )
 
         if life_state:
             scene_part += (
@@ -49,6 +56,11 @@ class PromptComposer:
         if recent_scenes:
             top_scene = recent_scenes[0]
             scene_part += f". Scene continuity: last scene {top_scene.get('scene_id', '')} used {top_scene.get('last_used', '')}"
+
+        recent_activities = context.get("recent_activity_memory") or []
+        if recent_activities:
+            top_activity = recent_activities[0]
+            scene_part += f". Activity continuity: {top_activity.get('activity_id', '')} on {top_activity.get('last_used', '')}"
 
         type_rules = {
             "photo": blocks.get("photo_base_rules", "Natural lifestyle photo, soft light, believable composition."),

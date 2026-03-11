@@ -52,6 +52,9 @@ class AssetEvolutionEngine:
                         "target_item_id": item_id,
                         "reason": "selected_in_outfit",
                         "status": "done",
+                        "context_day_type": package.day_type,
+                        "context_season": package.life_state.season if package.life_state else "all",
+                        "context_city": package.city,
                         "notes": "Automatically reactivated due to real usage",
                     }
                 )
@@ -72,6 +75,9 @@ class AssetEvolutionEngine:
                         "target_item_id": row.get("item_id"),
                         "reason": f"high_wear_count:{wear_count}",
                         "status": "suggested",
+                        "context_day_type": package.day_type,
+                        "context_season": package.life_state.season if package.life_state else "all",
+                        "context_city": package.city,
                         "notes": "Consider replacing this heavily used item",
                     }
                 )
@@ -97,6 +103,9 @@ class AssetEvolutionEngine:
                         "target_item_id": row.get("item_id"),
                         "reason": f"high_wear_count:{wear_count}",
                         "status": "suggested",
+                        "context_day_type": package.day_type,
+                        "context_season": package.life_state.season if package.life_state else "all",
+                        "context_city": package.city,
                         "notes": "Reduce selection priority temporarily",
                     }
                 )
@@ -114,6 +123,7 @@ class AssetEvolutionEngine:
                     "priority": "high",
                     "season": package.life_state.season if package.life_state else "all",
                     "style_match": package.day_type,
+                    "gap_score": tops - bottoms,
                     "status": "open",
                     "notes": f"top={tops}, bottom={bottoms}",
                 }

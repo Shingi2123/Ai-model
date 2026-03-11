@@ -58,6 +58,23 @@ class DailyPlanner:
         status = str(memory_row.get("status") or "active").strip().lower()
         return status not in {"overused", "temporary_pause", "inactive"}
 
+    def _candidate_rows(self, day_type: str) -> List[Dict[str, Any]]:
+        if not self.state_store or not hasattr(self.state_store, "load_scene_candidates"):
+            return []
+        try:
+            rows = self.state_store.load_scene_candidates() or []
+        except Exception:
+            return []
+        out: List[Dict[str, Any]] = []
+        for row in rows:
+            if str(row.get("day_type", "")).strip() != day_type:
+                continue
+            status = str(row.get("status") or "candidate").strip().lower()
+            if status not in {"candidate", "active", "approved"}:
+                continue
+            out.append(row)
+        return out
+
     def _load_scenes_from_sheet(self, day_type: str) -> List[DayScene]:
         if not self.state_store or not hasattr(self.state_store, "load_scene_library"):
             return []
@@ -65,7 +82,9 @@ class DailyPlanner:
         try:
             rows = self.state_store.load_scene_library() or []
         except Exception:
-            return []
+            rows = []
+
+        rows = rows + self._candidate_rows(day_type)
 
         matched_rows: List[Dict[str, Any]] = []
         for row in rows:
@@ -105,6 +124,8 @@ class DailyPlanner:
                     description=description,
                     mood=mood,
                     time_of_day=time_block,
+                    activity=str(row.get("activity_hint") or ""),
+                    source="generated" if row.get("generated_by_ai") else "library",
                 )
             )
 
@@ -125,6 +146,6 @@ class DailyPlanner:
             ]
 
         return [
-            DayScene(block=b, location=l, description=d, mood=m, time_of_day=b)
+            DayScene(block=b, location=l, description=d, mood=m, time_of_day=b, activity="", source="template")
             for b, l, d, m in template
         ]
