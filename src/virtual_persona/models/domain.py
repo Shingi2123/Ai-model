@@ -113,6 +113,12 @@ class DayScene:
     time_of_day: str
     activity: str = ""
     source: str = "library"
+    scene_moment: str = ""
+    scene_moment_type: str = ""
+    scene_source: str = ""
+    moment_signature: str = ""
+    moment_reason: str = ""
+    visual_focus: str = ""
 
 
 @dataclass

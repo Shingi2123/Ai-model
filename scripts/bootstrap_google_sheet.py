@@ -36,7 +36,8 @@ SHEETS = {
     "story_arcs": ["arc_id", "arc_type", "title", "status", "start_date", "progress", "description"],
     "activity_evolution": ["activity_id", "origin_activity", "generated_variant", "reason", "status"],
     "daily_calendar": ["date", "city", "day_type", "notes"],
-    "content_history": ["date", "city", "day_type", "outfit_ids", "scenes", "post_caption"],
+    "content_history": ["date", "city", "day_type", "outfit_ids", "scenes", "post_caption", "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus"],
+    "content_moment_memory": ["date", "city", "day_type", "scene_moment", "scene_moment_type", "moment_signature", "visual_focus", "scene_source"],
     "continuity_flags": ["date", "level", "code", "message"],
     "prompt_templates": ["key", "template"],
     "prompt_blocks": ["key", "content", "priority", "enabled"],
@@ -56,19 +57,38 @@ def main() -> None:
     sh = gc.open_by_key(sheet_id)
 
     existing = {ws.title for ws in sh.worksheets()}
+    created = []
+    updated = []
+
     for title, headers in SHEETS.items():
         if title not in existing:
             ws = sh.add_worksheet(title=title, rows=1000, cols=max(20, len(headers) + 3))
             ws.append_row(headers)
+            created.append(title)
             print(f"Created: {title}")
         else:
             ws = sh.worksheet(title)
             current_headers = ws.row_values(1)
-            if current_headers != headers:
-                ws.update("1:1", [headers])
-                print(f"Updated headers: {title}")
+            if not current_headers:
+                ws.append_row(headers)
+                print(f"Initialized headers: {title}")
+                continue
+
+            missing = [h for h in headers if h not in current_headers]
+            if missing:
+                ws.update("1:1", [current_headers + missing])
+                updated.append(title)
+                print(f"Updated headers: {title} (+{', '.join(missing)})")
             else:
                 print(f"Exists: {title}")
+
+    print("\nBootstrap summary:")
+    print(f"- Created sheets: {len(created)}")
+    print(f"- Updated headers: {len(updated)}")
+    if created:
+        print(f"  Created -> {', '.join(created)}")
+    if updated:
+        print(f"  Updated -> {', '.join(updated)}")
 
 
 if __name__ == "__main__":
