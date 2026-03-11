@@ -11,6 +11,7 @@ from virtual_persona.pipeline.content_generator import ContentGenerator
 from virtual_persona.pipeline.context_builder import ContextBuilder
 from virtual_persona.pipeline.continuity_checker import ContinuityChecker
 from virtual_persona.pipeline.daily_planner import DailyPlanner
+from virtual_persona.pipeline.asset_evolution_engine import AssetEvolutionEngine
 from virtual_persona.services.wardrobe import WardrobeManager
 from virtual_persona.storage.state_store import build_state_store
 
@@ -22,6 +23,7 @@ class PipelineOrchestrator:
         self.context_builder = ContextBuilder(settings, self.state)
         self.planner = DailyPlanner(self.state)
         self.wardrobe = WardrobeManager(self.state)
+        self.asset_engine = AssetEvolutionEngine(self.state)
         self.checker = ContinuityChecker()
         self.delivery = TelegramDelivery(settings)
 
@@ -64,6 +66,7 @@ class PipelineOrchestrator:
         self.state.append_daily_calendar(package)
         if hasattr(self.state, "append_life_state"):
             self.state.append_life_state(package)
+        self.asset_engine.run(package)
         self.state.ensure_city_exists(package)
         self.state.save_run_log("success", f"Generated package for {package.date} in {package.city}")
         return package

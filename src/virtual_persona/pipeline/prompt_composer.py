@@ -40,6 +40,16 @@ class PromptComposer:
                 f"Fatigue: {life_state.fatigue_level}/10"
             )
 
+        recent_outfits = context.get("recent_outfit_memory") or []
+        if recent_outfits:
+            last_outfit = recent_outfits[-1]
+            scene_part += f". Recent outfit memory: {last_outfit.get('item_ids', '')}"
+
+        recent_scenes = context.get("recent_scene_memory") or []
+        if recent_scenes:
+            top_scene = recent_scenes[0]
+            scene_part += f". Scene continuity: last scene {top_scene.get('scene_id', '')} used {top_scene.get('last_used', '')}"
+
         type_rules = {
             "photo": blocks.get("photo_base_rules", "Natural lifestyle photo, soft light, believable composition."),
             "video": blocks.get("video_base_rules", "Short lifestyle video, subtle motion, documentary realism."),

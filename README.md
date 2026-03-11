@@ -138,7 +138,35 @@ Use `scripts/bootstrap_google_sheet.py` to initialize sheet tabs:
 - `life_state`
 - `run_log`
 
+New life-memory sheets (self-management layer):
+- `wardrobe_items` (canonical item catalog with lifecycle fields)
+- `outfit_memory` (history of assembled outfits)
+- `wardrobe_actions` (AI decisions over wardrobe lifecycle)
+- `shopping_candidates` (future additions suggested by AI)
+- `scene_memory` (scene usage/repeat control)
+- `activity_memory` (activity distribution memory)
+- `location_memory` (location usage memory)
+
 `prompt_templates` is still supported for backward compatibility, while `prompt_blocks` is used by `PromptComposer` to inject persistent identity/realism/continuity rules.
+
+Compatibility mode:
+- Legacy `wardrobe` remains supported as fallback catalog source.
+- If new memory sheets are absent/empty, pipeline still works with old behavior.
+
+## Migration (Google Sheets) for life-memory stage
+
+1. Run `python scripts/bootstrap_google_sheet.py` to create missing tabs.
+2. Keep existing sheets unchanged: `character_profile`, `wardrobe`, `cities`, `scene_library`, `daily_calendar`, `content_history`, `continuity_flags`, `prompt_templates`, `prompt_blocks`, `route_pool`, `life_state`, `run_log`.
+3. Create/populate new sheets with these headers:
+   - `wardrobe_items`: `item_id,name,category,subcategory,color,style_tags,season_tags,weather_tags,occasion_tags,work_allowed,layer_role,warmth,status,owned_since,last_used,wear_count,times_in_content,notes`
+   - `outfit_memory`: `date,outfit_id,item_ids,city,day_type,weather,occasion,used_in_content,repeat_score,notes`
+   - `wardrobe_actions`: `date,action_type,target_item_id,reason,status,notes`
+   - `shopping_candidates`: `candidate_id,category,subcategory,suggested_name,reason,priority,season,style_match,status,notes`
+   - `scene_memory`: `scene_id,last_used,usage_count,last_city,last_day_type,repeat_cooldown,status,notes`
+   - `activity_memory`: `activity_id,activity_type,last_used,usage_count,context_tags,status,notes`
+   - `location_memory`: `location_id,city,location_type,name,usage_count,last_used,season_tags,status,notes`
+4. Optional gradual migration: copy relevant `wardrobe` rows into `wardrobe_items` and set `status=active`.
+5. Run `python main.py test-run` and verify writes now include memory sheets in addition to existing outputs.
 
 Required env for bootstrap:
 - `GOOGLE_SERVICE_ACCOUNT_JSON_PATH`

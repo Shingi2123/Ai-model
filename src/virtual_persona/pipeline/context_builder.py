@@ -101,6 +101,26 @@ class ContextBuilder:
             if date.fromisoformat(h["date"]) >= history_cutoff
         ]
 
+        recent_outfit_memory = []
+        if hasattr(self.state_store, "load_outfit_memory"):
+            try:
+                outfit_memory = self.state_store.load_outfit_memory() or []
+                recent_outfit_memory = outfit_memory[-7:]
+            except Exception:
+                recent_outfit_memory = []
+
+        recent_scene_memory = []
+        if hasattr(self.state_store, "load_scene_memory"):
+            try:
+                scene_memory = self.state_store.load_scene_memory() or []
+                recent_scene_memory = sorted(
+                    scene_memory,
+                    key=lambda row: str(row.get("last_used") or ""),
+                    reverse=True,
+                )[:10]
+            except Exception:
+                recent_scene_memory = []
+
         life_state = self.life_engine.build(
             target_date=target_date,
             profile=profile,
@@ -123,4 +143,6 @@ class ContextBuilder:
             "weather": weather,
             "sun": sun,
             "recent_history": recent_history,
+            "recent_outfit_memory": recent_outfit_memory,
+            "recent_scene_memory": recent_scene_memory,
         }
