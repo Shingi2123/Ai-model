@@ -133,13 +133,24 @@ class ContextBuilder:
             except Exception:
                 recent_activity_memory = []
 
+        recent_moment_memory = []
+        if hasattr(self.state_store, "load_content_moment_memory"):
+            try:
+                moment_memory = self.state_store.load_content_moment_memory() or []
+                recent_moment_memory = sorted(
+                    moment_memory,
+                    key=lambda row: str(row.get("date") or row.get("last_used") or ""),
+                    reverse=True,
+                )[:12]
+            except Exception:
+                recent_moment_memory = []
+
         style_rules = []
         if hasattr(self.state_store, "load_style_rules"):
             try:
                 style_rules = self.state_store.load_style_rules() or []
             except Exception:
                 style_rules = []
-
         life_state = self.life_engine.build(
             target_date=target_date,
             profile=profile,
@@ -165,5 +176,6 @@ class ContextBuilder:
             "recent_outfit_memory": recent_outfit_memory,
             "recent_scene_memory": recent_scene_memory,
             "recent_activity_memory": recent_activity_memory,
+            "recent_moment_memory": recent_moment_memory,
             "style_rules": style_rules,
         }

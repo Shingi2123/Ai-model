@@ -31,15 +31,19 @@ class PromptComposer:
             blocks.get("continuity_rules", "Respect city/day continuity and realistic aviation routine."),
         ]
 
-        scene_desc = getattr(scene, "description", "daily lifestyle moment")
+        scene_desc = getattr(scene, "scene_moment", "") or getattr(scene, "description", "daily lifestyle moment")
         scene_activity = getattr(scene, "activity", "")
-        scene_source = getattr(scene, "source", "library")
+        scene_source = getattr(scene, "scene_source", "") or getattr(scene, "source", "library")
         outfit_ids = ",".join(outfit_item_ids or [])
         scene_loc = getattr(scene, "location", context.get("city", "city"))
+        visual_focus = getattr(scene, "visual_focus", "")
+        moment_signature = getattr(scene, "moment_signature", "")
+        moment_type = getattr(scene, "scene_moment_type", "")
         scene_mood = getattr(scene, "mood", "calm")
         scene_part = (
             f"Scene: {scene_desc}. Location: {scene_loc}. Mood: {scene_mood}. "
             f"Activity: {scene_activity}. Scene source: {scene_source}. "
+            f"Moment type: {moment_type}. Visual focus: {visual_focus}. Signature: {moment_signature}. "
             f"Outfit: {outfit_summary}. Outfit items: {outfit_ids}. City: {context.get('city')}"
         )
 

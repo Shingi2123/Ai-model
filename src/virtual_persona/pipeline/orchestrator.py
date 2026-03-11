@@ -17,6 +17,7 @@ from virtual_persona.pipeline.activity_evolution_engine import ActivityEvolution
 from virtual_persona.pipeline.life_diversity_engine import LifeDiversityEngine
 from virtual_persona.pipeline.scene_activity_engine import SceneActivityExpansionEngine
 from virtual_persona.pipeline.story_arc_engine import StoryArcEngine
+from virtual_persona.pipeline.scene_moment_engine import SceneMomentGenerator
 from virtual_persona.pipeline.world_expansion_engine import WorldExpansionEngine
 from virtual_persona.pipeline.wardrobe_brain import WardrobeBrain
 from virtual_persona.services.wardrobe import WardrobeManager
@@ -38,6 +39,7 @@ class PipelineOrchestrator:
         self.activity_evolution_engine = ActivityEvolutionEngine(self.state)
         self.diversity_engine = LifeDiversityEngine(self.state)
         self.wardrobe_brain = WardrobeBrain(self.state)
+        self.scene_moment_engine = SceneMomentGenerator(self.state)
         self.checker = ContinuityChecker()
         self.delivery = TelegramDelivery(settings)
 
@@ -93,6 +95,7 @@ class PipelineOrchestrator:
             city=context["city"],
             occasion=context["day_type"],
         )
+        scenes = self.scene_moment_engine.generate(context, scenes)
         content = self.content_generator.generate(context, scenes, outfit.summary, outfit.item_ids)
         issues = self.checker.run(context, scenes, outfit)
 
@@ -115,6 +118,20 @@ class PipelineOrchestrator:
         self.wardrobe_brain.apply_daily_strategy(context, outfit.item_ids)
         self.state.save_content_package(package)
         self.state.append_history(package)
+        if hasattr(self.state, "append_content_moment_memory"):
+            for scene in package.scenes:
+                self.state.append_content_moment_memory(
+                    {
+                        "date": package.date.isoformat(),
+                        "city": package.city,
+                        "day_type": package.day_type,
+                        "scene_moment": getattr(scene, "scene_moment", ""),
+                        "scene_moment_type": getattr(scene, "scene_moment_type", ""),
+                        "moment_signature": getattr(scene, "moment_signature", ""),
+                        "visual_focus": getattr(scene, "visual_focus", ""),
+                        "scene_source": getattr(scene, "scene_source", ""),
+                    }
+                )
         self.state.append_daily_calendar(package)
         if hasattr(self.state, "append_life_state"):
             self.state.append_life_state(package)

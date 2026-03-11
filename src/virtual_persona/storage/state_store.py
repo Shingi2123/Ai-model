@@ -46,6 +46,9 @@ class LocalStateStore:
             self._read_json(Path("data/samples/content_history.sample.json"), []),
         )
 
+    def load_content_moment_memory(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "content_moment_memory.json", [])
+
     def load_character_profile(self) -> Dict[str, Any]:
         return {}
 
@@ -72,6 +75,16 @@ class LocalStateStore:
 
     def load_location_memory(self) -> List[Dict[str, Any]]:
         return self._read_json(self.base_dir / "location_memory.json", [])
+
+
+    def save_scene_memory(self, rows: List[Dict[str, Any]]) -> None:
+        self._write_json(self.base_dir / "scene_memory.json", rows)
+
+    def save_activity_memory(self, rows: List[Dict[str, Any]]) -> None:
+        self._write_json(self.base_dir / "activity_memory.json", rows)
+
+    def save_location_memory(self, rows: List[Dict[str, Any]]) -> None:
+        self._write_json(self.base_dir / "location_memory.json", rows)
 
     def load_life_state(self) -> List[Dict[str, Any]]:
         return self._read_json(self.base_dir / "life_state.json", [])
@@ -133,6 +146,7 @@ class LocalStateStore:
         history_path = self.base_dir / "content_history.json"
         history = self._read_json(history_path, [])
         caption = getattr(package.content, "post_caption", "") if hasattr(package, "content") else ""
+        last_scene = package.scenes[-1] if package.scenes else None
 
         history.append(
             {
@@ -140,11 +154,22 @@ class LocalStateStore:
                 "city": package.city,
                 "day_type": package.day_type,
                 "scenes": " | ".join(s.description for s in package.scenes),
+                "scene_moment": getattr(last_scene, "scene_moment", "") if last_scene else "",
+                "scene_source": getattr(last_scene, "scene_source", "") if last_scene else "",
+                "scene_moment_type": getattr(last_scene, "scene_moment_type", "") if last_scene else "",
+                "moment_signature": getattr(last_scene, "moment_signature", "") if last_scene else "",
+                "visual_focus": getattr(last_scene, "visual_focus", "") if last_scene else "",
                 "outfit_ids": ", ".join(package.outfit.item_ids),
                 "post_caption": caption,
             }
         )
         self._write_json(history_path, history)
+
+    def append_content_moment_memory(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "content_moment_memory.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
 
     def append_daily_calendar(self, package: DailyPackage) -> None:
         calendar_path = self.base_dir / "daily_calendar.json"
@@ -289,7 +314,12 @@ class GoogleSheetsStateStore:
     def load_content_history(self) -> List[Dict[str, Any]]:
         if not self.available():
             return []
-        return self._ws("content_history").get_all_records() or []
+        return self._safe_records("content_history")
+
+    def load_content_moment_memory(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("content_moment_memory")
 
     def load_character_profile(self) -> Dict[str, Any]:
         if not self.available():
@@ -386,6 +416,16 @@ class GoogleSheetsStateStore:
     def save_location_memory(self, rows: List[Dict[str, Any]]) -> None:
         headers = ["location_id", "city", "location_type", "name", "usage_count", "visit_frequency", "last_used", "last_scene", "cooldown_days", "season_tags", "status", "notes"]
         self._replace_records("location_memory", headers, rows)
+
+
+    def save_scene_memory(self, rows: List[Dict[str, Any]]) -> None:
+        self._write_json(self.base_dir / "scene_memory.json", rows)
+
+    def save_activity_memory(self, rows: List[Dict[str, Any]]) -> None:
+        self._write_json(self.base_dir / "activity_memory.json", rows)
+
+    def save_location_memory(self, rows: List[Dict[str, Any]]) -> None:
+        self._write_json(self.base_dir / "location_memory.json", rows)
 
     def load_life_state(self) -> List[Dict[str, Any]]:
         if not self.available():
@@ -521,17 +561,36 @@ class GoogleSheetsStateStore:
             return
 
         caption = getattr(package.content, "post_caption", "") if hasattr(package, "content") else ""
-
-        self._ws("content_history").append_row(
-            [
-                package.date.isoformat(),
-                package.city,
-                package.day_type,
-                ", ".join(package.outfit.item_ids),
-                " | ".join(s.description for s in package.scenes),
-                caption,
-            ]
+        last_scene = package.scenes[-1] if package.scenes else None
+        headers = [
+            "date", "city", "day_type", "outfit_ids", "scenes", "post_caption",
+            "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus",
+        ]
+        self._ensure_headers("content_history", headers)
+        self._append_dict_row(
+            "content_history",
+            headers,
+            {
+                "date": package.date.isoformat(),
+                "city": package.city,
+                "day_type": package.day_type,
+                "outfit_ids": ", ".join(package.outfit.item_ids),
+                "scenes": " | ".join(s.description for s in package.scenes),
+                "post_caption": caption,
+                "scene_moment": getattr(last_scene, "scene_moment", "") if last_scene else "",
+                "scene_source": getattr(last_scene, "scene_source", "") if last_scene else "",
+                "scene_moment_type": getattr(last_scene, "scene_moment_type", "") if last_scene else "",
+                "moment_signature": getattr(last_scene, "moment_signature", "") if last_scene else "",
+                "visual_focus": getattr(last_scene, "visual_focus", "") if last_scene else "",
+            },
         )
+
+    def append_content_moment_memory(self, row: Dict[str, Any]) -> None:
+        headers = [
+            "date", "city", "day_type", "scene_moment", "scene_moment_type", "moment_signature", "visual_focus", "scene_source",
+        ]
+        self._ensure_headers("content_moment_memory", headers)
+        self._append_dict_row("content_moment_memory", headers, row)
 
     def append_daily_calendar(self, package: DailyPackage) -> None:
         if not self.available():

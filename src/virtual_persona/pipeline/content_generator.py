@@ -59,11 +59,11 @@ class ContentGenerator:
         story_lines: List[str] = []
 
         weather_text = f"{weather.condition}, {weather.temp_c}C"
-        short_story = " → ".join(scene.description for scene in scenes)
+        short_story = " → ".join((scene.scene_moment or scene.description) for scene in scenes)
         outfit_item_ids = outfit_item_ids or []
 
         for scene in scenes:
-            scene_description = scene.description
+            scene_description = scene.scene_moment or scene.description
             mood = scene.mood
             time_of_day = scene.time_of_day
             location = scene.location
@@ -87,10 +87,16 @@ class ContentGenerator:
                 "outfit_summary": self._safe(outfit_summary),
                 "outfit_item_ids": self._safe(",".join(outfit_item_ids)),
                 "activity": self._safe(getattr(scene, "activity", "")),
-                "scene_source": self._safe(getattr(scene, "source", "library")),
+                "scene_source": self._safe(getattr(scene, "scene_source", getattr(scene, "source", "library"))),
+                "scene_moment": self._safe(getattr(scene, "scene_moment", scene_description)),
+                "scene_moment_type": self._safe(getattr(scene, "scene_moment_type", "")),
+                "moment_signature": self._safe(getattr(scene, "moment_signature", "")),
+                "moment_reason": self._safe(getattr(scene, "moment_reason", "")),
+                "visual_focus": self._safe(getattr(scene, "visual_focus", "")),
                 "lighting": self._safe(lighting),
                 "visual_style": "realistic lifestyle content",
                 "activity_context": self._safe(scene_description),
+                "continuity_hints": self._safe(getattr(scene, "moment_signature", "")),
                 "location_context": self._safe(city),
                 "wardrobe_context": self._safe(outfit_summary),
                 "mood_context": self._safe(mood),
@@ -150,6 +156,8 @@ class ContentGenerator:
             "day_type": self._safe(day_type),
             "day_mood": self._safe(scenes[-1].mood if scenes else "calm"),
             "scene_description": self._safe(short_story),
+            "scene_moment": self._safe(scenes[-1].scene_moment if scenes else short_story),
+            "visual_focus": self._safe(scenes[-1].visual_focus if scenes else ""),
             "short_story": self._safe(short_story),
             "mood": self._safe(scenes[-1].mood if scenes else "calm"),
             "weather": self._safe(weather_text),
