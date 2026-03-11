@@ -6,6 +6,7 @@ from typing import Dict, List, Any
 
 from virtual_persona.llm.provider import BaseLLMProvider
 from virtual_persona.models.domain import DayScene, GeneratedContent
+from virtual_persona.pipeline.prompt_composer import PromptComposer
 
 
 class ContentGenerator:
@@ -19,6 +20,7 @@ class ContentGenerator:
         self.state_store = state_store
         self.template_path = template_path
         self.templates = self._load_templates()
+        self.prompt_composer = PromptComposer(state_store)
 
     def _load_templates(self) -> Dict[str, str]:
         if self.state_store and hasattr(self.state_store, "load_prompt_templates"):
@@ -123,13 +125,13 @@ class ContentGenerator:
             if not story_template:
                 story_template = "{story_line}"
 
-            photo_prompt_text = photo_template.format(**mapping)
-            video_prompt_text = video_template.format(**mapping)
-            story_text = story_template.format(**mapping)
+            photo_prompt_text = f"{self.prompt_composer.compose(context, scene, outfit_summary, 'photo')} {self._safe_format(photo_template, mapping)}"
+            video_prompt_text = f"{self.prompt_composer.compose(context, scene, outfit_summary, 'video')} {self._safe_format(video_template, mapping)}"
+            story_text = f"{self.prompt_composer.compose(context, scene, outfit_summary, 'story')} {self._safe_format(story_template, mapping)}"
 
             photo_prompts.append(self.provider.generate(photo_prompt_text))
             video_prompts.append(self.provider.generate(video_prompt_text))
-            story_lines.append(story_text)
+            story_lines.append(self.provider.generate(story_text))
 
         post_template = self._get_template("caption_instagram_medium", "post_caption")
         if not post_template:
@@ -150,7 +152,11 @@ class ContentGenerator:
             "location": self._safe(scenes[-1].location if scenes else city),
         }
 
-        post_caption = self.provider.generate(post_template.format(**post_mapping))
+        caption_prompt = (
+            f"{self.prompt_composer.compose(context, scenes[-1] if scenes else None, outfit_summary, 'caption')} "
+            f"{self._safe_format(post_template, post_mapping)}"
+        )
+        post_caption = self.provider.generate(caption_prompt)
 
         return GeneratedContent(
             post_caption=post_caption,
@@ -176,3 +182,11 @@ class ContentGenerator:
             "evening": "warm evening ambient light",
             "night": "city lights and interior ambient",
         }.get(time_of_day, "natural soft light")
+
+    @staticmethod
+    def _safe_format(template: str, mapping: Dict[str, Any]) -> str:
+        class _SafeDict(dict):
+            def __missing__(self, key):
+                return ""
+
+        return template.format_map(_SafeDict(mapping))

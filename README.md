@@ -16,6 +16,8 @@ The engine generates a daily content package for a virtual influencer while pres
 - Continuity checks and conflict flags
 - Telegram delivery with resilient fallback
 
+Current evolution path is toward a **life simulation engine** where life-state (city, duty/rest logic, fatigue, mood, continuity memory) is computed first and content is derived from it.
+
 ## Architecture
 
 `main.py` + modular package `src/virtual_persona`:
@@ -28,8 +30,11 @@ The engine generates a daily content package for a virtual influencer while pres
   - sun (`Sunrise-Sunset` + fallback)
   - wardrobe selection and persistence
 - `pipeline`
+  - life engine (date/season/fatigue/mood baseline)
+  - route engine (home-base + route-pool decisions)
   - context builder
   - daily planner
+  - prompt composer (block-based prompt assembly)
   - content generator
   - continuity checker
   - orchestrator
@@ -128,7 +133,12 @@ Use `scripts/bootstrap_google_sheet.py` to initialize sheet tabs:
 - `content_history`
 - `continuity_flags`
 - `prompt_templates`
+- `prompt_blocks`
+- `route_pool`
+- `life_state`
 - `run_log`
+
+`prompt_templates` is still supported for backward compatibility, while `prompt_blocks` is used by `PromptComposer` to inject persistent identity/realism/continuity rules.
 
 Required env for bootstrap:
 - `GOOGLE_SERVICE_ACCOUNT_JSON_PATH`

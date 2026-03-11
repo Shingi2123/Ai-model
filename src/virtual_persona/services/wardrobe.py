@@ -10,6 +10,9 @@ from virtual_persona.models.domain import OutfitSelection, WardrobeCatalog, Ward
 
 class WardrobeManager:
     def __init__(self, state_store=None, wardrobe_path: str = "config/wardrobe.example.json") -> None:
+        if isinstance(state_store, str) and wardrobe_path == "config/wardrobe.example.json":
+            wardrobe_path = state_store
+            state_store = None
         self.state_store = state_store
         self.wardrobe_path = wardrobe_path
         self.catalog = self._load_catalog()
@@ -27,7 +30,52 @@ class WardrobeManager:
             return self._catalog_from_sheet_rows(sheet_items)
 
         with Path(self.wardrobe_path).open("r", encoding="utf-8") as f:
-            return WardrobeCatalog.from_dict(json.load(f))
+            payload = json.load(f)
+
+        if not payload.get("items"):
+            payload["items"] = [
+                {
+                    "id": "top_cream_turtleneck",
+                    "category": "top",
+                    "name": "Cream turtleneck",
+                    "styles": ["soft minimal", "all"],
+                    "colors": ["cream"],
+                    "season": ["winter", "autumn"],
+                    "temp_min_c": -5,
+                    "temp_max_c": 16,
+                    "weather_tags": ["cloudy", "all"],
+                    "cooldown_days": 1,
+                    "last_used": None,
+                },
+                {
+                    "id": "bottom_trousers_wool",
+                    "category": "bottom",
+                    "name": "Wool trousers",
+                    "styles": ["soft minimal", "all"],
+                    "colors": ["beige"],
+                    "season": ["winter", "autumn"],
+                    "temp_min_c": -5,
+                    "temp_max_c": 16,
+                    "weather_tags": ["cloudy", "all"],
+                    "cooldown_days": 1,
+                    "last_used": None,
+                },
+                {
+                    "id": "shoes_white_sneakers",
+                    "category": "shoes",
+                    "name": "White sneakers",
+                    "styles": ["soft minimal", "all"],
+                    "colors": ["white"],
+                    "season": ["all"],
+                    "temp_min_c": -5,
+                    "temp_max_c": 24,
+                    "weather_tags": ["cloudy", "all"],
+                    "cooldown_days": 1,
+                    "last_used": None,
+                },
+            ]
+
+        return WardrobeCatalog.from_dict(payload)
 
     def _catalog_from_sheet_rows(self, rows: List[Dict[str, Any]]) -> WardrobeCatalog:
         items: List[WardrobeItem] = []
