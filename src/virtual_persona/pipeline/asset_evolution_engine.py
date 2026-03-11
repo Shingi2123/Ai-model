@@ -232,7 +232,10 @@ class AssetEvolutionEngine:
                     "location_type": location_type,
                     "name": scene.location,
                     "usage_count": usage,
+                    "visit_frequency": usage,
                     "last_used": package.date.isoformat(),
+                    "last_scene": scene.description,
+                    "cooldown_days": 2 if usage < 6 else 4,
                     "season_tags": season,
                     "status": "active",
                 }
