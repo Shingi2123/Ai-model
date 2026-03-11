@@ -99,6 +99,8 @@ def test_asset_evolution_updates_memories():
     assert len(state.scene_memory) == 1
     assert len(state.activity_memory) == 1
     assert len(state.location_memory) == 1
+    assert "visit_frequency" in state.location_memory[0]
+    assert "last_scene" in state.location_memory[0]
 
 
 def test_asset_evolution_adds_balance_candidate_for_bottom_gap():

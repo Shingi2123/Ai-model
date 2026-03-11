@@ -101,6 +101,25 @@ class SceneActivityExpansionEngine:
                 "activity_hint": "early_sleep",
             }
 
+        story_arc = context.get("story_arc") or {}
+        arc_type = str(story_arc.get("arc_type") or "").strip().lower()
+        if arc_type == "fitness_journey":
+            scenes.append({"time_block": "afternoon", "location": "studio gym", "description": "Structured movement session with gradual progression", "mood": "energized", "activity_hint": "fitness_session"})
+        elif arc_type == "social_expansion":
+            scenes.append({"time_block": "evening", "location": "community space", "description": "Low-key social meetup in a cozy local spot", "mood": "open", "activity_hint": "social_meetup"})
+
+        diversity = context.get("diversity_metrics") or {}
+        if float(diversity.get("novelty_boost", 0.0) or 0.0) >= 0.2:
+            scenes.append(
+                {
+                    "time_block": "golden_hour",
+                    "location": "experimental district",
+                    "description": "Discovered a new route and spontaneous visual moments",
+                    "mood": "curious",
+                    "activity_hint": "new_scene_walk",
+                }
+            )
+
         for row in scenes:
             row["day_type"] = day_type
             row["city"] = city

@@ -22,6 +22,7 @@ class PromptComposer:
         blocks = self.load_blocks()
         life_state = context.get("life_state")
         narrative = context.get("narrative_context")
+        story_arc = context.get("story_arc") or {}
 
         base_parts: List[str] = [
             blocks.get("identity_base", "Alina Volkova, 22 y.o. Russian-speaking flight attendant based in Prague."),
@@ -53,6 +54,12 @@ class PromptComposer:
                 f" Energy: {getattr(narrative, 'energy_state', 'medium')}."
                 f" Rhythm: {getattr(narrative, 'rhythm_state', 'stable')}."
                 f" Novelty pressure: {getattr(narrative, 'novelty_pressure', 0)}"
+            )
+        if story_arc:
+            scene_part += (
+                f". Story arc: {story_arc.get('arc_type', '')}."
+                f" Arc title: {story_arc.get('title', '')}."
+                f" Arc progress: {story_arc.get('progress', 0)}"
             )
 
         recent_outfits = context.get("recent_outfit_memory") or []

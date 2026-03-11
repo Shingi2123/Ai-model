@@ -13,7 +13,11 @@ from virtual_persona.pipeline.context_builder import ContextBuilder
 from virtual_persona.pipeline.continuity_checker import ContinuityChecker
 from virtual_persona.pipeline.daily_planner import DailyPlanner
 from virtual_persona.pipeline.asset_evolution_engine import AssetEvolutionEngine
+from virtual_persona.pipeline.activity_evolution_engine import ActivityEvolutionEngine
+from virtual_persona.pipeline.life_diversity_engine import LifeDiversityEngine
 from virtual_persona.pipeline.scene_activity_engine import SceneActivityExpansionEngine
+from virtual_persona.pipeline.story_arc_engine import StoryArcEngine
+from virtual_persona.pipeline.world_expansion_engine import WorldExpansionEngine
 from virtual_persona.pipeline.wardrobe_brain import WardrobeBrain
 from virtual_persona.services.wardrobe import WardrobeManager
 from virtual_persona.storage.state_store import build_state_store
@@ -29,6 +33,10 @@ class PipelineOrchestrator:
         self.asset_engine = AssetEvolutionEngine(self.state)
         self.scene_activity_engine = SceneActivityExpansionEngine(self.state)
         self.life_narrative_engine = LifeNarrativeEngine(self.state)
+        self.story_arc_engine = StoryArcEngine(self.state)
+        self.world_expansion_engine = WorldExpansionEngine(self.state)
+        self.activity_evolution_engine = ActivityEvolutionEngine(self.state)
+        self.diversity_engine = LifeDiversityEngine(self.state)
         self.wardrobe_brain = WardrobeBrain(self.state)
         self.checker = ContinuityChecker()
         self.delivery = TelegramDelivery(settings)
@@ -41,6 +49,7 @@ class PipelineOrchestrator:
 
     def generate_day(self, target_date: date | None = None, override_city: str | None = None) -> DailyPackage:
         context = self.context_builder.build(target_date=target_date, override_city=override_city)
+
         narrative_context = self.life_narrative_engine.build_context(context["date"], context)
         context["narrative_context"] = narrative_context
         if context.get("life_state"):
@@ -49,6 +58,12 @@ class PipelineOrchestrator:
             context["life_state"].rhythm_state = narrative_context.rhythm_state
             context["life_state"].novelty_pressure = narrative_context.novelty_pressure
             context["life_state"].recovery_need = narrative_context.recovery_need
+
+        context["story_arc"] = self.story_arc_engine.run(context)
+        context["diversity_metrics"] = self.diversity_engine.analyze(lookback_days=7)
+
+        self.world_expansion_engine.run(context)
+        self.activity_evolution_engine.run(context)
 
         generated_scenes, _ = self.scene_activity_engine.ensure_candidates(context)
         scenes = self.planner.build_day(context)
