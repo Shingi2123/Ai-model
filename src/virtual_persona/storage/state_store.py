@@ -97,7 +97,6 @@ class LocalStateStore:
     def load_location_memory(self) -> List[Dict[str, Any]]:
         return self._read_json(self.base_dir / "location_memory.json", [])
 
-
     def save_scene_memory(self, rows: List[Dict[str, Any]]) -> None:
         self._write_json(self.base_dir / "scene_memory.json", rows)
 
@@ -286,6 +285,9 @@ class GoogleSheetsStateStore:
     def _ws(self, title: str):
         return self.sheet.worksheet(title)
 
+    def _get_ws(self, title: str):
+        return self._ws(title)
+
     def _safe_records(self, title: str) -> List[Dict[str, Any]]:
         try:
             return self._ws(title).get_all_records() or []
@@ -455,8 +457,13 @@ class GoogleSheetsStateStore:
         return self._safe_records("scene_memory")
 
     def save_scene_memory(self, rows: List[Dict[str, Any]]) -> None:
+        if not self.available():
+            return
+        ws = self._get_ws("scene_memory")
         headers = ["scene_id", "last_used", "usage_count", "last_city", "last_day_type", "repeat_cooldown", "status", "notes"]
-        self._replace_records("scene_memory", headers, rows)
+        values = [headers] + [[str(row.get(h, "")) for h in headers] for row in rows]
+        ws.clear()
+        ws.update(values)
 
     def load_activity_memory(self) -> List[Dict[str, Any]]:
         if not self.available():
@@ -464,8 +471,13 @@ class GoogleSheetsStateStore:
         return self._safe_records("activity_memory")
 
     def save_activity_memory(self, rows: List[Dict[str, Any]]) -> None:
+        if not self.available():
+            return
+        ws = self._get_ws("activity_memory")
         headers = ["activity_id", "activity_type", "last_used", "usage_count", "context_tags", "status", "notes"]
-        self._replace_records("activity_memory", headers, rows)
+        values = [headers] + [[str(row.get(h, "")) for h in headers] for row in rows]
+        ws.clear()
+        ws.update(values)
 
     def load_location_memory(self) -> List[Dict[str, Any]]:
         if not self.available():
@@ -473,18 +485,14 @@ class GoogleSheetsStateStore:
         return self._safe_records("location_memory")
 
     def save_location_memory(self, rows: List[Dict[str, Any]]) -> None:
+        if not self.available():
+            return
+        ws = self._get_ws("location_memory")
         headers = ["location_id", "city", "location_type", "name", "usage_count", "visit_frequency", "last_used", "last_scene", "cooldown_days", "season_tags", "status", "notes"]
-        self._replace_records("location_memory", headers, rows)
+        values = [headers] + [[str(row.get(h, "")) for h in headers] for row in rows]
+        ws.clear()
+        ws.update(values)
 
-
-    def save_scene_memory(self, rows: List[Dict[str, Any]]) -> None:
-        self._write_json(self.base_dir / "scene_memory.json", rows)
-
-    def save_activity_memory(self, rows: List[Dict[str, Any]]) -> None:
-        self._write_json(self.base_dir / "activity_memory.json", rows)
-
-    def save_location_memory(self, rows: List[Dict[str, Any]]) -> None:
-        self._write_json(self.base_dir / "location_memory.json", rows)
 
     def load_life_state(self) -> List[Dict[str, Any]]:
         if not self.available():

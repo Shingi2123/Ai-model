@@ -144,8 +144,6 @@ class PipelineOrchestrator:
         self.asset_engine.run(package)
         self.state.ensure_city_exists(package)
         self.state.save_run_log("success", f"Generated package for {package.date} in {package.city}")
-        if publishing_plan:
-            self.telegram_delivery_service.send_daily_plan(package, publishing_plan)
         return package
 
     def send_latest(self, package: DailyPackage) -> bool:

@@ -26,7 +26,7 @@ def _pkg():
     )
 
 
-def test_formatter_includes_prompt_and_caption():
+def test_formatter_includes_prompt_and_caption_and_user_time():
     package = _pkg()
     items = [
         PublishingPlanItem(
@@ -52,10 +52,11 @@ def test_formatter_includes_prompt_and_caption():
         )
     ]
 
-    text = format_plan_message(package, items)
+    text = format_plan_message(package, items, "Europe/Paris", "Asia/Pavlodar")
 
     assert "prompt text" in text
     assert "caption text" in text
+    assert "Ваше время" in text
 
 
 def test_command_views_for_captions_and_moments():
@@ -83,5 +84,5 @@ def test_command_views_for_captions_and_moments():
             short_caption="short",
         )
     ]
-    assert "short" in format_command_message(package, items, "/captions")
-    assert "moment one" in format_command_message(package, items, "/moments")
+    assert "short" in format_command_message(package, items, "/captions", "Europe/Paris", "Asia/Pavlodar")
+    assert "moment one" in format_command_message(package, items, "/moments", "Europe/Paris", "Asia/Pavlodar")

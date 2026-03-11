@@ -23,6 +23,8 @@ class AppSettings:
     app_env: str = "development"
     log_level: str = "INFO"
     timezone: str = "Europe/Prague"
+    user_timezone: str = "Asia/Pavlodar"
+    telegram_delivery_time: str = "00:00"
     default_city: str = "Prague"
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
@@ -47,6 +49,8 @@ class AppSettings:
             app_env=os.getenv("APP_ENV", "development"),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             timezone=os.getenv("TIMEZONE", "Europe/Prague"),
+            user_timezone=os.getenv("USER_TIMEZONE", "Asia/Pavlodar"),
+            telegram_delivery_time=os.getenv("TELEGRAM_DELIVERY_TIME", "00:00"),
             default_city=os.getenv("DEFAULT_CITY", "Prague"),
             telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
             telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID"),
