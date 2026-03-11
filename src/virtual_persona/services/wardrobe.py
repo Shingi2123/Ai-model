@@ -1,11 +1,160 @@
 from __future__ import annotations
 
 import json
+import logging
+from collections import Counter
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Any
 
 from virtual_persona.models.domain import OutfitSelection, WardrobeCatalog, WardrobeItem
+
+
+logger = logging.getLogger(__name__)
+
+
+class OutfitBuilderEngine:
+    OUTERWEAR_THRESHOLD_C = 14
+
+    def __init__(self, manager: "WardrobeManager") -> None:
+        self.manager = manager
+
+    def build(
+        self,
+        *,
+        temp_c: float,
+        condition: str,
+        preferred_style: str,
+        today: date,
+        season: str,
+        day_type: str,
+        city: str,
+        occasion: str,
+    ) -> OutfitSelection:
+        eligible = self._eligible_items(
+            temp_c=temp_c,
+            condition=condition,
+            preferred_style=preferred_style,
+            today=today,
+            season=season,
+            occasion=occasion,
+            day_type=day_type,
+        )
+        logger.info("OutfitBuilder: eligible items=%s for city=%s day_type=%s", len(eligible), city, day_type)
+
+        selected: Dict[str, WardrobeItem] = {}
+        dress = self._pick_best(eligible, "dress")
+        if dress:
+            selected["dress"] = dress
+        else:
+            top = self._pick_best(eligible, "top")
+            bottom = self._pick_best(eligible, "bottom")
+            if top:
+                selected["top"] = top
+            if bottom:
+                selected["bottom"] = bottom
+
+        shoes = self._pick_best(eligible, "shoes")
+        if shoes:
+            selected["shoes"] = shoes
+
+        if temp_c < self.OUTERWEAR_THRESHOLD_C:
+            outerwear = self._pick_best(eligible, "outerwear")
+            if outerwear:
+                selected["outerwear"] = outerwear
+
+        accessory = self._pick_best(eligible, "accessory")
+        if accessory:
+            selected["accessory"] = accessory
+
+        selected = self._ensure_required(selected, temp_c=temp_c)
+
+        for item in selected.values():
+            item.last_used = today
+
+        ordered_categories = ["dress", "top", "bottom", "shoes", "outerwear", "accessory"]
+        selected_items = [selected[c] for c in ordered_categories if c in selected]
+        ids = [i.id for i in selected_items]
+        summary = ", ".join(i.name for i in selected_items)
+        logger.info("OutfitBuilder: built outfit ids=%s", ids)
+        return OutfitSelection(item_ids=ids, summary=summary)
+
+    def _eligible_items(
+        self,
+        *,
+        temp_c: float,
+        condition: str,
+        preferred_style: str,
+        today: date,
+        season: str,
+        occasion: str,
+        day_type: str,
+    ) -> List[WardrobeItem]:
+        eligible: List[WardrobeItem] = []
+        for item in self.manager.catalog.items:
+            if item.season and "all" not in item.season and season not in item.season:
+                continue
+            if not (item.temp_min_c <= temp_c <= item.temp_max_c):
+                continue
+            if condition not in item.weather_tags and "all" not in item.weather_tags:
+                continue
+            if preferred_style not in item.styles and "all" not in item.styles:
+                continue
+            if self.manager._days_since_used(item, today) < item.cooldown_days:
+                continue
+            if not self._occasion_match(item, occasion, day_type):
+                continue
+            eligible.append(item)
+        return eligible
+
+    @staticmethod
+    def _occasion_match(item: WardrobeItem, occasion: str, day_type: str) -> bool:
+        occasions = {v.strip() for v in item.styles if v.strip()}
+        if not occasions:
+            return True
+        known_occasion_tags = {"work_day", "day_off", "travel_day", "event", "all"}
+        if not (occasions & known_occasion_tags):
+            return True
+        normalized = {occasion.strip(), day_type.strip(), "all"}
+        return bool(occasions & normalized) or "all" in occasions
+
+    def _pick_best(self, eligible: List[WardrobeItem], category: str) -> WardrobeItem | None:
+        candidates = [i for i in eligible if i.category == category]
+        if not candidates:
+            return None
+
+        repeats = self._recent_repeats()
+        candidates.sort(key=lambda i: (repeats.get(i.id, 0), self.manager._days_since_used(i, date.today())))
+        return candidates[0]
+
+    def _recent_repeats(self) -> Counter:
+        if not self.manager.state_store or not hasattr(self.manager.state_store, "load_outfit_memory"):
+            return Counter()
+        repeats: Counter = Counter()
+        memory = self.manager.state_store.load_outfit_memory() or []
+        for row in memory[-20:]:
+            for item_id in self.manager._split_csv(row.get("item_ids")):
+                repeats[item_id] += 1
+        return repeats
+
+    def _ensure_required(self, selected: Dict[str, WardrobeItem], *, temp_c: float) -> Dict[str, WardrobeItem]:
+        has_base = ("dress" in selected) or ("top" in selected and "bottom" in selected)
+        if has_base and "shoes" in selected:
+            return selected
+
+        fallback = [i for i in self.manager.catalog.items if i.category in {"dress", "top", "bottom", "shoes", "outerwear"}]
+        for item in fallback:
+            if item.category == "dress":
+                selected.setdefault("dress", item)
+            elif item.category == "top" and "dress" not in selected:
+                selected.setdefault("top", item)
+            elif item.category == "bottom" and "dress" not in selected:
+                selected.setdefault("bottom", item)
+            elif item.category == "shoes":
+                selected.setdefault("shoes", item)
+            elif item.category == "outerwear" and temp_c < self.OUTERWEAR_THRESHOLD_C:
+                selected.setdefault("outerwear", item)
+        return selected
 
 
 class WardrobeManager:
@@ -16,6 +165,7 @@ class WardrobeManager:
         self.state_store = state_store
         self.wardrobe_path = wardrobe_path
         self.catalog = self._load_catalog()
+        self.outfit_builder = OutfitBuilderEngine(self)
 
     def _load_catalog(self) -> WardrobeCatalog:
         sheet_items = []
@@ -95,6 +245,9 @@ class WardrobeManager:
             name = str(row.get("name", "")).strip()
 
             styles = self._split_csv(row.get("styles") or row.get("style_tags"))
+            occasion_tags = self._split_csv(row.get("occasion_tags"))
+            if occasion_tags:
+                styles = styles + [t for t in occasion_tags if t not in styles]
             colors = self._split_csv(row.get("colors") or row.get("color"))
             season = self._split_csv(row.get("season") or row.get("season_tags"))
             weather_tags = self._split_csv(row.get("weather_tags"))
@@ -177,47 +330,27 @@ class WardrobeManager:
             return 10_000
         return (today - item.last_used).days
 
-    def select_outfit(self, temp_c: float, condition: str, preferred_style: str, today: date) -> OutfitSelection:
-        eligible: List[WardrobeItem] = []
-
+    def select_outfit(
+        self,
+        temp_c: float,
+        condition: str,
+        preferred_style: str,
+        today: date,
+        day_type: str = "day_off",
+        city: str = "",
+        occasion: str | None = None,
+    ) -> OutfitSelection:
         season_now = current_season(today.month)
-
-        for item in self.catalog.items:
-            if item.season and "all" not in item.season and season_now not in item.season:
-                continue
-            if not (item.temp_min_c <= temp_c <= item.temp_max_c):
-                continue
-            if condition not in item.weather_tags and "all" not in item.weather_tags:
-                continue
-            if preferred_style not in item.styles and "all" not in item.styles:
-                continue
-            if self._days_since_used(item, today) < item.cooldown_days:
-                continue
-            eligible.append(item)
-
-        required = self.catalog.combination_rules.required_categories
-        selected: Dict[str, WardrobeItem] = {}
-
-        for category in required:
-            cand = next((i for i in eligible if i.category == category), None)
-            if cand:
-                selected[category] = cand
-
-        for category in self.catalog.combination_rules.optional_categories:
-            cand = next((i for i in eligible if i.category == category), None)
-            if cand and category not in selected:
-                selected[category] = cand
-
-        if len([c for c in required if c in selected]) != len(required):
-            fallback = [i for i in self.catalog.items if i.category in required][: len(required)]
-            selected = {i.category: i for i in fallback}
-
-        for item in selected.values():
-            item.last_used = today
-
-        ids = [i.id for i in selected.values()]
-        summary = ", ".join(i.name for i in selected.values())
-        return OutfitSelection(item_ids=ids, summary=summary)
+        return self.outfit_builder.build(
+            temp_c=temp_c,
+            condition=condition,
+            preferred_style=preferred_style,
+            today=today,
+            season=season_now,
+            day_type=day_type,
+            city=city,
+            occasion=occasion or day_type,
+        )
 
     def persist(self, wardrobe_path: str = "data/state/wardrobe_state.json") -> None:
         Path(wardrobe_path).parent.mkdir(parents=True, exist_ok=True)

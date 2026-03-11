@@ -55,7 +55,13 @@ def main() -> None:
             ws.append_row(headers)
             print(f"Created: {title}")
         else:
-            print(f"Exists: {title}")
+            ws = sh.worksheet(title)
+            current_headers = ws.row_values(1)
+            if current_headers != headers:
+                ws.update("1:1", [headers])
+                print(f"Updated headers: {title}")
+            else:
+                print(f"Exists: {title}")
 
 
 if __name__ == "__main__":

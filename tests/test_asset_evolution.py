@@ -99,3 +99,47 @@ def test_asset_evolution_updates_memories():
     assert len(state.scene_memory) == 1
     assert len(state.activity_memory) == 1
     assert len(state.location_memory) == 1
+
+
+def test_asset_evolution_adds_balance_candidate_for_bottom_gap():
+    state = DummyState()
+    state.wardrobe_items = [
+        {"item_id": "top_1", "name": "Top1", "category": "top", "status": "active", "wear_count": 1, "times_in_content": 1},
+        {"item_id": "top_2", "name": "Top2", "category": "top", "status": "active", "wear_count": 1, "times_in_content": 1},
+        {"item_id": "top_3", "name": "Top3", "category": "top", "status": "active", "wear_count": 1, "times_in_content": 1},
+        {"item_id": "top_4", "name": "Top4", "category": "top", "status": "active", "wear_count": 1, "times_in_content": 1},
+        {"item_id": "bottom_1", "name": "Bottom1", "category": "bottom", "status": "active", "wear_count": 1, "times_in_content": 1},
+    ]
+    engine = AssetEvolutionEngine(state)
+
+    package = DailyPackage(
+        generated_at=datetime.utcnow(),
+        date=date(2026, 1, 11),
+        city="Prague",
+        day_type="day_off",
+        summary="test",
+        weather=WeatherSnapshot(city="Prague", temp_c=12, condition="cloudy", humidity=70, wind_speed=3, cloudiness=80),
+        sun=SunSnapshot(sunrise_local=datetime.utcnow(), sunset_local=datetime.utcnow()),
+        outfit=OutfitSelection(item_ids=["top_1", "bottom_1"], summary="Top + Bottom"),
+        scenes=[DayScene(block="morning", location="city cafe", description="coffee", mood="calm", time_of_day="morning")],
+        content=GeneratedContent(post_caption="c", story_lines=[], photo_prompts=[], video_prompts=[], publish_windows=[], creative_notes=[]),
+        life_state=LifeState(
+            date=date(2026, 1, 11),
+            weekday="Sunday",
+            month=1,
+            season="winter",
+            is_holiday=False,
+            holiday_name="",
+            home_city="Prague",
+            current_city="Prague",
+            day_type="day_off",
+            day_type_reason="rest",
+            fatigue_level=2,
+            mood_base="calm",
+            continuity_note="stable",
+        ),
+    )
+
+    engine.run(package)
+
+    assert any(c.get("category") == "bottom" and c.get("reason") == "wardrobe imbalance" for c in state.candidates)
