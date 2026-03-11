@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
@@ -263,6 +265,8 @@ class GoogleSheetsStateStore:
         self.sheet_id = sheet_id
         self.client = None
         self.sheet = None
+        self.last_error = ""
+        self._sheet_cache: Dict[str, List[Dict[str, Any]]] = {}
 
         try:
             if Credentials is None or gspread is None:
@@ -275,7 +279,8 @@ class GoogleSheetsStateStore:
             self.client = gspread.authorize(creds)
             self.sheet = self.client.open_by_key(self.sheet_id)
         except Exception as exc:
-            logger.warning("GoogleSheetsStateStore disabled: %s", exc)
+            self.last_error = str(exc)
+            logger.error("GoogleSheetsStateStore disabled: %s", exc)
             self.client = None
             self.sheet = None
 
@@ -285,54 +290,102 @@ class GoogleSheetsStateStore:
     def _ws(self, title: str):
         return self.sheet.worksheet(title)
 
+    def _is_quota_error(self, exc: Exception) -> bool:
+        text = str(exc).lower()
+        return "429" in text or "quota" in text or "too many requests" in text
+
+    def _with_retry(self, operation, *, operation_name: str):
+        last_exc = None
+        for attempt in range(5):
+            try:
+                return operation()
+            except Exception as exc:  # pragma: no cover - external API behavior
+                last_exc = exc
+                if not self._is_quota_error(exc) or attempt == 4:
+                    break
+                delay = 2 ** attempt
+                logger.warning(
+                    "Google Sheets quota issue during %s (attempt %s/5). Retry in %ss.",
+                    operation_name,
+                    attempt + 1,
+                    delay,
+                )
+                time.sleep(delay)
+        if last_exc is not None:
+            raise last_exc
+        return None
+
     def _get_ws(self, title: str):
-        return self._ws(title)
+        return self._with_retry(lambda: self._ws(title), operation_name=f"open worksheet {title}")
+
+    def _read_records(self, title: str) -> List[Dict[str, Any]]:
+        if title in self._sheet_cache:
+            return self._sheet_cache[title]
+        ws = self._get_ws(title)
+        rows = self._with_retry(lambda: ws.get_all_records() or [], operation_name=f"read records {title}")
+        self._sheet_cache[title] = rows
+        return rows
+
+    def _invalidate_sheet_cache(self, title: str) -> None:
+        self._sheet_cache.pop(title, None)
 
     def _safe_records(self, title: str) -> List[Dict[str, Any]]:
         try:
-            return self._ws(title).get_all_records() or []
-        except Exception:
+            return self._read_records(title)
+        except Exception as exc:
+            logger.error("Google Sheets read failed for '%s': %s", title, exc)
             return []
 
     def _append_dict_row(self, title: str, headers: List[str], row: Dict[str, Any]) -> None:
         if not self.available():
             return
         try:
-            self._ws(title).append_row([row.get(h, "") for h in headers])
-        except Exception:
+            ws = self._get_ws(title)
+            self._with_retry(
+                lambda: ws.append_row([row.get(h, "") for h in headers]),
+                operation_name=f"append row {title}",
+            )
+            self._invalidate_sheet_cache(title)
+        except Exception as exc:
+            logger.error("Google Sheets append failed for '%s': %s", title, exc)
             return
 
     def _replace_records(self, title: str, headers: List[str], rows: List[Dict[str, Any]]) -> None:
         if not self.available():
             return
         try:
-            ws = self._ws(title)
+            ws = self._get_ws(title)
             values = [headers] + [[row.get(h, "") for h in headers] for row in rows]
-            ws.clear()
-            ws.update(values)
-        except Exception:
+            self._with_retry(ws.clear, operation_name=f"clear sheet {title}")
+            self._with_retry(lambda: ws.update(values), operation_name=f"update sheet {title}")
+            self._invalidate_sheet_cache(title)
+        except Exception as exc:
+            logger.error("Google Sheets replace failed for '%s': %s", title, exc)
             return
 
     def _ensure_headers(self, title: str, required_headers: List[str]) -> None:
         if not self.available():
             return
         try:
-            ws = self._ws(title)
-            existing = ws.row_values(1)
+            ws = self._get_ws(title)
+            existing = self._with_retry(lambda: ws.row_values(1), operation_name=f"read header {title}")
             if not existing:
-                ws.append_row(required_headers)
+                self._with_retry(lambda: ws.append_row(required_headers), operation_name=f"write header {title}")
+                self._invalidate_sheet_cache(title)
                 return
             missing = [h for h in required_headers if h not in existing]
             if missing:
-                ws.update("1:1", [existing + missing])
-        except Exception:
+                self._with_retry(lambda: ws.update("1:1", [existing + missing]), operation_name=f"extend header {title}")
+                self._invalidate_sheet_cache(title)
+        except Exception as exc:
+            logger.error("Google Sheets header sync failed for '%s': %s", title, exc)
             return
 
 
     def load_calendar(self) -> List[Dict[str, Any]]:
         if not self.available():
             return []
-        return self._ws("daily_calendar").get_all_records() or []
+        return self._safe_records("daily_calendar")
 
     def load_content_history(self) -> List[Dict[str, Any]]:
         if not self.available():
@@ -386,7 +439,7 @@ class GoogleSheetsStateStore:
         if not self.available():
             return {}
 
-        rows = self._ws("character_profile").get_all_records() or []
+        rows = self._safe_records("character_profile")
         profile: Dict[str, Any] = {}
 
         for row in rows:
@@ -400,12 +453,12 @@ class GoogleSheetsStateStore:
     def load_cities(self) -> List[Dict[str, Any]]:
         if not self.available():
             return []
-        return self._ws("cities").get_all_records() or []
+        return self._safe_records("cities")
 
     def load_wardrobe(self) -> List[Dict[str, Any]]:
         if not self.available():
             return []
-        return self._ws("wardrobe").get_all_records() or []
+        return self._safe_records("wardrobe")
 
     def load_wardrobe_items(self) -> List[Dict[str, Any]]:
         if not self.available():
@@ -431,7 +484,7 @@ class GoogleSheetsStateStore:
     def load_scene_library(self) -> List[Dict[str, Any]]:
         if not self.available():
             return []
-        return self._ws("scene_library").get_all_records() or []
+        return self._safe_records("scene_library")
 
     def load_outfit_memory(self) -> List[Dict[str, Any]]:
         if not self.available():
@@ -462,8 +515,9 @@ class GoogleSheetsStateStore:
         ws = self._get_ws("scene_memory")
         headers = ["scene_id", "last_used", "usage_count", "last_city", "last_day_type", "repeat_cooldown", "status", "notes"]
         values = [headers] + [[str(row.get(h, "")) for h in headers] for row in rows]
-        ws.clear()
-        ws.update(values)
+        self._with_retry(ws.clear, operation_name="clear sheet scene_memory")
+        self._with_retry(lambda: ws.update(values), operation_name="update sheet scene_memory")
+        self._invalidate_sheet_cache("scene_memory")
 
     def load_activity_memory(self) -> List[Dict[str, Any]]:
         if not self.available():
@@ -476,8 +530,9 @@ class GoogleSheetsStateStore:
         ws = self._get_ws("activity_memory")
         headers = ["activity_id", "activity_type", "last_used", "usage_count", "context_tags", "status", "notes"]
         values = [headers] + [[str(row.get(h, "")) for h in headers] for row in rows]
-        ws.clear()
-        ws.update(values)
+        self._with_retry(ws.clear, operation_name="clear sheet activity_memory")
+        self._with_retry(lambda: ws.update(values), operation_name="update sheet activity_memory")
+        self._invalidate_sheet_cache("activity_memory")
 
     def load_location_memory(self) -> List[Dict[str, Any]]:
         if not self.available():
@@ -490,8 +545,9 @@ class GoogleSheetsStateStore:
         ws = self._get_ws("location_memory")
         headers = ["location_id", "city", "location_type", "name", "usage_count", "visit_frequency", "last_used", "last_scene", "cooldown_days", "season_tags", "status", "notes"]
         values = [headers] + [[str(row.get(h, "")) for h in headers] for row in rows]
-        ws.clear()
-        ws.update(values)
+        self._with_retry(ws.clear, operation_name="clear sheet location_memory")
+        self._with_retry(lambda: ws.update(values), operation_name="update sheet location_memory")
+        self._invalidate_sheet_cache("location_memory")
 
 
     def load_life_state(self) -> List[Dict[str, Any]]:
@@ -580,7 +636,7 @@ class GoogleSheetsStateStore:
         if not self.available():
             return {}
 
-        rows = self._ws("prompt_templates").get_all_records() or []
+        rows = self._safe_records("prompt_templates")
         templates: Dict[str, str] = {}
 
         for row in rows:
@@ -596,7 +652,7 @@ class GoogleSheetsStateStore:
             return {}
 
         try:
-            rows = self._ws("prompt_blocks").get_all_records() or []
+            rows = self._safe_records("prompt_blocks")
         except Exception:
             return {}
 
@@ -612,14 +668,14 @@ class GoogleSheetsStateStore:
         if not self.available():
             return []
         try:
-            return self._ws("route_pool").get_all_records() or []
+            return self._safe_records("route_pool")
         except Exception:
             return []
 
-    def save_content_package(self, package: DailyPackage) -> Path:
-        output_path = Path("data/outputs") / f"{package.date.isoformat()}_package.json"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with output_path.open("w", encoding="utf-8") as f:
+    def save_content_package(self, package: DailyPackage) -> str:
+        output_path = f"data/outputs/{package.date.isoformat()}_package.json"
+        os.makedirs("data/outputs", exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
             json.dump(package.to_dict(), f, ensure_ascii=False, indent=2, default=str)
         return output_path
 
@@ -663,43 +719,52 @@ class GoogleSheetsStateStore:
         if not self.available():
             return
 
-        self._ws("daily_calendar").append_row(
-            [
-                package.date.isoformat(),
-                package.city,
-                package.day_type,
-                package.summary,
-            ]
+        self._with_retry(
+            lambda: self._get_ws("daily_calendar").append_row(
+                [
+                    package.date.isoformat(),
+                    package.city,
+                    package.day_type,
+                    package.summary,
+                ]
+            ),
+            operation_name="append row daily_calendar",
         )
+        self._invalidate_sheet_cache("daily_calendar")
 
     def ensure_city_exists(self, package: DailyPackage) -> None:
         if not self.available():
             return
 
-        ws = self._ws("cities")
-        records = ws.get_all_records()
+        ws = self._get_ws("cities")
+        records = self._safe_records("cities")
         known = {row.get("city") for row in records}
 
         if package.city not in known:
-            ws.append_row([package.city, "", "", "", ""])
+            self._with_retry(lambda: ws.append_row([package.city, "", "", "", ""]), operation_name="append row cities")
+            self._invalidate_sheet_cache("cities")
 
     def save_run_log(self, status: str, message: str) -> None:
         if not self.available():
             return
 
-        self._ws("run_log").append_row(
-            [
-                datetime.now().isoformat(timespec="seconds"),
-                status,
-                message,
-            ]
+        self._with_retry(
+            lambda: self._get_ws("run_log").append_row(
+                [
+                    datetime.now().isoformat(timespec="seconds"),
+                    status,
+                    message,
+                ]
+            ),
+            operation_name="append row run_log",
         )
+        self._invalidate_sheet_cache("run_log")
 
     def append_life_state(self, package: DailyPackage) -> None:
         if not self.available() or not package.life_state:
             return
         try:
-            self._ws("life_state").append_row(
+            self._with_retry(lambda: self._get_ws("life_state").append_row(
                 [
                     package.date.isoformat(),
                     package.life_state.current_city,
@@ -715,7 +780,8 @@ class GoogleSheetsStateStore:
                     getattr(package.life_state, "novelty_pressure", 0),
                     getattr(package.life_state, "recovery_need", 0),
                 ]
-            )
+            ), operation_name="append row life_state")
+            self._invalidate_sheet_cache("life_state")
         except Exception:
             return
 
@@ -734,5 +800,10 @@ def build_state_store(settings):
             )
             if gs.available():
                 return gs
+            if backend in ("google", "gsheets", "google_sheets"):
+                raise RuntimeError(f"Google Sheets backend unavailable: {gs.last_error or 'unknown error'}")
+            logger.error("Google Sheets backend unavailable in auto mode: %s", gs.last_error or "unknown error")
+        elif backend in ("google", "gsheets", "google_sheets"):
+            raise RuntimeError("Google Sheets backend requested but credentials are missing")
 
     return LocalStateStore()

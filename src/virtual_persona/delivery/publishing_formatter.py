@@ -9,12 +9,16 @@ from virtual_persona.models.domain import DailyPackage, PublishingPlanItem
 
 CONTENT_EMOJI = {
     "photo": "📸",
-    "carousel": "🖼️",
-    "video": "🎬",
-    "reel": "🎞️",
+    "carousel": "📸",
+    "video": "📹",
+    "reel": "📹",
     "stories": "📱",
     "story": "📱",
+    "text": "✍️",
 }
+
+SECTION_DIVIDER = "━━━━━━━━━━━━━━━━━━"
+TELEGRAM_MAX_LEN = 4096
 
 
 def _convert_time_for_user(target_date, hhmm: str, from_tz: str, to_tz: str) -> str:
@@ -25,15 +29,43 @@ def _convert_time_for_user(target_date, hhmm: str, from_tz: str, to_tz: str) -> 
         return hhmm
 
 
+def _post_header_emoji(content_type: str) -> str:
+    return CONTENT_EMOJI.get(content_type.lower(), "✍️")
+
+
+def split_for_telegram(text: str, max_len: int = TELEGRAM_MAX_LEN) -> List[str]:
+    if len(text) <= max_len:
+        return [text]
+
+    parts: List[str] = []
+    current = ""
+    for block in text.split("\n\n"):
+        candidate = f"{current}\n\n{block}" if current else block
+        if len(candidate) <= max_len:
+            current = candidate
+            continue
+        if current:
+            parts.append(current)
+            current = ""
+        while len(block) > max_len:
+            parts.append(block[:max_len])
+            block = block[max_len:]
+        current = block
+
+    if current:
+        parts.append(current)
+    return parts
+
+
 def format_plan_header(package: DailyPackage, persona_timezone: str, user_timezone: str) -> str:
     narrative_phase = getattr(package.life_state, "narrative_phase", "routine_stability") if package.life_state else "routine_stability"
     return (
-        "План публикаций на сегодня\n\n"
-        f"City: {package.city}\n"
-        f"Local timezone: {persona_timezone}\n"
-        f"User timezone: {user_timezone}\n"
-        f"Day type: {package.day_type}\n"
-        f"Narrative phase: {narrative_phase}"
+        f"📅 План публикаций — {package.date.strftime('%d %B')}\n\n"
+        f"📍 Город персонажа: {package.city}\n"
+        f"🕒 Таймзона персонажа: {persona_timezone}\n"
+        f"🕒 Ваше время: {user_timezone}\n\n"
+        f"🧭 День: {package.day_type}\n"
+        f"🎭 Фаза: {narrative_phase}"
     )
 
 
@@ -42,15 +74,18 @@ def format_plan_items(items: Iterable[PublishingPlanItem], package: DailyPackage
     for i, item in enumerate(items, start=1):
         local_time = item.post_time
         user_time = _convert_time_for_user(package.date, item.post_time, persona_timezone, user_timezone)
-        content_label = item.content_type.title()
-        emoji = CONTENT_EMOJI.get(item.content_type.lower(), "📝")
+        emoji = _post_header_emoji(item.content_type)
         rows.append(
-            f"{i}️⃣ {item.platform} {content_label} {emoji}\n\n"
-            f"Scene:\n{item.scene_moment}\n\n"
-            f"Публикация (местное время):\n{local_time}\n\n"
-            f"Ваше время:\n{user_time}\n\n"
-            f"Prompt:\n{item.prompt_text}\n\n"
-            f"Caption:\n{item.caption_text}"
+            f"{SECTION_DIVIDER}\n\n"
+            f"{emoji} POST #{i}\n\n"
+            f"🕘 Время персонажа: {local_time}\n"
+            f"🕘 Ваше время: {user_time}\n\n"
+            f"🌐 Платформа: {item.platform}\n"
+            f"🎬 Тип контента: {item.content_type.title()}\n\n"
+            f"🎯 Момент\n{item.scene_moment}\n\n"
+            f"🧠 Prompt\n{item.prompt_text}\n\n"
+            f"📝 Подпись\n{item.caption_text}\n\n"
+            f"🏷 Теги\n{item.day_type} | {item.activity_type} | {item.scene_moment_type} | {item.visual_focus}"
         )
     return "\n\n".join(rows) if rows else "Нет публикаций на сегодня."
 
@@ -78,16 +113,21 @@ def filter_plan_items(items: list[PublishingPlanItem], command: str) -> list[Pub
 def format_command_message(package: DailyPackage, items: list[PublishingPlanItem], command: str, persona_timezone: str, user_timezone: str) -> str:
     cmd = command.strip().lower()
     if cmd == "/captions":
-        return "\n\n".join(f"{idx}. {item.short_caption or item.caption_text}" for idx, item in enumerate(items, start=1)) or "Нет caption'ов."
+        return "\n\n".join(
+            f"📝 #{idx}\n{item.short_caption or item.caption_text}" for idx, item in enumerate(items, start=1)
+        ) or "Нет caption'ов."
     if cmd == "/moments":
-        return "\n".join(f"{idx}. {item.scene_moment}" for idx, item in enumerate(items, start=1)) or "Нет scene moments."
+        return "\n\n".join(f"🎯 #{idx}\n{item.scene_moment}" for idx, item in enumerate(items, start=1)) or "Нет scene moments."
     if cmd == "/debug":
         first = items[0] if items else None
-        outfit = first.outfit_ids if first else []
+        life_state = package.life_state
         return (
-            f"DEBUG\ncity={package.city}\nday_type={package.day_type}\n"
-            f"narrative_phase={getattr(package.life_state, 'narrative_phase', 'routine_stability') if package.life_state else 'routine_stability'}\n"
-            f"persona_timezone={persona_timezone}\nuser_timezone={user_timezone}\n"
-            f"outfit_ids={', '.join(outfit)}\nstory_arc={package.summary}"
+            "🛠 DEBUG\n"
+            f"city={package.city}\n"
+            f"day_type={package.day_type}\n"
+            f"narrative_phase={getattr(life_state, 'narrative_phase', 'routine_stability') if life_state else 'routine_stability'}\n"
+            f"energy_state={getattr(life_state, 'energy_state', 'medium') if life_state else 'medium'}\n"
+            f"timeline_phase={getattr(life_state, 'rhythm_state', 'stable') if life_state else 'stable'}\n"
+            f"moment_signature={first.moment_signature if first else ''}"
         )
     return format_plan_message(package, items, persona_timezone, user_timezone)

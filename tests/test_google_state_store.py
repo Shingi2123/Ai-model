@@ -20,6 +20,7 @@ class HelperGoogleStore(GoogleSheetsStateStore):
         self.sheet_id = ""
         self.client = object()
         self.sheet = object()
+        self._sheet_cache = {}
         self._ws_map = {
             "scene_memory": FakeWS(),
             "activity_memory": FakeWS(),
