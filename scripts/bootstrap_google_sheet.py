@@ -38,7 +38,8 @@ SHEETS = {
     "prompt_templates": ["key", "template"],
     "prompt_blocks": ["key", "content", "priority", "enabled"],
     "route_pool": ["route_id", "origin_city", "destination_city", "flight_type", "weight", "active"],
-    "life_state": ["date", "current_city", "day_type", "season", "fatigue_level", "mood_base", "reason", "continuity_note"],
+    "life_state": ["date", "current_city", "day_type", "season", "fatigue_level", "mood_base", "reason", "continuity_note", "narrative_phase", "energy_state", "rhythm_state", "novelty_pressure", "recovery_need"],
+    "narrative_memory": ["date", "narrative_phase", "energy_state", "rhythm_state", "novelty_pressure", "recovery_need", "reason"],
     "run_log": ["timestamp", "status", "message"],
 }
 

@@ -21,6 +21,7 @@ class PromptComposer:
     def compose(self, context: Dict[str, Any], scene: Any, outfit_summary: str, content_type: str, outfit_item_ids: List[str] | None = None) -> str:
         blocks = self.load_blocks()
         life_state = context.get("life_state")
+        narrative = context.get("narrative_context")
 
         base_parts: List[str] = [
             blocks.get("identity_base", "Alina Volkova, 22 y.o. Russian-speaking flight attendant based in Prague."),
@@ -45,6 +46,13 @@ class PromptComposer:
             scene_part += (
                 f". Day type: {life_state.day_type}. Season: {life_state.season}. "
                 f"Fatigue: {life_state.fatigue_level}/10"
+            )
+        if narrative:
+            scene_part += (
+                f". Narrative phase: {getattr(narrative, 'narrative_phase', 'routine_stability')}."
+                f" Energy: {getattr(narrative, 'energy_state', 'medium')}."
+                f" Rhythm: {getattr(narrative, 'rhythm_state', 'stable')}."
+                f" Novelty pressure: {getattr(narrative, 'novelty_pressure', 0)}"
             )
 
         recent_outfits = context.get("recent_outfit_memory") or []

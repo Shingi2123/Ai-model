@@ -132,11 +132,23 @@ class DailyPlanner:
         return scenes
 
     def build_day(self, context: Dict) -> List[DayScene]:
-        sheet_scenes = self._load_scenes_from_sheet(context["day_type"])
+        narrative = context.get("narrative_context")
+        narrative_phase = getattr(narrative, "narrative_phase", "") if narrative else ""
+        energy_state = getattr(narrative, "energy_state", "") if narrative else ""
+
+        day_type = context["day_type"]
+        if narrative_phase in {"recovery_phase", "quiet_reset_phase"}:
+            day_type = "day_off"
+        elif narrative_phase in {"exploration_phase", "travel_phase"} and context.get("day_type") == "day_off":
+            day_type = "layover_day"
+
+        sheet_scenes = self._load_scenes_from_sheet(day_type)
         if sheet_scenes:
+            if energy_state == "low":
+                return sheet_scenes[:2]
             return sheet_scenes
 
-        template = self.DAYTYPE_TEMPLATES.get(context["day_type"])
+        template = self.DAYTYPE_TEMPLATES.get(day_type)
 
         if not template:
             template = [
@@ -145,7 +157,10 @@ class DailyPlanner:
                 ("evening", "home", "Calm evening indoors after the day", "reflective"),
             ]
 
-        return [
+        scenes = [
             DayScene(block=b, location=l, description=d, mood=m, time_of_day=b, activity="", source="template")
             for b, l, d, m in template
         ]
+        if energy_state == "low":
+            return scenes[:2]
+        return scenes

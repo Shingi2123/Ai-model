@@ -7,6 +7,7 @@ from virtual_persona.delivery.formatter import package_to_markdown
 from virtual_persona.delivery.telegram_bot import TelegramDelivery
 from virtual_persona.llm.provider import OpenAIProvider, TemplateFallbackProvider
 from virtual_persona.models.domain import DailyPackage
+from virtual_persona.narrative.life_narrative_engine import LifeNarrativeEngine
 from virtual_persona.pipeline.content_generator import ContentGenerator
 from virtual_persona.pipeline.context_builder import ContextBuilder
 from virtual_persona.pipeline.continuity_checker import ContinuityChecker
@@ -27,6 +28,7 @@ class PipelineOrchestrator:
         self.wardrobe = WardrobeManager(self.state)
         self.asset_engine = AssetEvolutionEngine(self.state)
         self.scene_activity_engine = SceneActivityExpansionEngine(self.state)
+        self.life_narrative_engine = LifeNarrativeEngine(self.state)
         self.wardrobe_brain = WardrobeBrain(self.state)
         self.checker = ContinuityChecker()
         self.delivery = TelegramDelivery(settings)
@@ -39,10 +41,33 @@ class PipelineOrchestrator:
 
     def generate_day(self, target_date: date | None = None, override_city: str | None = None) -> DailyPackage:
         context = self.context_builder.build(target_date=target_date, override_city=override_city)
+        narrative_context = self.life_narrative_engine.build_context(context["date"], context)
+        context["narrative_context"] = narrative_context
+        if context.get("life_state"):
+            context["life_state"].narrative_phase = narrative_context.narrative_phase
+            context["life_state"].energy_state = narrative_context.energy_state
+            context["life_state"].rhythm_state = narrative_context.rhythm_state
+            context["life_state"].novelty_pressure = narrative_context.novelty_pressure
+            context["life_state"].recovery_need = narrative_context.recovery_need
+
         generated_scenes, _ = self.scene_activity_engine.ensure_candidates(context)
         scenes = self.planner.build_day(context)
         if not scenes and generated_scenes:
             scenes = generated_scenes
+
+        scene_memory = self.state.load_scene_memory() if hasattr(self.state, "load_scene_memory") else []
+        activity_memory = self.state.load_activity_memory() if hasattr(self.state, "load_activity_memory") else []
+        location_memory = self.state.load_location_memory() if hasattr(self.state, "load_location_memory") else []
+        filtered = self.life_narrative_engine.variation_controller.filter_scenes(
+            day_type=context["day_type"],
+            city=context["city"],
+            scenes=scenes,
+            scene_memory=scene_memory,
+            activity_memory=activity_memory,
+            location_memory=location_memory,
+        )
+        if filtered:
+            scenes = filtered
 
         outfit = self.wardrobe.select_outfit(
             temp_c=context["weather"].temp_c,

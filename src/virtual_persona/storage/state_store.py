@@ -73,6 +73,12 @@ class LocalStateStore:
     def load_location_memory(self) -> List[Dict[str, Any]]:
         return self._read_json(self.base_dir / "location_memory.json", [])
 
+    def load_life_state(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "life_state.json", [])
+
+    def load_narrative_memory(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "narrative_memory.json", [])
+
     def load_scene_candidates(self) -> List[Dict[str, Any]]:
         return self._read_json(self.base_dir / "scene_candidates.json", [])
 
@@ -108,6 +114,12 @@ class LocalStateStore:
 
     def append_activity_candidate(self, row: Dict[str, Any]) -> None:
         path = self.base_dir / "activity_candidates.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
+
+    def append_narrative_memory(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "narrative_memory.json"
         rows = self._read_json(path, [])
         rows.append(row)
         self._write_json(path, rows)
@@ -214,6 +226,11 @@ class LocalStateStore:
                 "mood_base": package.life_state.mood_base,
                 "reason": package.life_state.day_type_reason,
                 "continuity_note": package.life_state.continuity_note,
+                "narrative_phase": getattr(package.life_state, "narrative_phase", "routine_stability"),
+                "energy_state": getattr(package.life_state, "energy_state", "medium"),
+                "rhythm_state": getattr(package.life_state, "rhythm_state", "stable"),
+                "novelty_pressure": getattr(package.life_state, "novelty_pressure", 0),
+                "recovery_need": getattr(package.life_state, "recovery_need", 0),
             }
         )
         self._write_json(life_state_path, rows)
@@ -394,6 +411,16 @@ class GoogleSheetsStateStore:
         headers = ["location_id", "city", "location_type", "name", "usage_count", "last_used", "season_tags", "status", "notes"]
         self._replace_records("location_memory", headers, rows)
 
+    def load_life_state(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("life_state")
+
+    def load_narrative_memory(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("narrative_memory")
+
     def load_scene_candidates(self) -> List[Dict[str, Any]]:
         if not self.available():
             return []
@@ -420,6 +447,11 @@ class GoogleSheetsStateStore:
         ]
         self._ensure_headers("activity_candidates", headers)
         self._append_dict_row("activity_candidates", headers, row)
+
+    def append_narrative_memory(self, row: Dict[str, Any]) -> None:
+        headers = ["date", "narrative_phase", "energy_state", "rhythm_state", "novelty_pressure", "recovery_need", "reason"]
+        self._ensure_headers("narrative_memory", headers)
+        self._append_dict_row("narrative_memory", headers, row)
 
     def load_style_rules(self) -> List[Dict[str, Any]]:
         if not self.available():
@@ -540,6 +572,11 @@ class GoogleSheetsStateStore:
                     package.life_state.mood_base,
                     package.life_state.day_type_reason,
                     package.life_state.continuity_note,
+                    getattr(package.life_state, "narrative_phase", "routine_stability"),
+                    getattr(package.life_state, "energy_state", "medium"),
+                    getattr(package.life_state, "rhythm_state", "stable"),
+                    getattr(package.life_state, "novelty_pressure", 0),
+                    getattr(package.life_state, "recovery_need", 0),
                 ]
             )
         except Exception:
