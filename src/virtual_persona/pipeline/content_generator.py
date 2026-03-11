@@ -52,6 +52,7 @@ class ContentGenerator:
         weather = context["weather"]
         city = context["city"]
         day_type = context["day_type"]
+        narrative = context.get("narrative_context")
 
         photo_prompts: List[str] = []
         video_prompts: List[str] = []
@@ -96,6 +97,8 @@ class ContentGenerator:
                 "time_context": self._safe(time_of_day),
                 "short_story": self._safe(scene_description),
                 "story_line": self._safe(scene_description),
+                "narrative_phase": self._safe(getattr(narrative, "narrative_phase", "routine_stability") if narrative else "routine_stability"),
+                "energy_state": self._safe(getattr(narrative, "energy_state", "medium") if narrative else "medium"),
             }
 
             # фото-промпт

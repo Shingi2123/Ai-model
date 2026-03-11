@@ -51,8 +51,10 @@ class SceneActivityExpansionEngine:
         day_type = context.get("day_type", "day_off")
         city = context.get("city", "")
         life_state = context.get("life_state")
+        narrative = context.get("narrative_context")
         season = getattr(life_state, "season", "all")
         fatigue = getattr(life_state, "fatigue_level", 4)
+        phase = getattr(narrative, "narrative_phase", "") if narrative else ""
 
         base = [
             {"time_block": "morning", "location": "home", "description": "Slow breakfast near the window", "mood": "calm", "activity_hint": "slow_breakfast"},
@@ -79,6 +81,17 @@ class SceneActivityExpansionEngine:
         }
         scenes = by_day.get(day_type, base)
 
+        if phase in {"recovery_phase", "quiet_reset_phase"}:
+            scenes = [
+                {"time_block": "morning", "location": "home", "description": "Slow morning with no rush and warm drink", "mood": "calm", "activity_hint": "slow_morning"},
+                {"time_block": "afternoon", "location": "nearby park", "description": "Short restorative walk and mindful pause", "mood": "soft", "activity_hint": "recovery_walk"},
+                {"time_block": "evening", "location": "home", "description": "Quiet evening reset and early wind-down", "mood": "low-energy", "activity_hint": "quiet_day"},
+            ]
+        elif phase in {"exploration_phase", "creative_phase"}:
+            scenes.append(
+                {"time_block": "golden_hour", "location": "new district", "description": "Exploring a new corner of the city", "mood": "curious", "activity_hint": "exploration_walk"}
+            )
+
         if fatigue >= 7:
             scenes[-1] = {
                 "time_block": "evening",
@@ -96,10 +109,13 @@ class SceneActivityExpansionEngine:
 
     def _activity_seed_pool(self, context: Dict[str, Any], scenes: List[Dict[str, str]]) -> List[Dict[str, Any]]:
         life_state = context.get("life_state")
+        narrative = context.get("narrative_context")
         day_type = context.get("day_type", "day_off")
         fatigue = int(getattr(life_state, "fatigue_level", 4))
         season = getattr(life_state, "season", "all")
         city = context.get("city", "")
+        novelty = float(getattr(narrative, "novelty_pressure", 0.0)) if narrative else 0.0
+        activity_balance = float(getattr(narrative, "activity_balance", 0.5)) if narrative else 0.5
 
         out: List[Dict[str, Any]] = []
         for scene in scenes:
@@ -121,6 +137,27 @@ class SceneActivityExpansionEngine:
                     "status": "candidate",
                     "score": 0.78,
                     "notes": "Generated from continuity-aware scene seed",
+                }
+            )
+
+        if novelty >= 0.7 or activity_balance <= 0.35:
+            out.append(
+                {
+                    "activity_code": "new_activity_trial",
+                    "activity_label": "new activity trial",
+                    "day_type": day_type,
+                    "time_block": "afternoon",
+                    "city": city,
+                    "season": season,
+                    "mood_fit": "curious",
+                    "fatigue_min": 0,
+                    "fatigue_max": 7,
+                    "weather_fit": "all",
+                    "source_context": "narrative_novelty_pressure",
+                    "generated_by_ai": True,
+                    "status": "candidate",
+                    "score": 0.86,
+                    "notes": "Injected by narrative engine for life variation",
                 }
             )
         return out

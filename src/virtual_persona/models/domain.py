@@ -172,6 +172,11 @@ class LifeState:
     fatigue_level: int
     mood_base: str
     continuity_note: str = ""
+    narrative_phase: str = "routine_stability"
+    energy_state: str = "medium"
+    rhythm_state: str = "stable"
+    novelty_pressure: float = 0.0
+    recovery_need: float = 0.0
 
 
 @dataclass

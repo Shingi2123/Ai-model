@@ -41,6 +41,8 @@ class WardrobeBrain:
 
         profile = self.state_store.load_character_profile() if hasattr(self.state_store, "load_character_profile") else {}
         style_vector = self._profile_style_vector(profile)
+        narrative = context.get("narrative_context")
+        phase = getattr(narrative, "narrative_phase", "") if narrative else ""
 
         by_id = {str(row.get("item_id") or row.get("id") or "").strip(): row for row in items}
         category_count: Dict[str, int] = {}
@@ -115,6 +117,28 @@ class WardrobeBrain:
                     "gap_score": 2 - outerwear,
                     "status": "open",
                     "notes": "Season requires extra outer layer options",
+                }
+            )
+
+        if phase in {"social_phase", "exploration_phase", "recovery_phase"} and hasattr(self.state_store, "append_shopping_candidate"):
+            target = {
+                "social_phase": ("elevated_social_piece", "elegant"),
+                "exploration_phase": ("active_exploration_piece", "active"),
+                "recovery_phase": ("comfort_recovery_piece", "comfort"),
+            }[phase]
+            self.state_store.append_shopping_candidate(
+                {
+                    "candidate_id": f"narrative_{context['date'].isoformat()}_{phase}",
+                    "category": "top",
+                    "subcategory": target[1],
+                    "suggested_name": target[0],
+                    "reason": f"narrative_phase:{phase}",
+                    "priority": "medium",
+                    "season": season,
+                    "style_match": style_vector,
+                    "gap_score": 1,
+                    "status": "open",
+                    "notes": "Narrative-driven wardrobe refinement",
                 }
             )
 
