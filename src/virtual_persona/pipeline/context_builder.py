@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 from virtual_persona.config.settings import AppSettings
 from virtual_persona.models.domain import CharacterBible
+from virtual_persona.pipeline.life_engine import LifeEngine
 from virtual_persona.services.sun import SunService
 from virtual_persona.services.weather import WeatherService
 from virtual_persona.storage.state_store import LocalStateStore
@@ -16,6 +17,7 @@ class ContextBuilder:
         self.state_store = state_store
         self.weather_service = WeatherService(settings)
         self.sun_service = SunService(settings)
+        self.life_engine = LifeEngine(state_store)
 
     def _split_csv(self, value: Any) -> list[str]:
         if value is None:
@@ -89,25 +91,7 @@ class ContextBuilder:
 
         calendar = self.state_store.load_calendar()
 
-        entry = next(
-            (e for e in calendar if e.get("date") == target_date.isoformat()),
-            None
-        )
-
-        if override_city:
-            city = override_city
-        elif entry:
-            city = entry.get("city", self.settings.default_city)
-        else:
-            city = profile.get("home_city") or self.settings.default_city
-
-        if entry:
-            day_type = entry.get("day_type", "day_off")
-        else:
-            day_type = "day_off"
-
-        weather = self.weather_service.current(city)
-        sun = self.sun_service.today(city)
+        entry = next((e for e in calendar if e.get("date") == target_date.isoformat()), None)
 
         history = self.state_store.load_content_history()
         history_cutoff = target_date - timedelta(days=5)
@@ -117,11 +101,25 @@ class ContextBuilder:
             if date.fromisoformat(h["date"]) >= history_cutoff
         ]
 
+        life_state = self.life_engine.build(
+            target_date=target_date,
+            profile=profile,
+            calendar=calendar,
+            history=history,
+        )
+
+        city = override_city or (entry.get("city") if entry else None) or life_state.current_city or self.settings.default_city
+        day_type = (entry.get("day_type") if entry else None) or life_state.day_type
+
+        weather = self.weather_service.current(city)
+        sun = self.sun_service.today(city)
+
         return {
             "date": target_date,
             "character": character,
             "city": city,
             "day_type": day_type,
+            "life_state": life_state,
             "weather": weather,
             "sun": sun,
             "recent_history": recent_history,

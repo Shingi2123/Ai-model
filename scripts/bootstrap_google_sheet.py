@@ -26,6 +26,9 @@ SHEETS = {
     "content_history": ["date", "city", "day_type", "outfit_ids", "scenes", "post_caption"],
     "continuity_flags": ["date", "level", "code", "message"],
     "prompt_templates": ["key", "template"],
+    "prompt_blocks": ["key", "content", "priority", "enabled"],
+    "route_pool": ["route_id", "origin_city", "destination_city", "flight_type", "weight", "active"],
+    "life_state": ["date", "current_city", "day_type", "season", "fatigue_level", "mood_base", "reason", "continuity_note"],
     "run_log": ["timestamp", "status", "message"],
 }
 

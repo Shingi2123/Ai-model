@@ -6,8 +6,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-from google.oauth2.service_account import Credentials
-import gspread
+try:
+    from google.oauth2.service_account import Credentials
+    import gspread
+except Exception:  # optional dependency for local mode
+    Credentials = None
+    gspread = None
 
 from virtual_persona.models.domain import DailyPackage
 
@@ -56,6 +60,12 @@ class LocalStateStore:
 
     def load_prompt_templates(self) -> Dict[str, str]:
         return {}
+
+    def load_prompt_blocks(self) -> Dict[str, str]:
+        return {}
+
+    def load_route_pool(self) -> List[Dict[str, Any]]:
+        return []
 
     def save_content_package(self, package: DailyPackage) -> Path:
         output_path = Path("data/outputs") / f"{package.date.isoformat()}_package.json"
@@ -120,6 +130,25 @@ class LocalStateStore:
         )
         self._write_json(run_log_path, logs)
 
+    def append_life_state(self, package: DailyPackage) -> None:
+        life_state_path = self.base_dir / "life_state.json"
+        rows = self._read_json(life_state_path, [])
+        if not package.life_state:
+            return
+        rows.append(
+            {
+                "date": package.date.isoformat(),
+                "current_city": package.life_state.current_city,
+                "day_type": package.life_state.day_type,
+                "season": package.life_state.season,
+                "fatigue_level": package.life_state.fatigue_level,
+                "mood_base": package.life_state.mood_base,
+                "reason": package.life_state.day_type_reason,
+                "continuity_note": package.life_state.continuity_note,
+            }
+        )
+        self._write_json(life_state_path, rows)
+
 
 class GoogleSheetsStateStore:
     def __init__(self, json_path: str, sheet_id: str) -> None:
@@ -129,6 +158,8 @@ class GoogleSheetsStateStore:
         self.sheet = None
 
         try:
+            if Credentials is None or gspread is None:
+                raise RuntimeError("google dependencies are not installed")
             scopes = [
                 "https://www.googleapis.com/auth/spreadsheets",
                 "https://www.googleapis.com/auth/drive",
@@ -202,6 +233,31 @@ class GoogleSheetsStateStore:
 
         return templates
 
+    def load_prompt_blocks(self) -> Dict[str, str]:
+        if not self.available():
+            return {}
+
+        try:
+            rows = self._ws("prompt_blocks").get_all_records() or []
+        except Exception:
+            return {}
+
+        blocks: Dict[str, str] = {}
+        for row in rows:
+            key = row.get("key")
+            value = row.get("content")
+            if key:
+                blocks[str(key).strip()] = str(value or "")
+        return blocks
+
+    def load_route_pool(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        try:
+            return self._ws("route_pool").get_all_records() or []
+        except Exception:
+            return []
+
     def save_content_package(self, package: DailyPackage) -> Path:
         output_path = Path("data/outputs") / f"{package.date.isoformat()}_package.json"
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -261,6 +317,25 @@ class GoogleSheetsStateStore:
                 message,
             ]
         )
+
+    def append_life_state(self, package: DailyPackage) -> None:
+        if not self.available() or not package.life_state:
+            return
+        try:
+            self._ws("life_state").append_row(
+                [
+                    package.date.isoformat(),
+                    package.life_state.current_city,
+                    package.life_state.day_type,
+                    package.life_state.season,
+                    package.life_state.fatigue_level,
+                    package.life_state.mood_base,
+                    package.life_state.day_type_reason,
+                    package.life_state.continuity_note,
+                ]
+            )
+        except Exception:
+            return
 
 
 def build_state_store(settings):

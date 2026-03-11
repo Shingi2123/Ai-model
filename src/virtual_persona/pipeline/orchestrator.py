@@ -55,12 +55,15 @@ class PipelineOrchestrator:
             scenes=scenes,
             content=content,
             continuity_issues=issues,
+            life_state=context.get("life_state"),
         )
 
         self.wardrobe.persist()
         self.state.save_content_package(package)
         self.state.append_history(package)
         self.state.append_daily_calendar(package)
+        if hasattr(self.state, "append_life_state"):
+            self.state.append_life_state(package)
         self.state.ensure_city_exists(package)
         self.state.save_run_log("success", f"Generated package for {package.date} in {package.city}")
         return package

@@ -149,6 +149,31 @@ class DailyPackage:
     scenes: List[DayScene]
     content: GeneratedContent
     continuity_issues: List[ContinuityIssue] = field(default_factory=list)
+    life_state: Optional["LifeState"] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass
+class LifeState:
+    date: date
+    weekday: str
+    month: int
+    season: str
+    is_holiday: bool
+    holiday_name: str
+    home_city: str
+    current_city: str
+    day_type: str
+    day_type_reason: str
+    fatigue_level: int
+    mood_base: str
+    continuity_note: str = ""
+
+
+@dataclass
+class RouteDecision:
+    current_city: str
+    day_type: str
+    reason: str
