@@ -73,6 +73,15 @@ class LocalStateStore:
     def load_location_memory(self) -> List[Dict[str, Any]]:
         return self._read_json(self.base_dir / "location_memory.json", [])
 
+    def load_scene_candidates(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "scene_candidates.json", [])
+
+    def load_activity_candidates(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "activity_candidates.json", [])
+
+    def load_style_rules(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "style_rules.json", [])
+
     def append_outfit_memory(self, row: Dict[str, Any]) -> None:
         path = self.base_dir / "outfit_memory.json"
         rows = self._read_json(path, [])
@@ -87,6 +96,18 @@ class LocalStateStore:
 
     def append_shopping_candidate(self, row: Dict[str, Any]) -> None:
         path = self.base_dir / "shopping_candidates.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
+
+    def append_scene_candidate(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "scene_candidates.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
+
+    def append_activity_candidate(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "activity_candidates.json"
         rows = self._read_json(path, [])
         rows.append(row)
         self._write_json(path, rows)
@@ -308,7 +329,7 @@ class GoogleSheetsStateStore:
         headers = [
             "item_id", "name", "category", "subcategory", "color", "style_tags", "season_tags", "weather_tags",
             "occasion_tags", "work_allowed", "layer_role", "warmth", "status", "owned_since", "last_used",
-            "wear_count", "times_in_content", "notes",
+            "wear_count", "times_in_content", "capsule_role", "style_vector", "priority_score", "notes",
         ]
         self._ensure_headers("wardrobe_items", headers)
         rows = self._safe_records("wardrobe_items")
@@ -318,7 +339,7 @@ class GoogleSheetsStateStore:
         headers = [
             "item_id", "name", "category", "subcategory", "color", "style_tags", "season_tags", "weather_tags",
             "occasion_tags", "work_allowed", "layer_role", "warmth", "status", "owned_since", "last_used",
-            "wear_count", "times_in_content", "notes",
+            "wear_count", "times_in_content", "capsule_role", "style_vector", "priority_score", "notes",
         ]
         self._ensure_headers("wardrobe_items", headers)
         self._replace_records("wardrobe_items", headers, rows)
@@ -339,11 +360,11 @@ class GoogleSheetsStateStore:
         self._append_dict_row("outfit_memory", headers, row)
 
     def append_wardrobe_action(self, row: Dict[str, Any]) -> None:
-        headers = ["date", "action_type", "target_item_id", "reason", "status", "notes"]
+        headers = ["date", "action_type", "target_item_id", "reason", "status", "context_day_type", "context_season", "context_city", "notes"]
         self._append_dict_row("wardrobe_actions", headers, row)
 
     def append_shopping_candidate(self, row: Dict[str, Any]) -> None:
-        headers = ["candidate_id", "category", "subcategory", "suggested_name", "reason", "priority", "season", "style_match", "status", "notes"]
+        headers = ["candidate_id", "category", "subcategory", "suggested_name", "reason", "priority", "season", "style_match", "gap_score", "status", "notes"]
         self._append_dict_row("shopping_candidates", headers, row)
 
     def load_scene_memory(self) -> List[Dict[str, Any]]:
@@ -372,6 +393,38 @@ class GoogleSheetsStateStore:
     def save_location_memory(self, rows: List[Dict[str, Any]]) -> None:
         headers = ["location_id", "city", "location_type", "name", "usage_count", "last_used", "season_tags", "status", "notes"]
         self._replace_records("location_memory", headers, rows)
+
+    def load_scene_candidates(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("scene_candidates")
+
+    def append_scene_candidate(self, row: Dict[str, Any]) -> None:
+        headers = [
+            "candidate_id", "day_type", "time_block", "location", "description", "mood", "activity_hint",
+            "city", "season", "source_context", "generated_by_ai", "status", "score", "notes",
+        ]
+        self._ensure_headers("scene_candidates", headers)
+        self._append_dict_row("scene_candidates", headers, row)
+
+    def load_activity_candidates(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("activity_candidates")
+
+    def append_activity_candidate(self, row: Dict[str, Any]) -> None:
+        headers = [
+            "candidate_id", "activity_code", "activity_label", "day_type", "time_block", "city", "season",
+            "mood_fit", "fatigue_min", "fatigue_max", "weather_fit", "source_context", "generated_by_ai",
+            "status", "score", "notes",
+        ]
+        self._ensure_headers("activity_candidates", headers)
+        self._append_dict_row("activity_candidates", headers, row)
+
+    def load_style_rules(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("style_rules")
 
     def load_prompt_templates(self) -> Dict[str, str]:
         if not self.available():

@@ -47,7 +47,7 @@ class ContentGenerator:
             return self.templates[fallback_key]
         return ""
 
-    def generate(self, context: Dict, scenes: List[DayScene], outfit_summary: str) -> GeneratedContent:
+    def generate(self, context: Dict, scenes: List[DayScene], outfit_summary: str, outfit_item_ids: List[str] | None = None) -> GeneratedContent:
         char = context["character"]
         weather = context["weather"]
         city = context["city"]
@@ -59,6 +59,7 @@ class ContentGenerator:
 
         weather_text = f"{weather.condition}, {weather.temp_c}C"
         short_story = " → ".join(scene.description for scene in scenes)
+        outfit_item_ids = outfit_item_ids or []
 
         for scene in scenes:
             scene_description = scene.description
@@ -83,6 +84,9 @@ class ContentGenerator:
                 "temperature": self._safe(weather.temp_c),
                 "outfit": self._safe(outfit_summary),
                 "outfit_summary": self._safe(outfit_summary),
+                "outfit_item_ids": self._safe(",".join(outfit_item_ids)),
+                "activity": self._safe(getattr(scene, "activity", "")),
+                "scene_source": self._safe(getattr(scene, "source", "library")),
                 "lighting": self._safe(lighting),
                 "visual_style": "realistic lifestyle content",
                 "activity_context": self._safe(scene_description),
@@ -125,9 +129,9 @@ class ContentGenerator:
             if not story_template:
                 story_template = "{story_line}"
 
-            photo_prompt_text = f"{self.prompt_composer.compose(context, scene, outfit_summary, 'photo')} {self._safe_format(photo_template, mapping)}"
-            video_prompt_text = f"{self.prompt_composer.compose(context, scene, outfit_summary, 'video')} {self._safe_format(video_template, mapping)}"
-            story_text = f"{self.prompt_composer.compose(context, scene, outfit_summary, 'story')} {self._safe_format(story_template, mapping)}"
+            photo_prompt_text = f"{self.prompt_composer.compose(context, scene, outfit_summary, 'photo', outfit_item_ids)} {self._safe_format(photo_template, mapping)}"
+            video_prompt_text = f"{self.prompt_composer.compose(context, scene, outfit_summary, 'video', outfit_item_ids)} {self._safe_format(video_template, mapping)}"
+            story_text = f"{self.prompt_composer.compose(context, scene, outfit_summary, 'story', outfit_item_ids)} {self._safe_format(story_template, mapping)}"
 
             photo_prompts.append(self.provider.generate(photo_prompt_text))
             video_prompts.append(self.provider.generate(video_prompt_text))
@@ -153,7 +157,7 @@ class ContentGenerator:
         }
 
         caption_prompt = (
-            f"{self.prompt_composer.compose(context, scenes[-1] if scenes else None, outfit_summary, 'caption')} "
+            f"{self.prompt_composer.compose(context, scenes[-1] if scenes else None, outfit_summary, 'caption', outfit_item_ids)} "
             f"{self._safe_format(post_template, post_mapping)}"
         )
         post_caption = self.provider.generate(caption_prompt)

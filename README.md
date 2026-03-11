@@ -146,6 +146,9 @@ New life-memory sheets (self-management layer):
 - `scene_memory` (scene usage/repeat control)
 - `activity_memory` (activity distribution memory)
 - `location_memory` (location usage memory)
+- `scene_candidates` (AI-generated scene proposals with continuity filters)
+- `activity_candidates` (AI-generated activity proposals tied to day_type/mood/fatigue)
+- `style_rules` (optional style brain rules for capsule strategy)
 
 `prompt_templates` is still supported for backward compatibility, while `prompt_blocks` is used by `PromptComposer` to inject persistent identity/realism/continuity rules.
 
@@ -158,13 +161,16 @@ Compatibility mode:
 1. Run `python scripts/bootstrap_google_sheet.py` to create missing tabs.
 2. Keep existing sheets unchanged: `character_profile`, `wardrobe`, `cities`, `scene_library`, `daily_calendar`, `content_history`, `continuity_flags`, `prompt_templates`, `prompt_blocks`, `route_pool`, `life_state`, `run_log`.
 3. Create/populate new sheets with these headers:
-   - `wardrobe_items`: `item_id,name,category,subcategory,color,style_tags,season_tags,weather_tags,occasion_tags,work_allowed,layer_role,warmth,status,owned_since,last_used,wear_count,times_in_content,notes`
+   - `wardrobe_items`: `item_id,name,category,subcategory,color,style_tags,season_tags,weather_tags,occasion_tags,work_allowed,layer_role,warmth,status,owned_since,last_used,wear_count,times_in_content,capsule_role,style_vector,priority_score,notes`
    - `outfit_memory`: `date,outfit_id,item_ids,city,day_type,weather,occasion,used_in_content,repeat_score,notes`
-   - `wardrobe_actions`: `date,action_type,target_item_id,reason,status,notes`
-   - `shopping_candidates`: `candidate_id,category,subcategory,suggested_name,reason,priority,season,style_match,status,notes`
+   - `wardrobe_actions`: `date,action_type,target_item_id,reason,status,context_day_type,context_season,context_city,notes`
+   - `shopping_candidates`: `candidate_id,category,subcategory,suggested_name,reason,priority,season,style_match,gap_score,status,notes`
    - `scene_memory`: `scene_id,last_used,usage_count,last_city,last_day_type,repeat_cooldown,status,notes`
    - `activity_memory`: `activity_id,activity_type,last_used,usage_count,context_tags,status,notes`
    - `location_memory`: `location_id,city,location_type,name,usage_count,last_used,season_tags,status,notes`
+   - `scene_candidates`: `candidate_id,day_type,time_block,location,description,mood,activity_hint,city,season,source_context,generated_by_ai,status,score,notes`
+   - `activity_candidates`: `candidate_id,activity_code,activity_label,day_type,time_block,city,season,mood_fit,fatigue_min,fatigue_max,weather_fit,source_context,generated_by_ai,status,score,notes`
+   - `style_rules` (optional): `rule_id,rule_type,target,rule_value,priority,status,notes`
 4. Optional gradual migration: copy relevant `wardrobe` rows into `wardrobe_items` and set `status=active`.
 5. Run `python main.py test-run` and verify writes now include memory sheets in addition to existing outputs.
 

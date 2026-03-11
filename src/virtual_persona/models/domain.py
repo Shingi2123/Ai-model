@@ -111,6 +111,8 @@ class DayScene:
     description: str
     mood: str
     time_of_day: str
+    activity: str = ""
+    source: str = "library"
 
 
 @dataclass
