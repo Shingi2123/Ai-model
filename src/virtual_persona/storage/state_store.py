@@ -55,6 +55,54 @@ class LocalStateStore:
     def load_wardrobe(self) -> List[Dict[str, Any]]:
         return []
 
+    def load_wardrobe_items(self) -> List[Dict[str, Any]]:
+        rows = self._read_json(self.base_dir / "wardrobe_items.json", [])
+        if rows:
+            return rows
+        return self.load_wardrobe()
+
+    def load_outfit_memory(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "outfit_memory.json", [])
+
+    def load_scene_memory(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "scene_memory.json", [])
+
+    def load_activity_memory(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "activity_memory.json", [])
+
+    def load_location_memory(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "location_memory.json", [])
+
+    def append_outfit_memory(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "outfit_memory.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
+
+    def append_wardrobe_action(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "wardrobe_actions.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
+
+    def append_shopping_candidate(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "shopping_candidates.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
+
+    def save_scene_memory(self, rows: List[Dict[str, Any]]) -> None:
+        self._write_json(self.base_dir / "scene_memory.json", rows)
+
+    def save_activity_memory(self, rows: List[Dict[str, Any]]) -> None:
+        self._write_json(self.base_dir / "activity_memory.json", rows)
+
+    def save_location_memory(self, rows: List[Dict[str, Any]]) -> None:
+        self._write_json(self.base_dir / "location_memory.json", rows)
+
+    def save_wardrobe_items(self, rows: List[Dict[str, Any]]) -> None:
+        self._write_json(self.base_dir / "wardrobe_items.json", rows)
+
     def load_scene_library(self) -> List[Dict[str, Any]]:
         return []
 
@@ -178,6 +226,31 @@ class GoogleSheetsStateStore:
     def _ws(self, title: str):
         return self.sheet.worksheet(title)
 
+    def _safe_records(self, title: str) -> List[Dict[str, Any]]:
+        try:
+            return self._ws(title).get_all_records() or []
+        except Exception:
+            return []
+
+    def _append_dict_row(self, title: str, headers: List[str], row: Dict[str, Any]) -> None:
+        if not self.available():
+            return
+        try:
+            self._ws(title).append_row([row.get(h, "") for h in headers])
+        except Exception:
+            return
+
+    def _replace_records(self, title: str, headers: List[str], rows: List[Dict[str, Any]]) -> None:
+        if not self.available():
+            return
+        try:
+            ws = self._ws(title)
+            values = [headers] + [[row.get(h, "") for h in headers] for row in rows]
+            ws.clear()
+            ws.update(values)
+        except Exception:
+            return
+
     def load_calendar(self) -> List[Dict[str, Any]]:
         if not self.available():
             return []
@@ -213,10 +286,68 @@ class GoogleSheetsStateStore:
             return []
         return self._ws("wardrobe").get_all_records() or []
 
+    def load_wardrobe_items(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        rows = self._safe_records("wardrobe_items")
+        return rows or self.load_wardrobe()
+
+    def save_wardrobe_items(self, rows: List[Dict[str, Any]]) -> None:
+        headers = [
+            "item_id", "name", "category", "subcategory", "color", "style_tags", "season_tags", "weather_tags",
+            "occasion_tags", "work_allowed", "layer_role", "warmth", "status", "owned_since", "last_used",
+            "wear_count", "times_in_content", "notes",
+        ]
+        self._replace_records("wardrobe_items", headers, rows)
+
     def load_scene_library(self) -> List[Dict[str, Any]]:
         if not self.available():
             return []
         return self._ws("scene_library").get_all_records() or []
+
+    def load_outfit_memory(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("outfit_memory")
+
+    def append_outfit_memory(self, row: Dict[str, Any]) -> None:
+        headers = ["date", "outfit_id", "item_ids", "city", "day_type", "weather", "occasion", "used_in_content", "repeat_score", "notes"]
+        self._append_dict_row("outfit_memory", headers, row)
+
+    def append_wardrobe_action(self, row: Dict[str, Any]) -> None:
+        headers = ["date", "action_type", "target_item_id", "reason", "status", "notes"]
+        self._append_dict_row("wardrobe_actions", headers, row)
+
+    def append_shopping_candidate(self, row: Dict[str, Any]) -> None:
+        headers = ["candidate_id", "category", "subcategory", "suggested_name", "reason", "priority", "season", "style_match", "status", "notes"]
+        self._append_dict_row("shopping_candidates", headers, row)
+
+    def load_scene_memory(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("scene_memory")
+
+    def save_scene_memory(self, rows: List[Dict[str, Any]]) -> None:
+        headers = ["scene_id", "last_used", "usage_count", "last_city", "last_day_type", "repeat_cooldown", "status", "notes"]
+        self._replace_records("scene_memory", headers, rows)
+
+    def load_activity_memory(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("activity_memory")
+
+    def save_activity_memory(self, rows: List[Dict[str, Any]]) -> None:
+        headers = ["activity_id", "activity_type", "last_used", "usage_count", "context_tags", "status", "notes"]
+        self._replace_records("activity_memory", headers, rows)
+
+    def load_location_memory(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("location_memory")
+
+    def save_location_memory(self, rows: List[Dict[str, Any]]) -> None:
+        headers = ["location_id", "city", "location_type", "name", "usage_count", "last_used", "season_tags", "status", "notes"]
+        self._replace_records("location_memory", headers, rows)
 
     def load_prompt_templates(self) -> Dict[str, str]:
         if not self.available():

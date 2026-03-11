@@ -42,6 +42,22 @@ class DailyPlanner:
     def __init__(self, state_store=None) -> None:
         self.state_store = state_store
 
+    def _scene_allowed_by_memory(self, day_type: str, row: Dict[str, Any]) -> bool:
+        if not self.state_store or not hasattr(self.state_store, "load_scene_memory"):
+            return True
+        try:
+            memory_rows = self.state_store.load_scene_memory() or []
+        except Exception:
+            return True
+
+        scene_key = f"{day_type}:{str(row.get('time_block', '')).strip()}:{str(row.get('location', '')).strip()}"
+        memory_row = next((m for m in memory_rows if str(m.get("scene_id") or "") == scene_key), None)
+        if not memory_row:
+            return True
+
+        status = str(memory_row.get("status") or "active").strip().lower()
+        return status not in {"overused", "temporary_pause", "inactive"}
+
     def _load_scenes_from_sheet(self, day_type: str) -> List[DayScene]:
         if not self.state_store or not hasattr(self.state_store, "load_scene_library"):
             return []
@@ -55,6 +71,8 @@ class DailyPlanner:
         for row in rows:
             row_day_type = str(row.get("day_type", "")).strip()
             if row_day_type == day_type:
+                if not self._scene_allowed_by_memory(day_type, row):
+                    continue
                 matched_rows.append(row)
 
         if not matched_rows:

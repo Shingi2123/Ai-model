@@ -20,9 +20,12 @@ class WardrobeManager:
     def _load_catalog(self) -> WardrobeCatalog:
         sheet_items = []
 
-        if self.state_store and hasattr(self.state_store, "load_wardrobe"):
+        if self.state_store:
             try:
-                sheet_items = self.state_store.load_wardrobe() or []
+                if hasattr(self.state_store, "load_wardrobe_items"):
+                    sheet_items = self.state_store.load_wardrobe_items() or []
+                elif hasattr(self.state_store, "load_wardrobe"):
+                    sheet_items = self.state_store.load_wardrobe() or []
             except Exception:
                 sheet_items = []
 
@@ -81,16 +84,19 @@ class WardrobeManager:
         items: List[WardrobeItem] = []
 
         for row in rows:
-            item_id = str(row.get("id", "")).strip()
+            item_id = str(row.get("item_id") or row.get("id") or "").strip()
             if not item_id:
                 continue
 
             category = str(row.get("category", "")).strip()
+            status = str(row.get("status") or "active").strip().lower()
+            if status not in {"active", ""}:
+                continue
             name = str(row.get("name", "")).strip()
 
-            styles = self._split_csv(row.get("styles"))
-            colors = self._split_csv(row.get("colors"))
-            season = self._split_csv(row.get("season"))
+            styles = self._split_csv(row.get("styles") or row.get("style_tags"))
+            colors = self._split_csv(row.get("colors") or row.get("color"))
+            season = self._split_csv(row.get("season") or row.get("season_tags"))
             weather_tags = self._split_csv(row.get("weather_tags"))
 
             temp_min_c = self._to_int(row.get("temp_min_c"), 0)
