@@ -31,6 +31,37 @@ class WardrobeBrain:
         colors = str(profile.get("favorite_colors") or "beige,cream,white").strip()
         return f"{style}; palette={colors}"
 
+    def _balance_metrics(self, items: List[Dict[str, Any]]) -> Dict[str, float]:
+        if not items:
+            return {"style_balance": 1.0, "category_balance": 1.0, "season_balance": 1.0}
+
+        categories: Dict[str, int] = {}
+        style_tags: Dict[str, int] = {}
+        season_tags: Dict[str, int] = {}
+
+        for row in items:
+            cat = str(row.get("category") or "").strip().lower()
+            if cat:
+                categories[cat] = categories.get(cat, 0) + 1
+            for tag in self._split_csv(row.get("style_tags") or row.get("style_vector")):
+                t = tag.lower()
+                style_tags[t] = style_tags.get(t, 0) + 1
+            for season in self._split_csv(row.get("season_tags")):
+                s = season.lower()
+                season_tags[s] = season_tags.get(s, 0) + 1
+
+        def ratio(counts: Dict[str, int]) -> float:
+            if not counts:
+                return 0.3
+            total = sum(counts.values())
+            return round(len(counts) / max(total, 1), 3)
+
+        return {
+            "style_balance": ratio(style_tags),
+            "category_balance": ratio(categories),
+            "season_balance": ratio(season_tags),
+        }
+
     def apply_daily_strategy(self, context: Dict[str, Any], selected_item_ids: List[str]) -> None:
         if not hasattr(self.state_store, "load_wardrobe_items"):
             return
@@ -119,6 +150,26 @@ class WardrobeBrain:
                     "notes": "Season requires extra outer layer options",
                 }
             )
+
+        metrics = self._balance_metrics(list(by_id.values()))
+        weak = [k for k, v in metrics.items() if v < 0.35]
+        for axis in weak:
+            if hasattr(self.state_store, "append_shopping_candidate"):
+                self.state_store.append_shopping_candidate(
+                    {
+                        "candidate_id": f"style_evolution_{context['date'].isoformat()}_{axis}",
+                        "category": "capsule",
+                        "subcategory": axis,
+                        "suggested_name": f"capsule upgrade for {axis}",
+                        "reason": "style_evolution",
+                        "priority": "medium",
+                        "season": season,
+                        "style_match": style_vector,
+                        "gap_score": round(1 - metrics[axis], 3),
+                        "status": "open",
+                        "notes": f"auto balance metric: {metrics}",
+                    }
+                )
 
         if phase in {"social_phase", "exploration_phase", "recovery_phase"} and hasattr(self.state_store, "append_shopping_candidate"):
             target = {

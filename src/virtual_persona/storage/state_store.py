@@ -85,59 +85,35 @@ class LocalStateStore:
     def load_activity_candidates(self) -> List[Dict[str, Any]]:
         return self._read_json(self.base_dir / "activity_candidates.json", [])
 
-    def load_style_rules(self) -> List[Dict[str, Any]]:
-        return self._read_json(self.base_dir / "style_rules.json", [])
+    def load_world_candidates(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "world_candidates.json", [])
 
-    def append_outfit_memory(self, row: Dict[str, Any]) -> None:
-        path = self.base_dir / "outfit_memory.json"
+    def append_world_candidate(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "world_candidates.json"
         rows = self._read_json(path, [])
         rows.append(row)
         self._write_json(path, rows)
 
-    def append_wardrobe_action(self, row: Dict[str, Any]) -> None:
-        path = self.base_dir / "wardrobe_actions.json"
+    def load_story_arcs(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "story_arcs.json", [])
+
+    def append_story_arc(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "story_arcs.json"
         rows = self._read_json(path, [])
         rows.append(row)
         self._write_json(path, rows)
 
-    def append_shopping_candidate(self, row: Dict[str, Any]) -> None:
-        path = self.base_dir / "shopping_candidates.json"
+    def save_story_arcs(self, rows: List[Dict[str, Any]]) -> None:
+        self._write_json(self.base_dir / "story_arcs.json", rows)
+
+    def load_activity_evolution(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "activity_evolution.json", [])
+
+    def append_activity_evolution(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "activity_evolution.json"
         rows = self._read_json(path, [])
         rows.append(row)
         self._write_json(path, rows)
-
-    def append_scene_candidate(self, row: Dict[str, Any]) -> None:
-        path = self.base_dir / "scene_candidates.json"
-        rows = self._read_json(path, [])
-        rows.append(row)
-        self._write_json(path, rows)
-
-    def append_activity_candidate(self, row: Dict[str, Any]) -> None:
-        path = self.base_dir / "activity_candidates.json"
-        rows = self._read_json(path, [])
-        rows.append(row)
-        self._write_json(path, rows)
-
-    def append_narrative_memory(self, row: Dict[str, Any]) -> None:
-        path = self.base_dir / "narrative_memory.json"
-        rows = self._read_json(path, [])
-        rows.append(row)
-        self._write_json(path, rows)
-
-    def save_scene_memory(self, rows: List[Dict[str, Any]]) -> None:
-        self._write_json(self.base_dir / "scene_memory.json", rows)
-
-    def save_activity_memory(self, rows: List[Dict[str, Any]]) -> None:
-        self._write_json(self.base_dir / "activity_memory.json", rows)
-
-    def save_location_memory(self, rows: List[Dict[str, Any]]) -> None:
-        self._write_json(self.base_dir / "location_memory.json", rows)
-
-    def save_wardrobe_items(self, rows: List[Dict[str, Any]]) -> None:
-        self._write_json(self.base_dir / "wardrobe_items.json", rows)
-
-    def load_scene_library(self) -> List[Dict[str, Any]]:
-        return []
 
     def load_prompt_templates(self) -> Dict[str, str]:
         return {}
@@ -408,7 +384,7 @@ class GoogleSheetsStateStore:
         return self._safe_records("location_memory")
 
     def save_location_memory(self, rows: List[Dict[str, Any]]) -> None:
-        headers = ["location_id", "city", "location_type", "name", "usage_count", "last_used", "season_tags", "status", "notes"]
+        headers = ["location_id", "city", "location_type", "name", "usage_count", "visit_frequency", "last_used", "last_scene", "cooldown_days", "season_tags", "status", "notes"]
         self._replace_records("location_memory", headers, rows)
 
     def load_life_state(self) -> List[Dict[str, Any]]:
@@ -457,6 +433,41 @@ class GoogleSheetsStateStore:
         if not self.available():
             return []
         return self._safe_records("style_rules")
+
+    def load_world_candidates(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("world_candidates")
+
+    def append_world_candidate(self, row: Dict[str, Any]) -> None:
+        headers = ["candidate_id", "candidate_type", "name", "city", "description", "source_reason", "priority", "status"]
+        self._ensure_headers("world_candidates", headers)
+        self._append_dict_row("world_candidates", headers, row)
+
+    def load_story_arcs(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("story_arcs")
+
+    def append_story_arc(self, row: Dict[str, Any]) -> None:
+        headers = ["arc_id", "arc_type", "title", "status", "start_date", "progress", "description"]
+        self._ensure_headers("story_arcs", headers)
+        self._append_dict_row("story_arcs", headers, row)
+
+    def save_story_arcs(self, rows: List[Dict[str, Any]]) -> None:
+        headers = ["arc_id", "arc_type", "title", "status", "start_date", "progress", "description"]
+        self._ensure_headers("story_arcs", headers)
+        self._replace_records("story_arcs", headers, rows)
+
+    def load_activity_evolution(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("activity_evolution")
+
+    def append_activity_evolution(self, row: Dict[str, Any]) -> None:
+        headers = ["activity_id", "origin_activity", "generated_variant", "reason", "status"]
+        self._ensure_headers("activity_evolution", headers)
+        self._append_dict_row("activity_evolution", headers, row)
 
     def load_prompt_templates(self) -> Dict[str, str]:
         if not self.available():

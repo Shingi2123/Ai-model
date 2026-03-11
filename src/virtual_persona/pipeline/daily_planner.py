@@ -142,6 +142,13 @@ class DailyPlanner:
         elif narrative_phase in {"exploration_phase", "travel_phase"} and context.get("day_type") == "day_off":
             day_type = "layover_day"
 
+        story_arc = context.get("story_arc") or {}
+        arc_type = str(story_arc.get("arc_type") or "").strip().lower()
+        if arc_type == "travel_phase":
+            day_type = "travel_day"
+        elif arc_type == "fitness_journey" and day_type == "day_off":
+            day_type = "layover_day"
+
         sheet_scenes = self._load_scenes_from_sheet(day_type)
         if sheet_scenes:
             if energy_state == "low":
