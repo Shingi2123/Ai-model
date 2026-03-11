@@ -267,6 +267,9 @@ class GoogleSheetsStateStore:
         self.sheet = None
         self.last_error = ""
         self._sheet_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._ws_cache: Dict[str, Any] = {}
+        self._headers_ensured: set[str] = set()
+        self._worksheet_fetch_count = 0
 
         try:
             if Credentials is None or gspread is None:
@@ -288,7 +291,18 @@ class GoogleSheetsStateStore:
         return self.sheet is not None
 
     def _ws(self, title: str):
-        return self.sheet.worksheet(title)
+        if title in self._ws_cache:
+            return self._ws_cache[title]
+
+        ws = self.sheet.worksheet(title)
+        self._ws_cache[title] = ws
+        self._worksheet_fetch_count += 1
+        logger.info(
+            "Google Sheets worksheet fetched from API: title=%s total_fetches=%s",
+            title,
+            self._worksheet_fetch_count,
+        )
+        return ws
 
     def _is_quota_error(self, exc: Exception) -> bool:
         text = str(exc).lower()
@@ -329,6 +343,9 @@ class GoogleSheetsStateStore:
     def _invalidate_sheet_cache(self, title: str) -> None:
         self._sheet_cache.pop(title, None)
 
+    def _log_ws_fetch_stats(self) -> None:
+        logger.info("Google Sheets worksheet fetch count for this run: %s", self._worksheet_fetch_count)
+
     def _safe_records(self, title: str) -> List[Dict[str, Any]]:
         try:
             return self._read_records(title)
@@ -366,17 +383,21 @@ class GoogleSheetsStateStore:
     def _ensure_headers(self, title: str, required_headers: List[str]) -> None:
         if not self.available():
             return
+        if title in self._headers_ensured:
+            return
         try:
             ws = self._get_ws(title)
             existing = self._with_retry(lambda: ws.row_values(1), operation_name=f"read header {title}")
             if not existing:
                 self._with_retry(lambda: ws.append_row(required_headers), operation_name=f"write header {title}")
                 self._invalidate_sheet_cache(title)
+                self._headers_ensured.add(title)
                 return
             missing = [h for h in required_headers if h not in existing]
             if missing:
                 self._with_retry(lambda: ws.update("1:1", [existing + missing]), operation_name=f"extend header {title}")
                 self._invalidate_sheet_cache(title)
+            self._headers_ensured.add(title)
         except Exception as exc:
             logger.error("Google Sheets header sync failed for '%s': %s", title, exc)
             return
@@ -701,23 +722,24 @@ class GoogleSheetsStateStore:
         if not self.available():
             return
 
-        self._with_retry(
-            lambda: self._get_ws("daily_calendar").append_row(
-                [
-                    package.date.isoformat(),
-                    package.city,
-                    package.day_type,
-                    package.summary,
-                ]
-            ),
-            operation_name="append row daily_calendar",
+        headers = ["date", "city", "day_type", "notes"]
+        self._ensure_headers("daily_calendar", headers)
+        self._append_dict_row(
+            "daily_calendar",
+            headers,
+            {
+                "date": package.date.isoformat(),
+                "city": package.city,
+                "day_type": package.day_type,
+                "notes": package.summary,
+            },
         )
-        self._invalidate_sheet_cache("daily_calendar")
 
     def ensure_city_exists(self, package: DailyPackage) -> None:
         if not self.available():
             return
 
+        self._ensure_headers("cities", ["city", "country", "timezone", "lat", "lng"])
         ws = self._get_ws("cities")
         records = self._safe_records("cities")
         known = {row.get("city") for row in records}
@@ -730,42 +752,58 @@ class GoogleSheetsStateStore:
         if not self.available():
             return
 
-        self._with_retry(
-            lambda: self._get_ws("run_log").append_row(
-                [
-                    datetime.now().isoformat(timespec="seconds"),
-                    status,
-                    message,
-                ]
-            ),
-            operation_name="append row run_log",
+        headers = ["timestamp", "status", "message"]
+        self._ensure_headers("run_log", headers)
+        self._append_dict_row(
+            "run_log",
+            headers,
+            {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "status": status,
+                "message": message,
+            },
         )
-        self._invalidate_sheet_cache("run_log")
+        self._log_ws_fetch_stats()
 
     def append_life_state(self, package: DailyPackage) -> None:
         if not self.available() or not package.life_state:
             return
-        try:
-            self._with_retry(lambda: self._get_ws("life_state").append_row(
-                [
-                    package.date.isoformat(),
-                    package.life_state.current_city,
-                    package.life_state.day_type,
-                    package.life_state.season,
-                    package.life_state.fatigue_level,
-                    package.life_state.mood_base,
-                    package.life_state.day_type_reason,
-                    package.life_state.continuity_note,
-                    getattr(package.life_state, "narrative_phase", "routine_stability"),
-                    getattr(package.life_state, "energy_state", "medium"),
-                    getattr(package.life_state, "rhythm_state", "stable"),
-                    getattr(package.life_state, "novelty_pressure", 0),
-                    getattr(package.life_state, "recovery_need", 0),
-                ]
-            ), operation_name="append row life_state")
-            self._invalidate_sheet_cache("life_state")
-        except Exception:
-            return
+
+        headers = [
+            "date",
+            "current_city",
+            "day_type",
+            "season",
+            "fatigue_level",
+            "mood_base",
+            "reason",
+            "continuity_note",
+            "narrative_phase",
+            "energy_state",
+            "rhythm_state",
+            "novelty_pressure",
+            "recovery_need",
+        ]
+        self._ensure_headers("life_state", headers)
+        self._append_dict_row(
+            "life_state",
+            headers,
+            {
+                "date": package.date.isoformat(),
+                "current_city": package.life_state.current_city,
+                "day_type": package.life_state.day_type,
+                "season": package.life_state.season,
+                "fatigue_level": package.life_state.fatigue_level,
+                "mood_base": package.life_state.mood_base,
+                "reason": package.life_state.day_type_reason,
+                "continuity_note": package.life_state.continuity_note,
+                "narrative_phase": getattr(package.life_state, "narrative_phase", "routine_stability"),
+                "energy_state": getattr(package.life_state, "energy_state", "medium"),
+                "rhythm_state": getattr(package.life_state, "rhythm_state", "stable"),
+                "novelty_pressure": getattr(package.life_state, "novelty_pressure", 0),
+                "recovery_need": getattr(package.life_state, "recovery_need", 0),
+            },
+        )
 
 
 def build_state_store(settings):
