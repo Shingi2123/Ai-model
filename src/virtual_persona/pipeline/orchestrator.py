@@ -41,6 +41,9 @@ class PipelineOrchestrator:
             condition=context["weather"].condition,
             preferred_style=context["character"].style.preferred[0],
             today=context["date"],
+            day_type=context["day_type"],
+            city=context["city"],
+            occasion=context["day_type"],
         )
         content = self.content_generator.generate(context, scenes, outfit.summary)
         issues = self.checker.run(context, scenes, outfit)

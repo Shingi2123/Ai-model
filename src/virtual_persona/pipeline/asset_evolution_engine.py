@@ -1,21 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
 from typing import Any, Dict, List
 
 
 @dataclass
 class AssetEvolutionEngine:
     state_store: Any
-
-    def _split_csv(self, value: Any) -> List[str]:
-        if value is None:
-            return []
-        text = str(value).strip()
-        if not text:
-            return []
-        return [part.strip() for part in text.split(",") if part.strip()]
 
     @staticmethod
     def _to_int(value: Any, default: int = 0) -> int:
@@ -57,26 +48,31 @@ class AssetEvolutionEngine:
                 self.state_store.append_wardrobe_action(
                     {
                         "date": package.date.isoformat(),
-                        "action_type": "promote_for_use",
+                        "action_type": "reactivate",
                         "target_item_id": item_id,
                         "reason": "selected_in_outfit",
                         "status": "done",
-                        "notes": "Automatically promoted due to real usage",
+                        "notes": "Automatically reactivated due to real usage",
                     }
                 )
                 row["status"] = "active"
 
+        category_counts: Dict[str, int] = {}
         for row in by_id.values():
+            category = str(row.get("category") or "").strip()
+            if category:
+                category_counts[category] = category_counts.get(category, 0) + 1
+
             wear_count = self._to_int(row.get("wear_count"))
-            if wear_count >= 20 and str(row.get("status") or "") == "active":
+            if wear_count >= 30 and str(row.get("status") or "") == "active":
                 self.state_store.append_wardrobe_action(
                     {
                         "date": package.date.isoformat(),
-                        "action_type": "reduce_priority",
+                        "action_type": "replace",
                         "target_item_id": row.get("item_id"),
                         "reason": f"high_wear_count:{wear_count}",
                         "status": "suggested",
-                        "notes": "Consider rotating this item less frequently",
+                        "notes": "Consider replacing this heavily used item",
                     }
                 )
                 self.state_store.append_shopping_candidate(
@@ -84,15 +80,44 @@ class AssetEvolutionEngine:
                         "candidate_id": f"cand_{package.date.isoformat()}_{row.get('item_id')}",
                         "category": row.get("category", ""),
                         "subcategory": row.get("subcategory", ""),
-                        "suggested_name": f"Alternative to {row.get('name') or row.get('item_id')}",
-                        "reason": "wardrobe_rotation_refresh",
-                        "priority": "medium",
+                        "suggested_name": f"Replacement for {row.get('name') or row.get('item_id')}",
+                        "reason": "item_replacement",
+                        "priority": "high",
                         "season": row.get("season_tags", "all"),
                         "style_match": row.get("style_tags", "all"),
                         "status": "open",
                         "notes": "Auto-suggested by AssetEvolutionEngine",
                     }
                 )
+            elif wear_count >= 20 and str(row.get("status") or "") == "active":
+                self.state_store.append_wardrobe_action(
+                    {
+                        "date": package.date.isoformat(),
+                        "action_type": "cooldown",
+                        "target_item_id": row.get("item_id"),
+                        "reason": f"high_wear_count:{wear_count}",
+                        "status": "suggested",
+                        "notes": "Reduce selection priority temporarily",
+                    }
+                )
+
+        tops = category_counts.get("top", 0)
+        bottoms = category_counts.get("bottom", 0)
+        if tops >= bottoms + 3:
+            self.state_store.append_shopping_candidate(
+                {
+                    "candidate_id": f"cand_{package.date.isoformat()}_balance_bottom",
+                    "category": "bottom",
+                    "subcategory": "",
+                    "suggested_name": "Versatile bottom for wardrobe balance",
+                    "reason": "wardrobe imbalance",
+                    "priority": "high",
+                    "season": package.life_state.season if package.life_state else "all",
+                    "style_match": package.day_type,
+                    "status": "open",
+                    "notes": f"top={tops}, bottom={bottoms}",
+                }
+            )
 
         self.state_store.save_wardrobe_items(list(by_id.values()))
 

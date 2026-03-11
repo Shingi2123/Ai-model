@@ -251,6 +251,22 @@ class GoogleSheetsStateStore:
         except Exception:
             return
 
+    def _ensure_headers(self, title: str, required_headers: List[str]) -> None:
+        if not self.available():
+            return
+        try:
+            ws = self._ws(title)
+            existing = ws.row_values(1)
+            if not existing:
+                ws.append_row(required_headers)
+                return
+            missing = [h for h in required_headers if h not in existing]
+            if missing:
+                ws.update("1:1", [existing + missing])
+        except Exception:
+            return
+
+
     def load_calendar(self) -> List[Dict[str, Any]]:
         if not self.available():
             return []
@@ -289,6 +305,12 @@ class GoogleSheetsStateStore:
     def load_wardrobe_items(self) -> List[Dict[str, Any]]:
         if not self.available():
             return []
+        headers = [
+            "item_id", "name", "category", "subcategory", "color", "style_tags", "season_tags", "weather_tags",
+            "occasion_tags", "work_allowed", "layer_role", "warmth", "status", "owned_since", "last_used",
+            "wear_count", "times_in_content", "notes",
+        ]
+        self._ensure_headers("wardrobe_items", headers)
         rows = self._safe_records("wardrobe_items")
         return rows or self.load_wardrobe()
 
@@ -298,6 +320,7 @@ class GoogleSheetsStateStore:
             "occasion_tags", "work_allowed", "layer_role", "warmth", "status", "owned_since", "last_used",
             "wear_count", "times_in_content", "notes",
         ]
+        self._ensure_headers("wardrobe_items", headers)
         self._replace_records("wardrobe_items", headers, rows)
 
     def load_scene_library(self) -> List[Dict[str, Any]]:
@@ -312,6 +335,7 @@ class GoogleSheetsStateStore:
 
     def append_outfit_memory(self, row: Dict[str, Any]) -> None:
         headers = ["date", "outfit_id", "item_ids", "city", "day_type", "weather", "occasion", "used_in_content", "repeat_score", "notes"]
+        self._ensure_headers("outfit_memory", headers)
         self._append_dict_row("outfit_memory", headers, row)
 
     def append_wardrobe_action(self, row: Dict[str, Any]) -> None:
