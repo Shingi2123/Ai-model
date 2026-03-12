@@ -150,4 +150,4 @@ def test_callback_refresh_ignores_message_not_modified(monkeypatch):
     assert query.answer_calls[0][0] == ("План уже актуален",)
     assert query.edit_calls == 1
     assert module.logger.exception.call_count == 0
-    assert module.logger.info.call_count >= 1
+    module.logger.info.assert_any_call("telegram_plan_view unchanged action=callback data=%s", query.data)
