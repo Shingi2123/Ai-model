@@ -98,3 +98,21 @@ def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():
 
     assert "нет публикаций" in plan_text
     assert keyboard == [[("🔄 Обновить", "plan:today")]]
+
+
+def test_plan_screen_with_single_post_shows_post_card_not_empty_state():
+    context = PlanScreenContext(
+        target_date=date(2026, 3, 12),
+        city="Paris",
+        day_type="work_day",
+        narrative_phase="recovery_phase",
+        persona_timezone="Europe/Paris",
+        user_timezone="Asia/Pavlodar",
+    )
+
+    plan_text = format_plan_screen(context, [_item()])
+    keyboard = build_plan_keyboard(1)
+
+    assert "POST #1" in plan_text
+    assert "нет публикаций" not in plan_text
+    assert keyboard[0][0][0] == "POST 1"

@@ -50,6 +50,8 @@ class RankedMoment:
 
 class PublishingPlanEngine:
     MIN_GAP_MINUTES = 90
+    SOFT_FALLBACK_SCORE_THRESHOLD = 1.6
+
 
     def __init__(self, state_store) -> None:
         self.state = state_store
@@ -61,6 +63,16 @@ class PublishingPlanEngine:
         ranked = self._rank_moments(package)
         target_posts = self._decide_post_count(package, ranked)
         selected = self._select_diverse_moments(ranked, target_posts)
+        initial_selected_count = len(selected)
+
+        fallback_meta = {
+            "applied": False,
+            "reason": "not_needed",
+            "chosen_signature": "",
+            "chosen_score": None,
+        }
+        if not selected and ranked:
+            selected, fallback_meta = self._apply_fallback_selection(ranked, selected)
 
         assigned_times = self._assign_times(package, selected, rules)
         content_types = self._assign_content_types(selected, rules)
@@ -98,12 +110,13 @@ class PublishingPlanEngine:
             items.append(item)
 
         package.publishing_plan = items
+        self._annotate_moment_decisions(package, ranked, selected, initial_selected_count, fallback_meta)
 
         if hasattr(self.state, "append_publishing_plan"):
             for item in items:
                 self.state.append_publishing_plan(self._item_to_row(item))
 
-        self._log_decision(package, ranked, selected, assigned_times)
+        self._log_decision(package, ranked, selected, assigned_times, target_posts, initial_selected_count, fallback_meta)
         return items
 
     def _resolve_rules(self, package: DailyPackage) -> List[Dict[str, Any]]:
@@ -188,6 +201,64 @@ class PublishingPlanEngine:
                 continue
             selected.append(row)
         return selected
+
+    def _apply_fallback_selection(self, ranked: List[RankedMoment], selected: List[RankedMoment]) -> tuple[List[RankedMoment], Dict[str, Any]]:
+        fallback_meta = {
+            "applied": False,
+            "reason": "no_ranked_candidates",
+            "chosen_signature": "",
+            "chosen_score": None,
+        }
+        if selected:
+            fallback_meta["reason"] = "not_needed"
+            return selected, fallback_meta
+        if not ranked:
+            return selected, fallback_meta
+
+        best = ranked[0]
+        fallback_meta["chosen_signature"] = best.scene.moment_signature or best.scene.scene_moment or best.scene.description
+        fallback_meta["chosen_score"] = best.score
+
+        if best.score >= self.SOFT_FALLBACK_SCORE_THRESHOLD:
+            fallback_meta["applied"] = True
+            fallback_meta["reason"] = "best_ranked_above_soft_threshold"
+            return [best], fallback_meta
+
+        fallback_meta["reason"] = "best_ranked_below_soft_threshold"
+        return selected, fallback_meta
+
+    def _annotate_moment_decisions(
+        self,
+        package: DailyPackage,
+        ranked: List[RankedMoment],
+        selected: List[RankedMoment],
+        initial_selected_count: int,
+        fallback_meta: Dict[str, Any],
+    ) -> None:
+        selected_keys = {
+            (s.scene.moment_signature or s.scene.scene_moment or s.scene.description).strip().lower(): s
+            for s in selected
+        }
+        fallback_key = (str(fallback_meta.get("chosen_signature") or "")).strip().lower() if fallback_meta.get("applied") else ""
+
+        for row in ranked:
+            scene = row.scene
+            key = (scene.moment_signature or scene.scene_moment or scene.description).strip().lower()
+            scene.publish_score = row.score
+            if key in selected_keys:
+                if fallback_key and key == fallback_key and initial_selected_count == 0:
+                    scene.publish_decision = "fallback_selected"
+                    scene.decision_reason = "selected_as_best_ranked_above_soft_threshold"
+                else:
+                    scene.publish_decision = "selected"
+                    scene.decision_reason = "selected_by_primary_decision_and_diversity"
+            else:
+                if row.score < self.SOFT_FALLBACK_SCORE_THRESHOLD:
+                    scene.publish_decision = "below_fallback_threshold"
+                    scene.decision_reason = "score_below_soft_fallback_threshold"
+                else:
+                    scene.publish_decision = "not_in_top_subset"
+                    scene.decision_reason = "not_selected_after_primary_decision_and_diversity"
 
     def _assign_times(self, package: DailyPackage, selected: List[RankedMoment], rules: List[Dict[str, Any]]) -> List[str]:
         if not selected:
@@ -331,13 +402,29 @@ class PublishingPlanEngine:
                 signatures.add(raw_sig)
         return signatures
 
-    def _log_decision(self, package: DailyPackage, ranked: List[RankedMoment], selected: List[RankedMoment], assigned_times: List[str]) -> None:
+    def _log_decision(
+        self,
+        package: DailyPackage,
+        ranked: List[RankedMoment],
+        selected: List[RankedMoment],
+        assigned_times: List[str],
+        target_posts: int,
+        initial_selected_count: int,
+        fallback_meta: Dict[str, Any],
+    ) -> None:
         selected_signatures = [s.scene.moment_signature or s.scene.scene_moment or s.scene.description for s in selected]
         reasons = "; ".join(f"{(r.scene.moment_signature or r.scene.description)[:24]}={r.score:.2f}" for r in ranked[:5])
+        fallback_part = (
+            f" fallback_selected={1 if fallback_meta.get('applied') else 0}"
+            f" fallback_reason={fallback_meta.get('reason')}"
+            f" chosen_signature={fallback_meta.get('chosen_signature') or '-'}"
+            f" chosen_score={fallback_meta.get('chosen_score') if fallback_meta.get('chosen_score') is not None else '-'}"
+        )
         message = (
             f"publishing_decision date={package.date.isoformat()} generated={len(package.scenes)} "
-            f"ranked={len(ranked)} selected={len(selected)} times={','.join(assigned_times) or '-'} "
-            f"selected_signatures={selected_signatures} top_scores={reasons}"
+            f"ranked={len(ranked)} target={target_posts} selected_initial={initial_selected_count} selected={len(selected)} "
+            f"times={','.join(assigned_times) or '-'} selected_signatures={selected_signatures} "
+            f"top_scores={reasons}{fallback_part}"
         )
         if hasattr(self.state, "save_run_log"):
             self.state.save_run_log("debug", message)

@@ -13,11 +13,12 @@ from virtual_persona.pipeline.publishing_plan_engine import PublishingPlanEngine
 
 
 class DummyState:
-    def __init__(self, rules=None, history=None):
+    def __init__(self, rules=None, history=None, existing_posts=None):
         self.rules = rules or []
         self.rows = []
         self.history = history or []
         self.logs = []
+        self.existing_posts = existing_posts or []
 
     def load_posting_rules(self):
         return self.rules
@@ -29,7 +30,7 @@ class DummyState:
         return self.history
 
     def load_publishing_plan(self, target_date=None):
-        return []
+        return self.existing_posts
 
     def save_run_log(self, status, message):
         self.logs.append((status, message))
@@ -155,7 +156,7 @@ def test_publishing_plan_can_return_zero_for_low_quality_recovery_day():
 
     rows = engine.generate(_build_package(day_type="day_off", phase="recovery_phase", scenes=weak_scenes))
 
-    assert len(rows) in {0, 1}
+    assert len(rows) == 0
 
 
 def test_publishing_plan_selects_subset_and_drops_duplicates():
@@ -171,3 +172,52 @@ def test_publishing_plan_selects_subset_and_drops_duplicates():
 
     signatures = [row.moment_signature for row in rows]
     assert len(signatures) == len(set(signatures))
+
+
+def test_fallback_selects_one_when_primary_decision_returns_zero():
+    state = DummyState(existing_posts=[{"date": "2026-01-10"}] * 8)
+    engine = PublishingPlanEngine(state)
+
+    rows = engine.generate(_build_package(day_type="work_day", phase="recovery_phase"))
+
+    assert len(rows) == 1
+    assert any("fallback_selected=1" in msg for status, msg in state.logs if status == "debug")
+
+
+def test_fallback_does_not_select_when_best_score_below_soft_threshold():
+    state = DummyState(existing_posts=[{"date": "2026-01-10"}] * 8)
+    engine = PublishingPlanEngine(state)
+    very_weak = [
+        DayScene(
+            block="night",
+            location="home",
+            description="late technical transfer",
+            mood="tired",
+            time_of_day="night",
+            activity="sync",
+            scene_moment="late router reset",
+            scene_moment_type="technical",
+            scene_source="scene_moment_engine",
+            moment_signature="router-reset",
+            visual_focus="",
+        )
+    ]
+
+    rows = engine.generate(_build_package(day_type="work_day", phase="recovery_phase", scenes=very_weak))
+
+    assert rows == []
+    assert any("fallback_reason=best_ranked_below_soft_threshold" in msg for status, msg in state.logs if status == "debug")
+
+
+def test_scene_decisions_are_written_with_fallback_metadata():
+    state = DummyState(existing_posts=[{"date": "2026-01-10"}] * 8)
+    engine = PublishingPlanEngine(state)
+    package = _build_package(day_type="work_day", phase="recovery_phase")
+
+    rows = engine.generate(package)
+
+    assert len(rows) == 1
+    decisions = {scene.moment_signature: scene.publish_decision for scene in package.scenes}
+    assert "fallback_selected" in decisions.values()
+    assert all(scene.publish_score is not None for scene in package.scenes)
+    assert all(scene.decision_reason for scene in package.scenes)
