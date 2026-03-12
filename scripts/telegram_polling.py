@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
+from telegram.error import BadRequest
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from virtual_persona.config.settings import AppSettings
@@ -159,8 +160,7 @@ async def generate_day(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = ReplyKeyboardMarkup([[GET_PLAN_BUTTON]], resize_keyboard=True)
     await update.message.reply_text(
-        "Привет! Я помогу работать с контент-планом через кнопки.
-Нажмите кнопку ниже 👇",
+        "Привет! Я помогу работать с контент-планом через кнопки.\nНажмите кнопку ниже 👇",
         reply_markup=keyboard,
     )
 
@@ -226,7 +226,13 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             text, markup = _render_plan(plan_context, plan_items)
             context.user_data["plan_screen"] = serialize_context(plan_context, plan_items)
 
-        await query.edit_message_text(text=text, reply_markup=markup)
+        try:
+            await query.edit_message_text(text=text, reply_markup=markup)
+        except BadRequest as exc:
+            if "Message is not modified" in str(exc):
+                logger.info("telegram_plan_view no-op update data=%s status=already_actual", query.data)
+                return
+            raise
     except Exception as exc:
         logger.exception("telegram_plan_view failed action=callback data=%s error=%s", query.data, exc)
         await query.edit_message_text("⚠️ Не удалось обработать действие. Нажмите «📅 Получить план на сегодня».")
