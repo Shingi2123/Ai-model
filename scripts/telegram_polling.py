@@ -53,9 +53,9 @@ def _inline_markup(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     )
 
 
-def _load_or_generate_today_plan() -> tuple[PlanScreenContext, list]:
+def _load_or_generate_today_plan(force_regenerate: bool = False) -> tuple[PlanScreenContext, list]:
     today = date.today()
-    rows = orchestrator.state.load_publishing_plan(today.isoformat()) if hasattr(orchestrator.state, "load_publishing_plan") else []
+    rows = [] if force_regenerate else (orchestrator.state.load_publishing_plan(today.isoformat()) if hasattr(orchestrator.state, "load_publishing_plan") else [])
     if rows:
         items = [item_from_row(row, today) for row in rows]
         city = str(rows[0].get("city") or (items[0].city if items else "Unknown"))
@@ -124,7 +124,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def show_today_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     loading = await update.message.reply_text("⏳ Формирую план на сегодня...")
     try:
-        plan_context, items = _load_or_generate_today_plan()
+        plan_context, items = _load_or_generate_today_plan(force_regenerate=True)
         text, markup = _render_plan(plan_context, items)
         context.user_data["plan_screen"] = serialize_context(plan_context, items)
         await loading.edit_text(text=text, reply_markup=markup)
@@ -143,7 +143,11 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     try:
         plan_context, items = deserialize_context(cached)
         parsed = parse_callback(query.data or "")
+
         if parsed.view == "plan":
+            # Always re-sync with actual current day state to avoid stale cached plan.
+            plan_context, items = _load_or_generate_today_plan(force_regenerate=False)
+            context.user_data["plan_screen"] = serialize_context(plan_context, items)
             text, markup = _render_plan(plan_context, items)
         elif parsed.view == "post" and parsed.post_index is not None:
             if parsed.post_index < 0 or parsed.post_index >= len(items):

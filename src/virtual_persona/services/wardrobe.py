@@ -31,7 +31,7 @@ class OutfitBuilderEngine:
         city: str,
         occasion: str,
     ) -> OutfitSelection:
-        eligible = self._eligible_items(
+        strict = self._eligible_items(
             temp_c=temp_c,
             condition=condition,
             preferred_style=preferred_style,
@@ -39,8 +39,49 @@ class OutfitBuilderEngine:
             season=season,
             occasion=occasion,
             day_type=day_type,
+            relax_style=False,
+            relax_weather=False,
+            relax_season=False,
+            relax_temp=False,
         )
-        logger.info("OutfitBuilder: eligible items=%s for city=%s day_type=%s", len(eligible), city, day_type)
+        soft = self._eligible_items(
+            temp_c=temp_c,
+            condition=condition,
+            preferred_style=preferred_style,
+            today=today,
+            season=season,
+            occasion=occasion,
+            day_type=day_type,
+            relax_style=True,
+            relax_weather=True,
+            relax_season=False,
+            relax_temp=True,
+        )
+        tolerant = self._eligible_items(
+            temp_c=temp_c,
+            condition=condition,
+            preferred_style=preferred_style,
+            today=today,
+            season=season,
+            occasion=occasion,
+            day_type=day_type,
+            relax_style=True,
+            relax_weather=True,
+            relax_season=True,
+            relax_temp=True,
+        )
+
+        eligible = strict or soft or tolerant
+        selection_mode = "strict" if strict else "soft" if soft else "tolerant"
+        logger.info(
+            "OutfitBuilder: eligible strict=%s soft=%s tolerant=%s mode=%s city=%s day_type=%s",
+            len(strict),
+            len(soft),
+            len(tolerant),
+            selection_mode,
+            city,
+            day_type,
+        )
 
         selected: Dict[str, WardrobeItem] = {}
         dress = self._pick_best(eligible, "dress")
@@ -76,7 +117,16 @@ class OutfitBuilderEngine:
         selected_items = [selected[c] for c in ordered_categories if c in selected]
         ids = [i.id for i in selected_items]
         summary = ", ".join(i.name for i in selected_items)
-        logger.info("OutfitBuilder: built outfit ids=%s", ids)
+
+        has_fallback_item = any(i.id.startswith("fallback_") for i in selected_items)
+        mode = "fallback" if has_fallback_item else selection_mode
+        logger.info("OutfitBuilder: built outfit ids=%s mode=%s", ids, mode)
+        if self.manager.state_store and hasattr(self.manager.state_store, "save_run_log"):
+            self.manager.state_store.save_run_log(
+                "debug",
+                f"outfit_selection date={today.isoformat()} mode={mode} strict={len(strict)} soft={len(soft)} tolerant={len(tolerant)} ids={ids}",
+            )
+
         return OutfitSelection(item_ids=ids, summary=summary)
 
     def _eligible_items(
@@ -89,16 +139,34 @@ class OutfitBuilderEngine:
         season: str,
         occasion: str,
         day_type: str,
+        relax_style: bool,
+        relax_weather: bool,
+        relax_season: bool,
+        relax_temp: bool,
     ) -> List[WardrobeItem]:
         eligible: List[WardrobeItem] = []
+        normalized_style = self.manager._normalize_token(preferred_style)
+        normalized_condition = self.manager._normalize_weather(condition)
+        normalized_season = self.manager._normalize_season(season)
+
         for item in self.manager.catalog.items:
-            if item.season and "all" not in item.season and season not in item.season:
+            item_styles = {self.manager._normalize_token(s) for s in item.styles}
+            item_weather = {self.manager._normalize_weather(w) for w in item.weather_tags}
+            item_seasons = {self.manager._normalize_season(s) for s in item.season}
+
+            if not relax_season and item_seasons and "all" not in item_seasons and normalized_season not in item_seasons:
                 continue
-            if not (item.temp_min_c <= temp_c <= item.temp_max_c):
+
+            if not relax_temp and not (item.temp_min_c <= temp_c <= item.temp_max_c):
                 continue
-            if condition not in item.weather_tags and "all" not in item.weather_tags:
+            if relax_temp and temp_c < item.temp_min_c - 8:
                 continue
-            if preferred_style not in item.styles and "all" not in item.styles:
+            if relax_temp and temp_c > item.temp_max_c + 8:
+                continue
+
+            if not relax_weather and normalized_condition not in item_weather and "all" not in item_weather:
+                continue
+            if not relax_style and normalized_style not in item_styles and "all" not in item_styles:
                 continue
             if self.manager._days_since_used(item, today) < item.cooldown_days:
                 continue
@@ -109,14 +177,14 @@ class OutfitBuilderEngine:
 
     @staticmethod
     def _occasion_match(item: WardrobeItem, occasion: str, day_type: str) -> bool:
-        occasions = {v.strip() for v in item.styles if v.strip()}
+        occasions = {v.strip().lower() for v in item.styles if v.strip()}
         if not occasions:
             return True
         known_occasion_tags = {"work_day", "day_off", "travel_day", "event", "all"}
         if not (occasions & known_occasion_tags):
             return True
-        normalized = {occasion.strip(), day_type.strip(), "all"}
-        return bool(occasions & normalized) or "all" in occasions
+        normalized = {occasion.strip().lower(), day_type.strip().lower(), "all"}
+        return bool(occasions & normalized)
 
     def _pick_best(self, eligible: List[WardrobeItem], category: str) -> WardrobeItem | None:
         candidates = [i for i in eligible if i.category == category]
@@ -142,8 +210,12 @@ class OutfitBuilderEngine:
         if has_base and "shoes" in selected:
             return selected
 
-        fallback = [i for i in self.manager.catalog.items if i.category in {"dress", "top", "bottom", "shoes", "outerwear"}]
-        for item in fallback:
+        fallback_pool = [
+            i
+            for i in self.manager.catalog.items
+            if i.category in {"dress", "top", "bottom", "shoes", "outerwear"}
+        ]
+        for item in fallback_pool:
             if item.category == "dress":
                 selected.setdefault("dress", item)
             elif item.category == "top" and "dress" not in selected:
@@ -154,16 +226,62 @@ class OutfitBuilderEngine:
                 selected.setdefault("shoes", item)
             elif item.category == "outerwear" and temp_c < self.OUTERWEAR_THRESHOLD_C:
                 selected.setdefault("outerwear", item)
+
+        has_base = ("dress" in selected) or ("top" in selected and "bottom" in selected)
+        if has_base and "shoes" in selected:
+            return selected
+
+        hardcoded = [
+            WardrobeItem(
+                id="fallback_top",
+                category="top",
+                name="Fallback neutral top",
+                styles=["all"],
+                colors=["neutral"],
+                season=["all"],
+                temp_min_c=-20,
+                temp_max_c=40,
+                weather_tags=["all"],
+                cooldown_days=0,
+            ),
+            WardrobeItem(
+                id="fallback_bottom",
+                category="bottom",
+                name="Fallback neutral bottom",
+                styles=["all"],
+                colors=["neutral"],
+                season=["all"],
+                temp_min_c=-20,
+                temp_max_c=40,
+                weather_tags=["all"],
+                cooldown_days=0,
+            ),
+            WardrobeItem(
+                id="fallback_shoes",
+                category="shoes",
+                name="Fallback sneakers",
+                styles=["all"],
+                colors=["neutral"],
+                season=["all"],
+                temp_min_c=-20,
+                temp_max_c=40,
+                weather_tags=["all"],
+                cooldown_days=0,
+            ),
+        ]
+        for item in hardcoded:
+            selected.setdefault(item.category, item)
         return selected
 
 
 class WardrobeManager:
-    def __init__(self, state_store=None, wardrobe_path: str = "config/wardrobe.example.json") -> None:
-        if isinstance(state_store, str) and wardrobe_path == "config/wardrobe.example.json":
-            wardrobe_path = state_store
-            state_store = None
-        self.state_store = state_store
-        self.wardrobe_path = wardrobe_path
+    def __init__(self, wardrobe_path_or_state_store: Any = "config/wardrobe.example.json", state_store: Any = None) -> None:
+        if state_store is None and not isinstance(wardrobe_path_or_state_store, (str, Path)):
+            self.state_store = wardrobe_path_or_state_store
+            self.wardrobe_path = "config/wardrobe.example.json"
+        else:
+            self.state_store = state_store
+            self.wardrobe_path = str(wardrobe_path_or_state_store)
         self.catalog = self._load_catalog()
         self.outfit_builder = OutfitBuilderEngine(self)
 
@@ -238,22 +356,24 @@ class WardrobeManager:
             if not item_id:
                 continue
 
-            category = str(row.get("category", "")).strip()
+            category = self._normalize_category(str(row.get("category", "")).strip())
+            if not category:
+                continue
             status = str(row.get("status") or "active").strip().lower()
             if status not in {"active", ""}:
                 continue
-            name = str(row.get("name", "")).strip()
+            name = str(row.get("name", "")).strip() or item_id
 
-            styles = self._split_csv(row.get("styles") or row.get("style_tags"))
-            occasion_tags = self._split_csv(row.get("occasion_tags"))
+            styles = [self._normalize_token(x) for x in self._split_csv(row.get("styles") or row.get("style_tags"))]
+            occasion_tags = [self._normalize_token(x) for x in self._split_csv(row.get("occasion_tags"))]
             if occasion_tags:
                 styles = styles + [t for t in occasion_tags if t not in styles]
-            colors = self._split_csv(row.get("colors") or row.get("color"))
-            season = self._split_csv(row.get("season") or row.get("season_tags"))
-            weather_tags = self._split_csv(row.get("weather_tags"))
+            colors = [self._normalize_token(x) for x in self._split_csv(row.get("colors") or row.get("color"))]
+            season = [self._normalize_season(x) for x in self._split_csv(row.get("season") or row.get("season_tags"))]
+            weather_tags = [self._normalize_weather(x) for x in self._split_csv(row.get("weather_tags"))]
 
-            temp_min_c = self._to_int(row.get("temp_min_c"), 0)
-            temp_max_c = self._to_int(row.get("temp_max_c"), 30)
+            temp_min_c = self._to_int(row.get("temp_min_c"), self._warmth_to_temp_min(row.get("warmth")))
+            temp_max_c = self._to_int(row.get("temp_max_c"), self._warmth_to_temp_max(row.get("warmth")))
             cooldown_days = self._to_int(row.get("cooldown_days"), 2)
 
             last_used_raw = row.get("last_used")
@@ -313,7 +433,8 @@ class WardrobeManager:
         text = str(value).strip()
         if not text:
             return []
-        return [part.strip() for part in text.split(",") if part.strip()]
+        normalized = text.replace(";", ",").replace("|", ",")
+        return [part.strip() for part in normalized.split(",") if part.strip()]
 
     @staticmethod
     def _to_int(value: Any, default: int) -> int:
@@ -329,6 +450,83 @@ class WardrobeManager:
         if not item.last_used:
             return 10_000
         return (today - item.last_used).days
+
+    @staticmethod
+    def _normalize_token(value: str) -> str:
+        return str(value or "").strip().lower().replace("_", " ")
+
+    def _normalize_season(self, value: str) -> str:
+        token = self._normalize_token(value)
+        mapping = {
+            "fall": "autumn",
+            "autumn": "autumn",
+            "spring": "spring",
+            "summer": "summer",
+            "winter": "winter",
+            "all": "all",
+        }
+        return mapping.get(token, token or "all")
+
+    def _normalize_weather(self, value: str) -> str:
+        token = self._normalize_token(value)
+        mapping = {
+            "clear sky": "clear",
+            "sun": "clear",
+            "sunny": "clear",
+            "clouds": "cloudy",
+            "overcast": "cloudy",
+            "rain": "rain",
+            "rainy": "rain",
+            "drizzle": "rain",
+            "snow": "snow",
+            "all": "all",
+            "": "all",
+        }
+        return mapping.get(token, token)
+
+    def _normalize_category(self, value: str) -> str:
+        token = self._normalize_token(value)
+        mapping = {
+            "tops": "top",
+            "shirt": "top",
+            "blouse": "top",
+            "pants": "bottom",
+            "trousers": "bottom",
+            "jeans": "bottom",
+            "shoe": "shoes",
+            "sneakers": "shoes",
+            "coat": "outerwear",
+            "jacket": "outerwear",
+        }
+        return mapping.get(token, token)
+
+    @staticmethod
+    def _warmth_to_temp_min(value: Any) -> int:
+        try:
+            warmth = int(float(value))
+        except Exception:
+            return 0
+        if warmth >= 4:
+            return -10
+        if warmth == 3:
+            return 0
+        if warmth == 2:
+            return 8
+        return 14
+
+    @staticmethod
+    def _warmth_to_temp_max(value: Any) -> int:
+        try:
+            warmth = int(float(value))
+        except Exception:
+            return 30
+        if warmth >= 4:
+            return 14
+        if warmth == 3:
+            return 22
+        if warmth == 2:
+            return 30
+        return 38
 
     def select_outfit(
         self,
