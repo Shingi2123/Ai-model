@@ -1,4 +1,4 @@
-from virtual_persona.storage.state_store import GoogleSheetsStateStore, TelegramStateView, build_state_store
+from virtual_persona.storage.state_store import GoogleSheetsStateStore, LocalStateStore, TelegramStateView, build_state_store
 
 
 class FakeWS:
@@ -30,6 +30,8 @@ class HelperGoogleStore(GoogleSheetsStateStore):
             "activity_memory": FakeWS(),
             "location_memory": FakeWS(),
         }
+        self.records = {}
+        self.replaced = {}
 
     def available(self) -> bool:
         return True
@@ -38,6 +40,17 @@ class HelperGoogleStore(GoogleSheetsStateStore):
         return self._ws_map[title]
 
 
+
+    def _safe_records(self, title: str):
+        return list(self.records.get(title, []))
+
+    def _replace_records(self, title, headers, rows):
+        if title in self._ws_map:
+            ws = self._ws_map[title]
+            ws.clear()
+            ws.update([headers] + [[row.get(h, "") for h in headers] for row in rows])
+            return
+        self.replaced[title] = {"headers": headers, "rows": rows}
 class CacheWS:
     def __init__(self):
         self.rows = []
@@ -116,3 +129,40 @@ def test_telegram_state_view_exposes_only_needed_methods():
     assert hasattr(base, "load_cities")
     assert hasattr(base, "load_life_state")
     assert not hasattr(base, "load_wardrobe")
+
+
+def test_google_store_reset_day_records_removes_target_date_rows():
+    store = HelperGoogleStore()
+    store.records = {
+        "publishing_plan": [
+            {"date": "2026-03-12", "publication_id": "p1"},
+            {"date": "2026-03-13", "publication_id": "p2"},
+        ],
+        "life_state": [{"date": "2026-03-12"}],
+        "daily_calendar": [{"date": "2026-03-12"}],
+        "content_history": [{"date": "2026-03-12"}, {"date": "2026-03-11"}],
+        "content_moment_memory": [{"date": "2026-03-12"}, {"date": "2026-03-12"}],
+    }
+
+    store.reset_day_records("2026-03-12")
+
+    assert [r["date"] for r in store.replaced["publishing_plan"]["rows"]] == ["2026-03-13"]
+    assert store.replaced["life_state"]["rows"] == []
+    assert [r["date"] for r in store.replaced["content_history"]["rows"]] == ["2026-03-11"]
+    assert store.replaced["content_moment_memory"]["rows"] == []
+
+
+def test_local_store_reset_day_records_keeps_single_day_slice(tmp_path):
+    store = LocalStateStore(base_dir=str(tmp_path / "state"))
+    target = "2026-03-12"
+
+    for name in ["publishing_plan", "life_state", "daily_calendar", "content_history", "content_moment_memory"]:
+        path = store.base_dir / f"{name}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('[{"date":"2026-03-12"},{"date":"2026-03-13"}]', encoding='utf-8')
+
+    store.reset_day_records(target)
+
+    for name in ["publishing_plan", "life_state", "daily_calendar", "content_history", "content_moment_memory"]:
+        rows = __import__('json').loads((store.base_dir / f"{name}.json").read_text(encoding='utf-8'))
+        assert rows == [{"date": "2026-03-13"}]

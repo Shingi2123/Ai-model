@@ -36,6 +36,14 @@ class LocalStateStore:
         with path.open("w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
 
+    def _delete_rows_by_date(self, file_name: str, target_date: str) -> None:
+        path = self.base_dir / file_name
+        rows = self._read_json(path, [])
+        filtered = [row for row in rows if str(row.get("date")) != target_date]
+        if len(filtered) != len(rows):
+            self._write_json(path, filtered)
+
+
     def load_calendar(self) -> List[Dict[str, Any]]:
         return self._read_json(
             self.base_dir / "daily_calendar.json",
@@ -62,6 +70,16 @@ class LocalStateStore:
         rows = self._read_json(path, [])
         rows.append(row)
         self._write_json(path, rows)
+
+    def reset_day_records(self, target_date: str) -> None:
+        for file_name in [
+            "publishing_plan.json",
+            "life_state.json",
+            "daily_calendar.json",
+            "content_history.json",
+            "content_moment_memory.json",
+        ]:
+            self._delete_rows_by_date(file_name, target_date)
 
     def load_posting_rules(self) -> List[Dict[str, Any]]:
         return self._read_json(self.base_dir / "posting_rules.json", [])
@@ -420,6 +438,42 @@ class GoogleSheetsStateStore:
             return
 
 
+
+    def _remove_rows_by_date(self, title: str, headers: List[str], target_date: str) -> None:
+        if not self.available():
+            return
+        rows = self._safe_records(title)
+        filtered = [row for row in rows if str(row.get("date")) != target_date]
+        if len(filtered) == len(rows):
+            return
+        self._replace_records(title, headers, filtered)
+
+    def reset_day_records(self, target_date: str) -> None:
+        sheets_with_headers = {
+            "publishing_plan": [
+                "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
+                "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
+                "outfit_ids", "prompt_type", "prompt_text", "caption_text", "short_caption", "post_timezone", "publish_score",
+                "selection_reason", "delivery_status", "notes",
+            ],
+            "life_state": [
+                "date", "current_city", "day_type", "season", "fatigue_level", "mood_base", "reason", "continuity_note",
+                "narrative_phase", "energy_state", "rhythm_state", "novelty_pressure", "recovery_need",
+            ],
+            "daily_calendar": ["date", "city", "day_type", "notes"],
+            "content_history": [
+                "date", "city", "day_type", "outfit_ids", "scenes", "post_caption", "scene_moment", "scene_source",
+                "scene_moment_type", "moment_signature", "visual_focus",
+            ],
+            "content_moment_memory": [
+                "date", "city", "day_type", "scene_moment", "scene_moment_type", "moment_signature", "visual_focus",
+                "scene_source", "publish_score", "publish_decision", "decision_reason",
+            ],
+        }
+        for title, headers in sheets_with_headers.items():
+            self._ensure_headers(title, headers)
+            self._remove_rows_by_date(title, headers, target_date)
+
     def load_calendar(self) -> List[Dict[str, Any]]:
         if not self.available():
             return []
@@ -441,7 +495,8 @@ class GoogleSheetsStateStore:
         headers = [
             "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
             "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
-            "outfit_ids", "prompt_type", "prompt_text", "caption_text", "short_caption", "delivery_status", "notes",
+            "outfit_ids", "prompt_type", "prompt_text", "caption_text", "short_caption", "post_timezone", "publish_score",
+            "selection_reason", "delivery_status", "notes",
         ]
         self._ensure_headers("publishing_plan", headers)
         rows = self._safe_records("publishing_plan")
@@ -453,7 +508,8 @@ class GoogleSheetsStateStore:
         headers = [
             "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
             "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
-            "outfit_ids", "prompt_type", "prompt_text", "caption_text", "short_caption", "delivery_status", "notes",
+            "outfit_ids", "prompt_type", "prompt_text", "caption_text", "short_caption", "post_timezone", "publish_score",
+            "selection_reason", "delivery_status", "notes",
         ]
         self._ensure_headers("publishing_plan", headers)
         self._append_dict_row("publishing_plan", headers, row)

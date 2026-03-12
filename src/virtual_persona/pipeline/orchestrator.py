@@ -56,6 +56,9 @@ class PipelineOrchestrator:
 
     def generate_day(self, target_date: date | None = None, override_city: str | None = None) -> DailyPackage:
         context = self.context_builder.build(target_date=target_date, override_city=override_city)
+        if hasattr(self.state, "reset_day_records"):
+            self.state.reset_day_records(context["date"].isoformat())
+
 
         narrative_context = self.life_narrative_engine.build_context(context["date"], context)
         context["narrative_context"] = narrative_context

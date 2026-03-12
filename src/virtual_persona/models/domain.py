@@ -162,6 +162,8 @@ class PublishingPlanItem:
     caption_text: str
     short_caption: str
     post_timezone: str = ""
+    publish_score: float | None = None
+    selection_reason: str = ""
     delivery_status: str = "planned"
     notes: str = ""
 
