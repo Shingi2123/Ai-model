@@ -152,6 +152,29 @@ def _load_today_package_and_plan():
     return package, plan
 
 
+async def safe_edit_message(
+    query,
+    *,
+    text: str,
+    markup: InlineKeyboardMarkup,
+    parse_mode: str | None = None,
+) -> bool:
+    try:
+        await query.edit_message_text(
+            text=text,
+            reply_markup=markup,
+            parse_mode=parse_mode,
+            disable_web_page_preview=True,
+        )
+        return True
+    except BadRequest as exc:
+        if "Message is not modified" in str(exc):
+            logger.info("telegram_plan_view unchanged action=callback data=%s", query.data)
+            await query.answer("План уже актуален")
+            return False
+        raise
+
+
 async def generate_day(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     package = orchestrator.generate_day()
     await update.message.reply_text(f"Generated: {package.date} in {package.city}")
@@ -225,15 +248,9 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             text, markup = _render_plan(plan_context, plan_items)
             context.user_data["plan_screen"] = serialize_context(plan_context, plan_items)
 
-        try:
-            await query.edit_message_text(text=text, reply_markup=markup)
-            await query.answer()
-        except BadRequest as exc:
-            if "Message is not modified" in str(exc):
-                logger.info("telegram_plan_view no-op update data=%s status=already_actual", query.data)
-                await query.answer("План уже актуален")
-                return
-            raise
+        if not await safe_edit_message(query, text=text, markup=markup):
+            return
+        await query.answer()
     except Exception as exc:
         logger.exception("telegram_plan_view failed action=callback data=%s error=%s", query.data, exc)
         await query.edit_message_text("⚠️ Не удалось обработать действие. Нажмите «📅 Получить план на сегодня».")
