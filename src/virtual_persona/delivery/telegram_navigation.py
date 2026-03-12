@@ -20,6 +20,8 @@ class PlanScreenContext:
 @dataclass
 class ParsedCallback:
     view: str
+    target_date: str | None = None
+    publication_id: str | None = None
     post_index: int | None = None
 
 
@@ -90,36 +92,92 @@ def format_moment_screen(item: PublishingPlanItem, post_index: int) -> str:
     return f"{_format_detail_header(item, post_index)}\n\n🧠 Момент:\n{body}"
 
 
-def build_plan_keyboard(items_count: int) -> list[list[tuple[str, str]]]:
+def plan_item_key(item: PublishingPlanItem) -> str:
+    if item.publication_id:
+        return f"publication_id:{item.publication_id}"
+    return "|".join(
+        [
+            item.date.isoformat(),
+            item.platform,
+            item.content_type,
+            item.scene_moment,
+            item.post_time,
+        ]
+    )
+
+
+def normalize_plan_items(items: list[PublishingPlanItem]) -> list[PublishingPlanItem]:
+    ordered = sorted(
+        items,
+        key=lambda item: (
+            item.post_time,
+            item.platform,
+            item.content_type,
+            item.publication_id or "",
+            item.scene_moment,
+        ),
+    )
+    unique: list[PublishingPlanItem] = []
+    seen: set[str] = set()
+    for item in ordered:
+        key = plan_item_key(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        if not item.publication_id:
+            item.publication_id = key
+        unique.append(item)
+    return unique
+
+
+def build_plan_keyboard(items: list[PublishingPlanItem], target_date: date) -> list[list[tuple[str, str]]]:
     rows = []
-    for idx in range(items_count):
-        rows.append([(f"POST {idx + 1}", f"p:{idx}")])
-    rows.append([("🔄 Обновить", "plan:today")])
+    day = target_date.isoformat()
+    for idx, item in enumerate(items):
+        rows.append([(f"POST {idx + 1}", f"p:{day}:{item.publication_id}")])
+    rows.append([("🔄 Обновить", f"plan:{day}")])
     return rows
 
 
-def build_post_keyboard(post_index: int) -> list[list[tuple[str, str]]]:
+def build_post_keyboard(target_date: date, publication_id: str) -> list[list[tuple[str, str]]]:
+    day = target_date.isoformat()
     return [
-        [("🖼 Промпт", f"pv:{post_index}:prompt"), ("✍️ Подпись", f"pv:{post_index}:caption")],
-        [("🧠 Момент", f"pv:{post_index}:moment")],
-        [("⬅️ К плану", "back:plan")],
+        [("🖼 Промпт", f"pv:{day}:{publication_id}:prompt"), ("✍️ Подпись", f"pv:{day}:{publication_id}:caption")],
+        [("🧠 Момент", f"pv:{day}:{publication_id}:moment")],
+        [("⬅️ К плану", f"back:plan:{day}")],
     ]
 
 
-def build_detail_keyboard(post_index: int) -> list[list[tuple[str, str]]]:
-    return [[("⬅️ К посту", f"back:post:{post_index}"), ("⬅️ К плану", "back:plan")]]
+def build_detail_keyboard(target_date: date, publication_id: str) -> list[list[tuple[str, str]]]:
+    day = target_date.isoformat()
+    return [[("⬅️ К посту", f"back:post:{day}:{publication_id}"), ("⬅️ К плану", f"back:plan:{day}")]]
 
 
 def parse_callback(data: str) -> ParsedCallback:
     if data == "plan:today" or data == "back:plan":
         return ParsedCallback(view="plan")
+    if data.startswith("plan:"):
+        return ParsedCallback(view="plan", target_date=data.split(":", 1)[1])
     if data.startswith("p:"):
-        return ParsedCallback(view="post", post_index=int(data.split(":", 1)[1]))
+        _, raw = data.split(":", 1)
+        parts = raw.split(":")
+        if len(parts) == 1:
+            return ParsedCallback(view="post", post_index=int(parts[0]))
+        return ParsedCallback(view="post", target_date=parts[0], publication_id=parts[1])
     if data.startswith("back:post:"):
-        return ParsedCallback(view="post", post_index=int(data.split(":")[-1]))
+        parts = data.split(":")
+        if len(parts) == 3:
+            return ParsedCallback(view="post", post_index=int(parts[-1]))
+        return ParsedCallback(view="post", target_date=parts[2], publication_id=parts[3])
+    if data.startswith("back:plan:"):
+        return ParsedCallback(view="plan", target_date=data.split(":", 2)[2])
     if data.startswith("pv:"):
-        _, post_index, view_name = data.split(":", 2)
-        return ParsedCallback(view=view_name, post_index=int(post_index))
+        parts = data.split(":")
+        if len(parts) == 3:
+            _, post_index, view_name = parts
+            return ParsedCallback(view=view_name, post_index=int(post_index))
+        _, target_date, publication_id, view_name = parts
+        return ParsedCallback(view=view_name, target_date=target_date, publication_id=publication_id)
     raise ValueError(f"Unknown callback data: {data}")
 
 
