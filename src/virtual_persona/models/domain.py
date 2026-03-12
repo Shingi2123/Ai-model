@@ -119,6 +119,9 @@ class DayScene:
     moment_signature: str = ""
     moment_reason: str = ""
     visual_focus: str = ""
+    publish_score: float | None = None
+    publish_decision: str = ""
+    decision_reason: str = ""
 
 
 @dataclass

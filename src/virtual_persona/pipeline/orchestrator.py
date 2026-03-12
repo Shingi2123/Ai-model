@@ -136,6 +136,9 @@ class PipelineOrchestrator:
                         "moment_signature": getattr(scene, "moment_signature", ""),
                         "visual_focus": getattr(scene, "visual_focus", ""),
                         "scene_source": getattr(scene, "scene_source", ""),
+                        "publish_score": getattr(scene, "publish_score", ""),
+                        "publish_decision": getattr(scene, "publish_decision", ""),
+                        "decision_reason": getattr(scene, "decision_reason", ""),
                     }
                 )
         self.state.append_daily_calendar(package)
