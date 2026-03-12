@@ -166,3 +166,11 @@ def test_local_store_reset_day_records_keeps_single_day_slice(tmp_path):
     for name in ["publishing_plan", "life_state", "daily_calendar", "content_history", "content_moment_memory"]:
         rows = __import__('json').loads((store.base_dir / f"{name}.json").read_text(encoding='utf-8'))
         assert rows == [{"date": "2026-03-13"}]
+
+
+def test_local_store_bootstraps_default_posting_rules(tmp_path):
+    store = LocalStateStore(base_dir=str(tmp_path / "state"))
+    rules = store.load_posting_rules()
+    assert rules
+    assert any(str(r.get("rule_id", "")).startswith("default-") for r in rules)
+

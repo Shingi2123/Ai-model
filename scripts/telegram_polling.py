@@ -92,15 +92,6 @@ def _load_persisted_plan(target_date: date) -> tuple[PlanScreenContext, list]:
 def _ensure_today_plan() -> tuple[PlanScreenContext, list]:
     today = date.today()
     plan_context, items = _load_persisted_plan(today)
-    if items:
-        return plan_context, items
-
-    package = orchestrator.generate_day(target_date=today)
-    if package.publishing_plan:
-        items = normalize_plan_items(package.publishing_plan)
-        return _build_context(today, [], items), items
-
-    plan_context, items = _load_persisted_plan(today)
     return plan_context, items
 
 
@@ -153,9 +144,16 @@ def _log_plan_view(action: str, target_date: date, raw_rows: int, deduped_rows: 
 
 
 def _load_today_package_and_plan():
-    package = orchestrator.generate_day(target_date=date.today())
-    plan = package.publishing_plan or orchestrator.publishing_plan_engine.generate(package)
-    return package, plan
+    today = date.today()
+    plan_context, items = _load_persisted_plan(today)
+    if not items:
+        package = orchestrator.generate_day(target_date=today)
+        plan = package.publishing_plan or []
+        return package, plan
+    package = orchestrator._load_frozen_day(today)
+    if package is None:
+        package = orchestrator.generate_day(target_date=today)
+    return package, items
 
 
 async def safe_edit_message(
@@ -249,6 +247,10 @@ async def generate_day(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = ReplyKeyboardMarkup([[GET_PLAN_BUTTON]], resize_keyboard=True)
+    if context.user_data.get("started"):
+        await update.message.reply_text("Я уже на связи. Нажмите кнопку, чтобы открыть план.", reply_markup=keyboard)
+        return
+    context.user_data["started"] = True
     await update.message.reply_text(
         "Привет! Я помогу работать с контент-планом через кнопки.\nНажмите кнопку ниже 👇",
         reply_markup=keyboard,

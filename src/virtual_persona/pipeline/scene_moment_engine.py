@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from datetime import date
 from typing import Any, Dict, List, Sequence
 
@@ -44,18 +45,19 @@ class SceneMomentGenerator:
         return str(getattr(scene, "source", "library") or "library")
 
     @staticmethod
-    def _build_signature(day_type: str, scene: DayScene, moment_type: str, visual_focus: str) -> str:
-        location = str(getattr(scene, "location", "") or "")
-        time_of_day = str(getattr(scene, "time_of_day", "") or "")
-        return "|".join(
-            [
-                day_type.strip().lower(),
-                location.strip().lower(),
-                time_of_day.strip().lower(),
-                moment_type.strip().lower(),
-                visual_focus.strip().lower(),
-            ]
-        )
+    def _signature_text(value: str) -> str:
+        cleaned = re.sub(r"[^a-z0-9\s]+", " ", (value or "").lower())
+        compact = " ".join(cleaned.split())
+        stop = {"a", "the", "and", "with", "by", "of", "to", "in", "on", "near", "before", "after"}
+        return " ".join([t for t in compact.split() if t not in stop])
+
+    @classmethod
+    def _build_signature(cls, day_type: str, scene: DayScene, moment_type: str, moment_text: str) -> str:
+        location = cls._signature_text(str(getattr(scene, "location", "") or ""))
+        time_of_day = cls._signature_text(str(getattr(scene, "time_of_day", "") or ""))
+        canonical_type = cls._signature_text(moment_type.replace("_moment", ""))
+        canonical_moment = cls._signature_text(moment_text)
+        return "|".join([day_type.strip().lower(), location, time_of_day, canonical_type, canonical_moment])
 
     def _load_recent_moments(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
@@ -118,13 +120,13 @@ class SceneMomentGenerator:
     ) -> Dict[str, str]:
         day_type = str(context.get("day_type") or "")
         for candidate in self._candidate_pool(context, scene):
-            sig = self._build_signature(day_type, scene, candidate["type"], candidate["focus"])
+            sig = self._build_signature(day_type, scene, candidate["type"], candidate["moment"])
             if sig not in blocked_signatures:
                 return {**candidate, "signature": sig}
         fallback = self._candidate_pool(context, scene)[0]
         return {
             **fallback,
-            "signature": self._build_signature(day_type, scene, fallback["type"], fallback["focus"]),
+            "signature": self._build_signature(day_type, scene, fallback["type"], fallback["moment"]),
         }
 
     def generate_for_scene(self, context: Dict[str, Any], scene: DayScene) -> DayScene:

@@ -19,7 +19,13 @@ from virtual_persona.utils.logging import configure_logging
 
 def cmd_generate_day(args: argparse.Namespace, orchestrator: PipelineOrchestrator) -> None:
     target = date.fromisoformat(args.date) if args.date else None
-    package = orchestrator.generate_day(target_date=target, override_city=args.city)
+    if target and not args.force_regenerate and hasattr(orchestrator.state, "load_publishing_plan"):
+        existing = orchestrator.state.load_publishing_plan(target.isoformat())
+        if existing:
+            print(f"Day {target.isoformat()} already exists; reusing frozen package.")
+    if target and args.force_regenerate:
+        print(f"Force regenerate enabled for {target.isoformat()}: existing day will be replaced.")
+    package = orchestrator.generate_day(target_date=target, override_city=args.city, force_regenerate=args.force_regenerate)
     print(f"Generated package: {package.date} / {package.city}")
 
 
@@ -73,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     g = sub.add_parser("generate-day")
     g.add_argument("--date", help="YYYY-MM-DD")
     g.add_argument("--city", help="Override city")
+    g.add_argument("--force-regenerate", action="store_true", help="Regenerate even if day already exists")
     g.set_defaults(func=cmd_generate_day)
 
     c = sub.add_parser("check-continuity")
