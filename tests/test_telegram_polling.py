@@ -130,11 +130,11 @@ def test_callback_refresh_ignores_message_not_modified(monkeypatch):
     class Query:
         def __init__(self):
             self.data = "plan:2026-03-12"
-            self.answer_calls = 0
+            self.answer_calls = []
             self.edit_calls = 0
 
         async def answer(self, *_args, **_kwargs):
-            self.answer_calls += 1
+            self.answer_calls.append((_args, _kwargs))
 
         async def edit_message_text(self, **_kwargs):
             self.edit_calls += 1
@@ -146,7 +146,8 @@ def test_callback_refresh_ignores_message_not_modified(monkeypatch):
 
     asyncio.run(module.callback_nav(update, context))
 
-    assert query.answer_calls == 1
+    assert len(query.answer_calls) == 1
+    assert query.answer_calls[0][0] == ("План уже актуален",)
     assert query.edit_calls == 1
     assert module.logger.exception.call_count == 0
     assert module.logger.info.call_count >= 1

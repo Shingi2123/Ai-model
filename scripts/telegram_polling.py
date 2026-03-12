@@ -181,7 +181,6 @@ async def show_today_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
     parsed = parse_callback(query.data or "")
 
     cached = context.user_data.get("plan_screen")
@@ -228,9 +227,11 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         try:
             await query.edit_message_text(text=text, reply_markup=markup)
+            await query.answer()
         except BadRequest as exc:
             if "Message is not modified" in str(exc):
                 logger.info("telegram_plan_view no-op update data=%s status=already_actual", query.data)
+                await query.answer("План уже актуален")
                 return
             raise
     except Exception as exc:
