@@ -81,3 +81,20 @@ def test_detail_views_have_fallback_for_empty_prompt_and_caption():
 
     assert "нет сохранённого prompt" in prompt_text
     assert "нет сохранённой подписи" in caption_text
+
+
+def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():
+    context = PlanScreenContext(
+        target_date=date(2026, 3, 12),
+        city="Paris",
+        day_type="work_day",
+        narrative_phase="recovery_phase",
+        persona_timezone="Europe/Paris",
+        user_timezone="Asia/Pavlodar",
+    )
+
+    plan_text = format_plan_screen(context, [])
+    keyboard = build_plan_keyboard(0)
+
+    assert "нет публикаций" in plan_text
+    assert keyboard == [[("🔄 Обновить", "plan:today")]]
