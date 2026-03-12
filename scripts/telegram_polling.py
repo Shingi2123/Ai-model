@@ -46,7 +46,7 @@ from virtual_persona.delivery.telegram_navigation import (
 from virtual_persona.pipeline.orchestrator import PipelineOrchestrator
 
 settings = AppSettings.from_env()
-orchestrator = PipelineOrchestrator(settings)
+orchestrator = PipelineOrchestrator(settings, mode="telegram")
 GET_PLAN_BUTTON = "📅 Получить план на сегодня"
 logger = logging.getLogger(__name__)
 
