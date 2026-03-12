@@ -40,11 +40,20 @@ class PromptComposer:
         moment_signature = getattr(scene, "moment_signature", "")
         moment_type = getattr(scene, "scene_moment_type", "")
         scene_mood = getattr(scene, "mood", "calm")
+        continuity = context.get("continuity_context") or {}
+        persona_voice = context.get("persona_voice") or {}
+        city_ambience = self._city_ambience(str(context.get("city") or ""))
         scene_part = (
-            f"Scene: {scene_desc}. Location: {scene_loc}. Mood: {scene_mood}. "
-            f"Activity: {scene_activity}. Scene source: {scene_source}. "
-            f"Moment type: {moment_type}. Visual focus: {visual_focus}. Signature: {moment_signature}. "
-            f"Outfit: {outfit_summary}. Outfit items: {outfit_ids}. City: {context.get('city')}"
+            f"Subject: recurring character identity preserved, same person as prior days. "
+            f"Setting: {scene_loc} in {context.get('city')}. {city_ambience}. "
+            f"Action: {scene_desc}; activity={scene_activity}. "
+            f"Wardrobe: {outfit_summary}. Outfit item ids: {outfit_ids}. "
+            f"Mood: {scene_mood}. Composition: focus on {visual_focus or 'natural focal detail'}, layered foreground/background, candid framing. "
+            f"Lighting: realistic {self._lighting_hint(getattr(scene, 'time_of_day', 'day'))}. "
+            f"Realism cues: no glamour overprocessing, plausible textures and weather response. "
+            f"Continuity cues: arc_hint={continuity.get('arc_hint', 'stable_routine')}; previous_evening={continuity.get('previous_evening_moment', '')}; "
+            f"moment_type={moment_type}; signature={moment_signature}; scene_source={scene_source}. "
+            f"Persona voice cues: restraint={persona_voice.get('restraint', 0.7)}, reflection={persona_voice.get('reflection', 0.65)}, self_irony={persona_voice.get('self_irony', 0.3)}."
         )
 
         if life_state:
@@ -89,3 +98,27 @@ class PromptComposer:
         }
 
         return " ".join([part for part in [*base_parts, type_rules.get(content_type, ""), scene_part] if part])
+
+    @staticmethod
+    def _lighting_hint(time_of_day: str) -> str:
+        return {
+            "early_morning": "cool early morning light",
+            "morning": "soft morning daylight",
+            "late_morning": "clean late-morning daylight",
+            "noon": "bright overhead daylight",
+            "afternoon": "neutral afternoon light",
+            "golden_hour": "warm directional golden hour light",
+            "evening": "warm evening ambient light",
+            "night": "mixed city and practical interior light",
+        }.get(str(time_of_day or "").lower(), "natural soft light")
+
+    @staticmethod
+    def _city_ambience(city: str) -> str:
+        normalized = city.strip().lower()
+        known = {
+            "paris": "Haussmann facades, compact sidewalk cafes, layered warm street glow",
+            "prague": "historic stone facades, tram rhythm, river-side muted palette",
+            "rome": "textured warm walls, scooters and piazza flow, afternoon contrast",
+            "london": "brick streets, overcast diffusion, restrained business-casual crowd",
+        }
+        return known.get(normalized, "city-specific rhythm, local architecture and transport cues")

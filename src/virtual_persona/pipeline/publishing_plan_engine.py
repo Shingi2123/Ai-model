@@ -26,6 +26,12 @@ class RankedMoment:
 class PublishingPlanEngine:
     MIN_GAP_MINUTES = 90
     SOFT_FALLBACK_SCORE_THRESHOLD = 1.6
+    DAY_THEME_HINTS = {
+        "travel_day": {"transit", "city_observation", "ambient_street"},
+        "work_day": {"preparation", "work_setup", "transit"},
+        "day_off": {"recovery", "meal", "hotel_private"},
+        "layover_day": {"hotel_private", "city_observation", "recovery"},
+    }
 
 
     def __init__(self, state_store) -> None:
@@ -77,9 +83,9 @@ class PublishingPlanEngine:
                 activity_type=scene.activity or "daily_life",
                 outfit_ids=list(package.outfit.item_ids),
                 prompt_type=content_type,
-                prompt_text=prompt_text or (scene.scene_moment or scene.description or "daily lifestyle scene"),
-                caption_text=caption or (scene.scene_moment or scene.description or "A quiet daily moment."),
-                short_caption=self._short_caption(caption or (scene.scene_moment or scene.description or "Daily moment")),
+                prompt_text=self._required_text(prompt_text, scene.scene_moment or scene.description or "daily lifestyle scene"),
+                caption_text=self._required_text(caption, scene.scene_moment or scene.description or "A quiet daily moment."),
+                short_caption=self._short_caption(self._required_text(caption, scene.scene_moment or scene.description or "Daily moment"), limit=72),
                 post_timezone=persona_timezone or "UTC",
                 publish_score=ranked_moment.score if ranked_moment.score is not None else 0.0,
                 selection_reason=selection_reason or "selected_for_publication",
@@ -131,6 +137,9 @@ class PublishingPlanEngine:
             if self._phase(package) == "recovery_phase" and "calm" in (scene.mood or ""):
                 score += 0.3
                 reasons.append("recovery_mood")
+            if self._is_representative(scene, package.day_type):
+                score += 0.8
+                reasons.append("day_theme_representative")
 
             signature = scene.moment_signature or scene.scene_moment or scene.description
             if signature and signature in history:
@@ -144,6 +153,18 @@ class PublishingPlanEngine:
 
         rows.sort(key=lambda r: r.score, reverse=True)
         return rows
+
+    def _is_representative(self, scene: DayScene, day_type: str) -> bool:
+        archetype = str(scene.scene_moment_type or "").strip().lower()
+        moment = str(scene.scene_moment or scene.description or "").lower()
+        hints = self.DAY_THEME_HINTS.get(day_type, set())
+        if archetype in hints:
+            return True
+        if day_type == "travel_day" and any(token in moment for token in ["terminal", "airport", "flight", "station", "arrival"]):
+            return True
+        if day_type == "work_day" and any(token in moment for token in ["setup", "meeting", "desk", "preparation"]):
+            return True
+        return False
 
     def _decide_post_count(self, package: DailyPackage, ranked: List[RankedMoment]) -> int:
         if not ranked:
@@ -474,6 +495,11 @@ class PublishingPlanEngine:
         if len(text) <= limit:
             return text
         return text[: limit - 1].rstrip() + "…"
+
+    @staticmethod
+    def _required_text(value: str, fallback: str) -> str:
+        text = str(value or "").strip()
+        return text or fallback
 
     @staticmethod
     def _pick_prompt_text(package: DailyPackage, scene: DayScene, content_type: str) -> str:

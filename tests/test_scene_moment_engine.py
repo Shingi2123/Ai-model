@@ -35,6 +35,7 @@ def build_context(day_type: str = "work_day"):
         "weather": type("W", (), {"condition": "clear", "temp_c": 18})(),
         "narrative_context": type("N", (), {"narrative_phase": "work_focus_phase", "energy_state": "medium"})(),
         "story_arc": {"arc_type": "travel_phase", "title": "Flights", "progress": 30},
+        "persona_voice": {"reflection": 0.8, "self_irony": 0.2},
     }
 
 
@@ -90,3 +91,37 @@ def test_content_generator_uses_scene_moment_instead_of_raw_scene_description():
     assert "Quiet coffee at the gate before boarding" in content.photo_prompts[0]
     assert "Early airport routine before flight" not in content.photo_prompts[0]
     assert "coffee cup and runway" in content.post_caption
+
+
+def test_moment_signature_normalization_keeps_stable_canonical_form():
+    generator = SceneMomentGenerator(DummyState())
+
+    normalized = generator.normalize_signature(" Work_Day | Airport Terminal | Morning | Gate waiting moment | Calm waiting at the gate!!! ")
+
+    assert normalized == "work day|airport terminal|morning|gate waiting moment|calm waiting at gate"
+
+
+def test_generate_prefers_archetype_diversity_inside_one_day():
+    generator = SceneMomentGenerator(DummyState())
+    context = build_context("travel_day")
+    scenes = [
+        DayScene("morning", "airport terminal", "a", "focused", "morning"),
+        DayScene("day", "hotel room", "b", "calm", "day"),
+        DayScene("evening", "city street", "c", "curious", "evening"),
+    ]
+
+    enriched = generator.generate(context, scenes)
+
+    archetypes = [scene.scene_moment_type for scene in enriched]
+    assert len(archetypes) == len(set(archetypes))
+
+
+def test_content_generator_applies_persona_voice_tone_profile():
+    state = DummyState()
+    generator = ContentGenerator(DummyProvider(), state_store=state)
+    scene = DayScene("morning", "city street", "Morning routine", "calm", "morning", scene_moment="morning city walk")
+    context = build_context("travel_day")
+
+    content = generator.generate(context, [scene], "beige coat", ["coat_1"])
+
+    assert any(note.startswith("caption_tone=observational_travel") for note in content.creative_notes)

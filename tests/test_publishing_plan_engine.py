@@ -239,3 +239,28 @@ def test_publishing_plan_row_contains_timezone_and_decision_metadata():
     assert persisted["post_timezone"]
     assert persisted["publish_score"] is not None
     assert persisted["selection_reason"]
+
+
+def test_publishing_plan_keeps_required_text_fields_non_empty_even_with_empty_caption():
+    state = DummyState()
+    engine = PublishingPlanEngine(state)
+    package = _build_package(day_type="travel_day", phase="transition_phase")
+    package.content.post_caption = ""
+    package.content.photo_prompts = [""] * len(package.scenes)
+
+    rows = engine.generate(package)
+
+    assert rows
+    assert all(row.prompt_text.strip() for row in rows)
+    assert all(row.caption_text.strip() for row in rows)
+    assert all(row.short_caption.strip() for row in rows)
+
+
+def test_publishing_plan_uses_default_rules_when_store_has_none():
+    state = DummyState(rules=[])
+    engine = PublishingPlanEngine(state)
+
+    rows = engine.generate(_build_package(day_type="work_day", phase="growth"))
+
+    assert rows
+    assert all(row.platform == "Instagram" for row in rows)
