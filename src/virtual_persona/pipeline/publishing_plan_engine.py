@@ -56,6 +56,7 @@ class PublishingPlanEngine:
         items: List[PublishingPlanItem] = []
         used_signatures: set[str] = set()
         publish_windows = package.content.publish_windows or ["09:30"]
+        persona_timezone = self._resolve_city_timezone(package.city)
 
         for idx, rule in enumerate(matched_rules):
             min_per_day = max(0, self._as_int(rule.get("min_per_day"), 0))
@@ -92,6 +93,7 @@ class PublishingPlanEngine:
                     prompt_text=prompt_text,
                     caption_text=caption,
                     short_caption=self._short_caption(caption),
+                    post_timezone=persona_timezone,
                     delivery_status="planned",
                     notes=str(rule.get("notes") or ""),
                 )
@@ -122,6 +124,7 @@ class PublishingPlanEngine:
                     prompt_text=self._pick_prompt_text(package, scene, "photo"),
                     caption_text=package.content.post_caption,
                     short_caption=self._short_caption(package.content.post_caption),
+                    post_timezone=persona_timezone,
                     delivery_status="planned",
                     notes="fallback-guaranteed-post",
                 )
@@ -132,6 +135,14 @@ class PublishingPlanEngine:
             if hasattr(self.state, "append_publishing_plan"):
                 self.state.append_publishing_plan(self._item_to_row(item))
         return items
+
+
+    def _resolve_city_timezone(self, city: str) -> str:
+        if hasattr(self.state, "load_cities"):
+            for row in self.state.load_cities() or []:
+                if str(row.get("city", "")).strip().lower() == city.strip().lower() and row.get("timezone"):
+                    return str(row.get("timezone")).strip()
+        return ""
 
     def _load_rules(self) -> List[Dict[str, Any]]:
         if hasattr(self.state, "load_posting_rules"):
