@@ -158,6 +158,7 @@ class PublishingPlanItem:
     prompt_text: str
     caption_text: str
     short_caption: str
+    post_timezone: str = ""
     delivery_status: str = "planned"
     notes: str = ""
 
