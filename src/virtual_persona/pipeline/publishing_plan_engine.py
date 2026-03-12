@@ -8,36 +8,11 @@ from virtual_persona.models.domain import DailyPackage, DayScene, PublishingPlan
 
 
 DEFAULT_POSTING_RULES = [
-    {
-        "rule_id": "default-photo-morning",
-        "platform": "Instagram",
-        "content_type": "photo",
-        "preferred_time": "09:30",
-        "enabled": "true",
-        "priority": "10",
-        "min_per_day": "0",
-        "max_per_day": "2",
-        "day_type_filter": "",
-        "narrative_phase_filter": "",
-        "city_filter": "",
-        "weekday_filter": "",
-        "notes": "Primary visual post",
-    },
-    {
-        "rule_id": "default-video-evening",
-        "platform": "Instagram",
-        "content_type": "video",
-        "preferred_time": "19:00",
-        "enabled": "true",
-        "priority": "6",
-        "min_per_day": "0",
-        "max_per_day": "1",
-        "day_type_filter": "work_day,travel_day",
-        "narrative_phase_filter": "",
-        "city_filter": "",
-        "weekday_filter": "",
-        "notes": "Optional motion content",
-    },
+    {"rule_id": "default-work-photo", "platform": "Instagram", "content_type": "photo", "preferred_time": "09:30", "enabled": "true", "priority": "10", "min_per_day": "1", "max_per_day": "2", "day_type_filter": "work_day", "narrative_phase_filter": "", "city_filter": "", "weekday_filter": "", "notes": "Work day cadence 1-2"},
+    {"rule_id": "default-travel-photo", "platform": "Instagram", "content_type": "photo", "preferred_time": "10:00", "enabled": "true", "priority": "9", "min_per_day": "1", "max_per_day": "3", "day_type_filter": "travel_day", "narrative_phase_filter": "", "city_filter": "", "weekday_filter": "", "notes": "Travel day cadence 1-3"},
+    {"rule_id": "default-weekend-photo", "platform": "Instagram", "content_type": "photo", "preferred_time": "11:00", "enabled": "true", "priority": "8", "min_per_day": "1", "max_per_day": "2", "day_type_filter": "weekend_day,day_off", "narrative_phase_filter": "", "city_filter": "", "weekday_filter": "", "notes": "Weekend cadence 1-2"},
+    {"rule_id": "default-special-video", "platform": "Instagram", "content_type": "video", "preferred_time": "19:30", "enabled": "true", "priority": "11", "min_per_day": "2", "max_per_day": "3", "day_type_filter": "special_day,event_day", "narrative_phase_filter": "", "city_filter": "", "weekday_filter": "", "notes": "Special day cadence 2-3"},
+    {"rule_id": "default-recovery-photo", "platform": "Instagram", "content_type": "photo", "preferred_time": "12:00", "enabled": "true", "priority": "12", "min_per_day": "1", "max_per_day": "1", "day_type_filter": "", "narrative_phase_filter": "recovery_phase", "city_filter": "", "weekday_filter": "", "notes": "Recovery phase keeps gentle rhythm"},
 ]
 
 
@@ -94,20 +69,20 @@ class PublishingPlanEngine:
                 city=package.city,
                 day_type=package.day_type,
                 narrative_phase=self._phase(package),
-                scene_moment=scene.scene_moment or scene.description,
-                scene_source=scene.scene_source or scene.source,
-                scene_moment_type=scene.scene_moment_type,
-                moment_signature=scene.moment_signature,
-                visual_focus=scene.visual_focus,
-                activity_type=scene.activity,
+                scene_moment=scene.scene_moment or scene.description or "unspecified_scene",
+                scene_source=scene.scene_source or scene.source or "scene_library",
+                scene_moment_type=scene.scene_moment_type or "lifestyle",
+                moment_signature=scene.moment_signature or f"{package.date.isoformat()}-{idx+1:02d}",
+                visual_focus=scene.visual_focus or "natural daily detail",
+                activity_type=scene.activity or "daily_life",
                 outfit_ids=list(package.outfit.item_ids),
                 prompt_type=content_type,
-                prompt_text=prompt_text,
-                caption_text=caption,
-                short_caption=self._short_caption(caption),
-                post_timezone=persona_timezone,
-                publish_score=ranked_moment.score,
-                selection_reason=selection_reason,
+                prompt_text=prompt_text or (scene.scene_moment or scene.description or "daily lifestyle scene"),
+                caption_text=caption or (scene.scene_moment or scene.description or "A quiet daily moment."),
+                short_caption=self._short_caption(caption or (scene.scene_moment or scene.description or "Daily moment")),
+                post_timezone=persona_timezone or "UTC",
+                publish_score=ranked_moment.score if ranked_moment.score is not None else 0.0,
+                selection_reason=selection_reason or "selected_for_publication",
                 delivery_status="planned",
                 notes=f"score={ranked_moment.score:.2f}; reasons={', '.join(ranked_moment.reasons[:3])}",
             )
@@ -177,6 +152,10 @@ class PublishingPlanEngine:
         quality = sum(1 for r in ranked if r.score >= 1.9)
         very_strong = sum(1 for r in ranked if r.score >= 2.5)
 
+        bounds = self._policy_bounds(package)
+        min_policy = bounds["min"]
+        max_policy = bounds["max"]
+
         base = 1 if quality > 0 else 0
         if package.day_type in {"travel_day", "event_day"} and very_strong >= 2:
             base += 1
@@ -193,7 +172,23 @@ class PublishingPlanEngine:
         if recent >= 7:
             base = max(0, base - 1)
 
-        return max(0, min(base, 3, quality if quality > 0 else base))
+        raw = max(0, min(base, 3, quality if quality > 0 else base))
+        if raw <= 0:
+            return 0
+        return min(max_policy, max(min_policy, raw))
+
+
+    def _policy_bounds(self, package: DailyPackage) -> Dict[str, int]:
+        matched = [r for r in self._load_rules() if self._rule_matches_package(r, package)]
+        if not matched:
+            return {"min": 0, "max": 3}
+        mins = [self._as_int(r.get("min_per_day"), 0) for r in matched]
+        maxs = [self._as_int(r.get("max_per_day"), 3) for r in matched]
+        min_bound = max(0, max(mins) if mins else 0)
+        max_bound = min(3, max(maxs) if maxs else 3)
+        if max_bound < min_bound:
+            max_bound = min_bound
+        return {"min": min_bound, "max": max_bound}
 
     def _select_diverse_moments(self, ranked: List[RankedMoment], target_posts: int) -> List[RankedMoment]:
         selected: List[RankedMoment] = []
@@ -423,9 +418,10 @@ class PublishingPlanEngine:
             f" chosen_signature={fallback_meta.get('chosen_signature') or '-'}"
             f" chosen_score={fallback_meta.get('chosen_score') if fallback_meta.get('chosen_score') is not None else '-'}"
         )
+        bounds = self._policy_bounds(package)
         message = (
             f"publishing_decision date={package.date.isoformat()} generated={len(package.scenes)} "
-            f"ranked={len(ranked)} target={target_posts} selected_initial={initial_selected_count} selected={len(selected)} "
+            f"ranked={len(ranked)} target={target_posts} policy_min={bounds['min']} policy_max={bounds['max']} selected_initial={initial_selected_count} selected={len(selected)} "
             f"times={','.join(assigned_times) or '-'} selected_signatures={selected_signatures} "
             f"top_scores={reasons}{fallback_part}"
         )

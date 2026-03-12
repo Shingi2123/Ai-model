@@ -17,6 +17,85 @@ except Exception:  # optional dependency for local mode
 
 from virtual_persona.models.domain import DailyPackage
 
+
+DEFAULT_POSTING_RULES = [
+    {
+        "rule_id": "default-work-photo",
+        "platform": "Instagram",
+        "content_type": "photo",
+        "preferred_time": "09:30",
+        "enabled": "true",
+        "priority": "10",
+        "min_per_day": "1",
+        "max_per_day": "2",
+        "day_type_filter": "work_day",
+        "narrative_phase_filter": "",
+        "city_filter": "",
+        "weekday_filter": "",
+        "notes": "Work day cadence: 1-2 posts",
+    },
+    {
+        "rule_id": "default-travel-video",
+        "platform": "Instagram",
+        "content_type": "video",
+        "preferred_time": "19:00",
+        "enabled": "true",
+        "priority": "9",
+        "min_per_day": "1",
+        "max_per_day": "3",
+        "day_type_filter": "travel_day",
+        "narrative_phase_filter": "",
+        "city_filter": "",
+        "weekday_filter": "",
+        "notes": "Travel day cadence: 1-3 posts",
+    },
+    {
+        "rule_id": "default-weekend-photo",
+        "platform": "Instagram",
+        "content_type": "photo",
+        "preferred_time": "11:00",
+        "enabled": "true",
+        "priority": "8",
+        "min_per_day": "1",
+        "max_per_day": "2",
+        "day_type_filter": "weekend_day,day_off",
+        "narrative_phase_filter": "",
+        "city_filter": "",
+        "weekday_filter": "",
+        "notes": "Weekend cadence: 1-2 posts",
+    },
+    {
+        "rule_id": "default-special-dual",
+        "platform": "Instagram",
+        "content_type": "video",
+        "preferred_time": "20:00",
+        "enabled": "true",
+        "priority": "11",
+        "min_per_day": "2",
+        "max_per_day": "3",
+        "day_type_filter": "special_day,event_day",
+        "narrative_phase_filter": "",
+        "city_filter": "",
+        "weekday_filter": "",
+        "notes": "Special day cadence: 2-3 posts",
+    },
+    {
+        "rule_id": "default-recovery-gentle",
+        "platform": "Instagram",
+        "content_type": "photo",
+        "preferred_time": "12:00",
+        "enabled": "true",
+        "priority": "12",
+        "min_per_day": "1",
+        "max_per_day": "1",
+        "day_type_filter": "",
+        "narrative_phase_filter": "recovery_phase",
+        "city_filter": "",
+        "weekday_filter": "",
+        "notes": "Recovery phase prefers one careful post",
+    },
+]
+
 logger = logging.getLogger(__name__)
 
 
@@ -82,7 +161,11 @@ class LocalStateStore:
             self._delete_rows_by_date(file_name, target_date)
 
     def load_posting_rules(self) -> List[Dict[str, Any]]:
-        return self._read_json(self.base_dir / "posting_rules.json", [])
+        rows = self._read_json(self.base_dir / "posting_rules.json", [])
+        if rows:
+            return rows
+        self._write_json(self.base_dir / "posting_rules.json", DEFAULT_POSTING_RULES)
+        return list(DEFAULT_POSTING_RULES)
 
     def append_delivery_log(self, row: Dict[str, Any]) -> None:
         path = self.base_dir / "delivery_log.json"
@@ -522,6 +605,16 @@ class GoogleSheetsStateStore:
             "day_type_filter", "narrative_phase_filter", "city_filter", "weekday_filter", "notes",
         ]
         self._ensure_headers("posting_rules", headers)
+        rows = self._safe_records("posting_rules")
+        if rows:
+            return rows
+        ws = self._get_ws("posting_rules")
+        for rule in DEFAULT_POSTING_RULES:
+            self._with_retry(
+                lambda r=rule: ws.append_row([r.get(h, "") for h in headers]),
+                operation_name="append default posting rule",
+            )
+        self._invalidate_sheet_cache("posting_rules")
         return self._safe_records("posting_rules")
 
     def append_delivery_log(self, row: Dict[str, Any]) -> None:

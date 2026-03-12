@@ -103,6 +103,9 @@ def _install_orchestrator_stub() -> None:
             self.state = TelegramStateView(base)
             self.telegram_delivery_service = types.SimpleNamespace(_resolve_persona_timezone=lambda _city: "Europe/Prague")
 
+        def _load_frozen_day(self, _target_date):
+            return None
+
     orchestrator_module.PipelineOrchestrator = PipelineOrchestrator
     sys.modules["virtual_persona.pipeline.orchestrator"] = orchestrator_module
 

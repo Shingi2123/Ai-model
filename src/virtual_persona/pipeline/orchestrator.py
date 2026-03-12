@@ -7,7 +7,7 @@ from virtual_persona.delivery.formatter import package_to_markdown
 from virtual_persona.delivery.telegram_bot import TelegramDelivery
 from virtual_persona.delivery.telegram_delivery_service import TelegramDeliveryService
 from virtual_persona.llm.provider import OpenAIProvider, TemplateFallbackProvider
-from virtual_persona.models.domain import DailyPackage
+from virtual_persona.models.domain import DailyPackage, GeneratedContent, OutfitSelection, PublishingPlanItem, SunSnapshot, WeatherSnapshot
 from virtual_persona.narrative.life_narrative_engine import LifeNarrativeEngine
 from virtual_persona.pipeline.content_generator import ContentGenerator
 from virtual_persona.pipeline.context_builder import ContextBuilder
@@ -54,8 +54,67 @@ class PipelineOrchestrator:
             llm = TemplateFallbackProvider()
         self.content_generator = ContentGenerator(llm, self.state)
 
-    def generate_day(self, target_date: date | None = None, override_city: str | None = None) -> DailyPackage:
-        context = self.context_builder.build(target_date=target_date, override_city=override_city)
+    def _load_frozen_day(self, target_date: date) -> DailyPackage | None:
+        if not hasattr(self.state, "load_publishing_plan"):
+            return None
+        rows = self.state.load_publishing_plan(target_date.isoformat()) or []
+        if not rows:
+            return None
+        city = str(rows[0].get("city") or "Unknown")
+        day_type = str(rows[0].get("day_type") or "work_day")
+        scene_text = " | ".join(str(r.get("scene_moment") or "") for r in rows if r.get("scene_moment"))
+        package = DailyPackage(
+            generated_at=datetime.utcnow(),
+            date=target_date,
+            city=city,
+            day_type=day_type,
+            summary=scene_text or "Frozen daily package",
+            weather=WeatherSnapshot(city=city, temp_c=0, condition="unknown", humidity=0, wind_speed=0, cloudiness=0, source="persisted"),
+            sun=SunSnapshot(sunrise_local=datetime.utcnow(), sunset_local=datetime.utcnow(), source="persisted"),
+            outfit=OutfitSelection(item_ids=[], summary=""),
+            scenes=[],
+            content=GeneratedContent(post_caption="", story_lines=[], photo_prompts=[], video_prompts=[], publish_windows=[], creative_notes=[]),
+        )
+        package.publishing_plan = [
+            PublishingPlanItem(
+                publication_id=str(r.get("publication_id") or f"{target_date.isoformat()}-{idx+1:02d}"),
+                date=target_date,
+                platform=str(r.get("platform") or "Instagram"),
+                post_time=str(r.get("post_time") or "09:30"),
+                content_type=str(r.get("content_type") or "photo"),
+                city=str(r.get("city") or city),
+                day_type=str(r.get("day_type") or day_type),
+                narrative_phase=str(r.get("narrative_phase") or "routine_stability"),
+                scene_moment=str(r.get("scene_moment") or ""),
+                scene_source=str(r.get("scene_source") or ""),
+                scene_moment_type=str(r.get("scene_moment_type") or ""),
+                moment_signature=str(r.get("moment_signature") or ""),
+                visual_focus=str(r.get("visual_focus") or ""),
+                activity_type=str(r.get("activity_type") or ""),
+                outfit_ids=[x.strip() for x in str(r.get("outfit_ids") or "").split(",") if x.strip()],
+                prompt_type=str(r.get("prompt_type") or ""),
+                prompt_text=str(r.get("prompt_text") or ""),
+                caption_text=str(r.get("caption_text") or ""),
+                short_caption=str(r.get("short_caption") or ""),
+                post_timezone=str(r.get("post_timezone") or "UTC"),
+                publish_score=float(r.get("publish_score") or 0.0),
+                selection_reason=str(r.get("selection_reason") or "selected_for_publication"),
+                delivery_status=str(r.get("delivery_status") or "planned"),
+                notes=str(r.get("notes") or ""),
+            )
+            for idx, r in enumerate(rows)
+        ]
+        return package
+
+    def generate_day(self, target_date: date | None = None, override_city: str | None = None, force_regenerate: bool = False) -> DailyPackage:
+        target = target_date or date.today()
+        if not force_regenerate:
+            frozen = self._load_frozen_day(target)
+            if frozen is not None:
+                self.state.save_run_log("info", f"day_generation mode=reuse date={target.isoformat()} rows={len(frozen.publishing_plan)}")
+                return frozen
+
+        context = self.context_builder.build(target_date=target, override_city=override_city)
         if hasattr(self.state, "reset_day_records"):
             self.state.reset_day_records(context["date"].isoformat())
 
@@ -150,7 +209,8 @@ class PipelineOrchestrator:
             self.state.append_life_state(package)
         self.asset_engine.run(package)
         self.state.ensure_city_exists(package)
-        self.state.save_run_log("success", f"Generated package for {package.date} in {package.city}")
+        mode = "regenerate" if force_regenerate else "create"
+        self.state.save_run_log("success", f"day_generation mode={mode} date={package.date.isoformat()} city={package.city} scenes={len(package.scenes)} posts={len(package.publishing_plan)}")
         return package
 
     def send_latest(self, package: DailyPackage) -> bool:
