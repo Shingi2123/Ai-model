@@ -41,3 +41,23 @@ def test_prompt_includes_story_arc_context():
     assert "Story arc" in prompt
     assert "creative_phase" in prompt
     assert "city_walk" in prompt
+
+
+def test_prompt_has_structured_visual_blocks_and_continuity_cues():
+    composer = PromptComposer(DummyState())
+    context = {
+        "city": "Paris",
+        "life_state": LifeState(),
+        "narrative_context": Narrative(),
+        "story_arc": {"arc_type": "creative_phase", "title": "Creative month", "progress": 40},
+        "continuity_context": {"arc_hint": "arrival_and_adaptation", "previous_evening_moment": "hotel check-in"},
+        "persona_voice": {"restraint": 0.8, "reflection": 0.7, "self_irony": 0.2},
+    }
+
+    prompt = composer.compose(context, Scene(), "soft casual", "photo", ["top_1"])
+
+    assert "Subject:" in prompt
+    assert "Setting:" in prompt
+    assert "Wardrobe:" in prompt
+    assert "Continuity cues:" in prompt
+    assert "Haussmann" in prompt

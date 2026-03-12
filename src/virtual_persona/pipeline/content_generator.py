@@ -167,8 +167,10 @@ class ContentGenerator:
             "location": self._safe(scenes[-1].location if scenes else city),
         }
 
+        tone_profile = self._select_caption_tone(context, scenes)
         caption_prompt = (
             f"{self.prompt_composer.compose(context, scenes[-1] if scenes else None, outfit_summary, 'caption', outfit_item_ids)} "
+            f"Tone profile: {tone_profile}. Avoid generic AI phrasing, keep natural social media voice, no literal prompt retelling. "
             f"{self._safe_format(post_template, post_mapping)}"
         )
         post_caption = self.provider.generate(caption_prompt)
@@ -182,8 +184,29 @@ class ContentGenerator:
             creative_notes=[
                 "Keep visual continuity of face and hair unchanged.",
                 "Character lifestyle must remain realistic and coherent.",
+                f"caption_tone={tone_profile}",
             ],
         )
+
+    @staticmethod
+    def _select_caption_tone(context: Dict[str, Any], scenes: List[DayScene]) -> str:
+        day_type = str(context.get("day_type") or "")
+        voice = context.get("persona_voice") or {}
+        reflection = float(voice.get("reflection", 0.65))
+        self_irony = float(voice.get("self_irony", 0.3))
+        if day_type in {"travel_day", "airport_transfer"}:
+            base = "observational_travel"
+        elif day_type in {"work_day"}:
+            base = "grounded_workday"
+        elif day_type in {"day_off", "weekend_day"}:
+            base = "cozy_diary"
+        else:
+            base = "quiet_lifestyle"
+        if any("evening" in (s.time_of_day or "") for s in scenes) and reflection > 0.6:
+            base += "+reflective"
+        if self_irony > 0.45:
+            base += "+light_irony"
+        return base
 
     @staticmethod
     def _lighting_from_scene(time_of_day: str) -> str:

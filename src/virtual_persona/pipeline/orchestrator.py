@@ -209,9 +209,26 @@ class PipelineOrchestrator:
             self.state.append_life_state(package)
         self.asset_engine.run(package)
         self.state.ensure_city_exists(package)
+        self._save_quality_trace(package, context, mode="regenerate" if force_regenerate else "create")
         mode = "regenerate" if force_regenerate else "create"
         self.state.save_run_log("success", f"day_generation mode={mode} date={package.date.isoformat()} city={package.city} scenes={len(package.scenes)} posts={len(package.publishing_plan)}")
         return package
+
+    def _save_quality_trace(self, package: DailyPackage, context: dict, mode: str) -> None:
+        if not hasattr(self.state, "save_run_log"):
+            return
+        primary = package.publishing_plan[0] if package.publishing_plan else None
+        tone = next((note for note in (package.content.creative_notes or []) if str(note).startswith("caption_tone=")), "caption_tone=unknown")
+        continuity = context.get("continuity_context") or {}
+        self.state.save_run_log(
+            "debug",
+            "quality_trace "
+            f"date={package.date.isoformat()} mode={mode} "
+            f"primary_archetype={getattr(primary, 'scene_moment_type', '-') if primary else '-'} "
+            f"moment_signature={getattr(primary, 'moment_signature', '-') if primary else '-'} "
+            f"city_context={package.city}:{continuity.get('arc_hint', 'stable_routine')} "
+            f"outfit_items={','.join(package.outfit.item_ids)} {tone}",
+        )
 
     def send_latest(self, package: DailyPackage) -> bool:
         payload_md = package_to_markdown(package)
