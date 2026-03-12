@@ -158,8 +158,7 @@ def test_callback_refresh_ignores_message_not_modified(monkeypatch):
 
     asyncio.run(module.callback_nav(update, context))
 
-    assert len(query.answer_calls) == 1
-    assert query.answer_calls[0][0] == ("План уже актуален",)
+    assert query.answer_calls == [((), {})]
     assert query.edit_calls == 1
     assert module.logger.exception.call_count == 0
 
@@ -251,9 +250,60 @@ def test_callback_duplicate_post_press_no_fallback(monkeypatch):
 
     asyncio.run(module.callback_nav(update, context))
 
-    assert query.answer_calls[0][0] == ("План уже актуален",)
+    assert query.answer_calls == [((), {})]
     assert module.logger.exception.call_count == 0
 
+
+
+
+def test_callback_nav_uses_safe_wrappers_runtime(monkeypatch):
+    module = _load_module()
+    plan_context, plan_items = _context_and_items(module)
+
+    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
+    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
+    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
+
+    wrapper_calls = {"answer": 0, "edit": 0}
+
+    async def fake_safe_answer(_query, text=None, *, show_alert=False):
+        wrapper_calls["answer"] += 1
+        return True
+
+    async def fake_safe_edit(_query, *, text, markup, parse_mode=None):
+        wrapper_calls["edit"] += 1
+        return True
+
+    monkeypatch.setattr(module, "safe_answer_callback", fake_safe_answer)
+    monkeypatch.setattr(module, "safe_edit_message", fake_safe_edit)
+
+    class Query:
+        def __init__(self):
+            self.data = "plan:2026-03-12"
+
+        async def answer(self, *args, **kwargs):
+            raise AssertionError("callback_nav must not call query.answer directly")
+
+        async def edit_message_text(self, **kwargs):
+            raise AssertionError("callback_nav must not call query.edit_message_text directly")
+
+    query = Query()
+    update = types.SimpleNamespace(callback_query=query)
+    context = types.SimpleNamespace(user_data={})
+
+    asyncio.run(module.callback_nav(update, context))
+
+    assert wrapper_calls == {"answer": 1, "edit": 1}
+
+
+def test_callback_nav_source_has_no_direct_query_calls():
+    source = Path("scripts/telegram_polling.py").read_text(encoding="utf-8")
+    start = source.index("async def callback_nav")
+    end = source.index("\n\nasync def plan_cmd")
+    callback_source = source[start:end]
+
+    assert "query.answer(" not in callback_source
+    assert "query.edit_message_text(" not in callback_source
 
 def test_show_today_plan_existing_plan_uses_persisted_data(monkeypatch):
     module = _load_module()

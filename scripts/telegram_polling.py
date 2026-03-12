@@ -171,7 +171,6 @@ async def safe_edit_message(
         message = str(exc)
         if "Message is not modified" in message:
             logger.info("telegram_plan_view unchanged action=callback data=%s", query.data)
-            await safe_answer_callback(query, "План уже актуален")
             return False
         if "Query is too old" in message or "query id is invalid" in message.lower():
             logger.info("telegram_plan_view stale_callback action=callback data=%s", query.data)
@@ -268,7 +267,10 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     query = update.callback_query
     try:
         parsed = parse_callback(query.data or "")
-        logger.info("telegram_callback start view=%s data=%s", parsed.view, query.data)
+        logger.debug("telegram_callback start view=%s data=%s", parsed.view, query.data)
+
+        answer_ok = await safe_answer_callback(query)
+        logger.debug("telegram_callback answer_callback %s view=%s", "ok" if answer_ok else "skipped", parsed.view)
 
         cached_context, cached_items = _load_cached_screen(context)
         target_date = _resolve_target_date(parsed, cached_context)
@@ -295,12 +297,12 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if should_cache:
             context.user_data["plan_screen"] = serialize_context(plan_context, items)
 
+        logger.debug("telegram_callback render_attempt view=%s", parsed.view)
         changed = await safe_edit_message(query, text=text, markup=markup)
         if not changed:
-            logger.info("telegram_callback render_success view=%s changed=no", parsed.view)
+            logger.debug("telegram_callback render_unchanged view=%s", parsed.view)
             return
-        logger.info("telegram_callback render_success view=%s changed=yes", parsed.view)
-        await safe_answer_callback(query)
+        logger.debug("telegram_callback render_success view=%s", parsed.view)
     except Exception as exc:
         logger.exception("telegram_callback fatal_error data=%s error=%s", query.data, exc)
         try:
