@@ -304,9 +304,26 @@ class GoogleSheetsStateStore:
         )
         return ws
 
+    def get_worksheet(self, title: str):
+        """Return a worksheet object using in-process cache to minimize read quota usage."""
+        return self._get_ws(title)
+
     def _is_quota_error(self, exc: Exception) -> bool:
         text = str(exc).lower()
         return "429" in text or "quota" in text or "too many requests" in text
+
+    def _retry_delay(self, exc: Exception, attempt: int) -> int:
+        response = getattr(exc, "response", None)
+        if response is not None:
+            retry_after = None
+            if hasattr(response, "headers"):
+                retry_after = response.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    return max(1, int(retry_after))
+                except (TypeError, ValueError):
+                    pass
+        return min(30, 2 ** attempt)
 
     def _with_retry(self, operation, *, operation_name: str):
         last_exc = None
@@ -317,7 +334,7 @@ class GoogleSheetsStateStore:
                 last_exc = exc
                 if not self._is_quota_error(exc) or attempt == 4:
                     break
-                delay = 2 ** attempt
+                delay = self._retry_delay(exc, attempt)
                 logger.warning(
                     "Google Sheets quota issue during %s (attempt %s/5). Retry in %ss.",
                     operation_name,
@@ -807,11 +824,42 @@ class GoogleSheetsStateStore:
         )
 
 
-def build_state_store(settings):
+class TelegramStateView:
+    """Lightweight state view for Telegram polling mode.
+
+    Exposes only the worksheets needed for displaying publication plan data.
+    """
+
+    def __init__(self, base_store: Any) -> None:
+        self._base_store = base_store
+
+    def available(self) -> bool:
+        return bool(getattr(self._base_store, "available", lambda: True)())
+
+    def load_publishing_plan(self, target_date: str | None = None) -> List[Dict[str, Any]]:
+        if hasattr(self._base_store, "load_publishing_plan"):
+            return self._base_store.load_publishing_plan(target_date)
+        return []
+
+    def load_cities(self) -> List[Dict[str, Any]]:
+        if hasattr(self._base_store, "load_cities"):
+            return self._base_store.load_cities()
+        return []
+
+    def load_life_state(self) -> List[Dict[str, Any]]:
+        if hasattr(self._base_store, "load_life_state"):
+            return self._base_store.load_life_state()
+        return []
+
+
+def build_state_store(settings, mode: str = "full"):
     backend = (settings.state_backend or "auto").lower()
 
     if backend == "local":
-        return LocalStateStore()
+        store = LocalStateStore()
+        if mode.lower() == "telegram":
+            return TelegramStateView(store)
+        return store
 
     if backend in ("google", "gsheets", "google_sheets", "auto"):
         if settings.google_service_account_json_path and settings.google_sheet_id:
@@ -820,6 +868,8 @@ def build_state_store(settings):
                 sheet_id=settings.google_sheet_id,
             )
             if gs.available():
+                if mode.lower() == "telegram":
+                    return TelegramStateView(gs)
                 return gs
             if backend in ("google", "gsheets", "google_sheets"):
                 raise RuntimeError(f"Google Sheets backend unavailable: {gs.last_error or 'unknown error'}")
@@ -827,4 +877,7 @@ def build_state_store(settings):
         elif backend in ("google", "gsheets", "google_sheets"):
             raise RuntimeError("Google Sheets backend requested but credentials are missing")
 
-    return LocalStateStore()
+    store = LocalStateStore()
+    if mode.lower() == "telegram":
+        return TelegramStateView(store)
+    return store

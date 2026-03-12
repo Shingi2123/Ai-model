@@ -27,9 +27,10 @@ from virtual_persona.storage.state_store import build_state_store
 
 
 class PipelineOrchestrator:
-    def __init__(self, settings: AppSettings) -> None:
+    def __init__(self, settings: AppSettings, mode: str = "full") -> None:
         self.settings = settings
-        self.state = build_state_store(settings)
+        self.mode = mode
+        self.state = build_state_store(settings, mode=mode)
         self.context_builder = ContextBuilder(settings, self.state)
         self.planner = DailyPlanner(self.state)
         self.wardrobe = WardrobeManager(self.state)

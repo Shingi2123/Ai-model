@@ -1,4 +1,4 @@
-from virtual_persona.storage.state_store import GoogleSheetsStateStore
+from virtual_persona.storage.state_store import GoogleSheetsStateStore, TelegramStateView, build_state_store
 
 
 class FakeWS:
@@ -59,6 +59,12 @@ class CacheSheet:
         return self.ws
 
 
+class SettingsStub:
+    state_backend = "local"
+    google_service_account_json_path = ""
+    google_sheet_id = ""
+
+
 def test_google_store_scene_memory_saved_to_worksheet():
     store = HelperGoogleStore()
 
@@ -95,9 +101,18 @@ def test_google_store_reuses_cached_worksheet_handle():
     store._headers_ensured = set()
     store._worksheet_fetch_count = 0
 
-    ws_1 = store._get_ws("daily_calendar")
-    ws_2 = store._get_ws("daily_calendar")
+    ws_1 = store.get_worksheet("daily_calendar")
+    ws_2 = store.get_worksheet("daily_calendar")
 
     assert ws_1 is ws_2
     assert store.sheet.calls == 1
     assert store._worksheet_fetch_count == 1
+
+
+def test_telegram_state_view_exposes_only_needed_methods():
+    base = build_state_store(SettingsStub(), mode="telegram")
+    assert isinstance(base, TelegramStateView)
+    assert hasattr(base, "load_publishing_plan")
+    assert hasattr(base, "load_cities")
+    assert hasattr(base, "load_life_state")
+    assert not hasattr(base, "load_wardrobe")

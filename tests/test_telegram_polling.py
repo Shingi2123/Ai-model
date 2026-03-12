@@ -90,7 +90,8 @@ def _install_orchestrator_stub() -> None:
     orchestrator_module = types.ModuleType("virtual_persona.pipeline.orchestrator")
 
     class PipelineOrchestrator:
-        def __init__(self, _settings):
+        def __init__(self, _settings, mode="full"):
+            self.mode = mode
             self.state = types.SimpleNamespace(load_publishing_plan=lambda _d: [])
             self.telegram_delivery_service = types.SimpleNamespace(_resolve_persona_timezone=lambda _city: "Europe/Prague")
 
@@ -109,6 +110,8 @@ def test_callback_refresh_ignores_message_not_modified(monkeypatch):
     assert spec and spec.loader
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
+
+    assert module.orchestrator.mode == "telegram"
 
     plan_context = module.PlanScreenContext(
         target_date=date(2026, 3, 12),
