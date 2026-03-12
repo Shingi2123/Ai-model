@@ -44,9 +44,15 @@ from virtual_persona.delivery.telegram_navigation import (
     serialize_context,
 )
 from virtual_persona.pipeline.orchestrator import PipelineOrchestrator
+from virtual_persona.storage.state_store import TelegramStateView
 
 settings = AppSettings.from_env()
 orchestrator = PipelineOrchestrator(settings, mode="telegram")
+if not isinstance(orchestrator.state, TelegramStateView):
+    raise RuntimeError(
+        "telegram_polling must run with TelegramStateView (lightweight state); "
+        f"got {type(orchestrator.state).__name__}"
+    )
 GET_PLAN_BUTTON = "📅 Получить план на сегодня"
 logger = logging.getLogger(__name__)
 
