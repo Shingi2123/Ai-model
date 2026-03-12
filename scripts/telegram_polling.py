@@ -275,6 +275,8 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         parsed = parse_callback(query.data or "")
         logger.debug("telegram_callback start view=%s data=%s", parsed.view, query.data)
 
+        # IMPORTANT: use only safe wrappers in callbacks to avoid BadRequest crashes
+        # from stale callback ids or unchanged message content.
         answer_ok = await safe_answer_callback(query)
         logger.debug("telegram_callback answer_callback %s view=%s", "ok" if answer_ok else "skipped", parsed.view)
 
