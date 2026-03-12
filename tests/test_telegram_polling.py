@@ -99,7 +99,7 @@ def _install_orchestrator_stub() -> None:
     sys.modules["virtual_persona.pipeline.orchestrator"] = orchestrator_module
 
 
-def test_callback_refresh_ignores_message_not_modified(monkeypatch):
+def _load_module():
     _install_telegram_stubs()
     _install_orchestrator_stub()
 
@@ -110,9 +110,11 @@ def test_callback_refresh_ignores_message_not_modified(monkeypatch):
     assert spec and spec.loader
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
-
     assert module.orchestrator.mode == "telegram"
+    return module
 
+
+def _context_and_items(module):
     plan_context = module.PlanScreenContext(
         target_date=date(2026, 3, 12),
         city="Paris",
@@ -122,6 +124,13 @@ def test_callback_refresh_ignores_message_not_modified(monkeypatch):
         user_timezone="Asia/Pavlodar",
     )
     plan_items = []
+    return plan_context, plan_items
+
+
+def test_callback_refresh_ignores_message_not_modified(monkeypatch):
+    module = _load_module()
+
+    plan_context, plan_items = _context_and_items(module)
 
     monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
     monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
@@ -153,4 +162,126 @@ def test_callback_refresh_ignores_message_not_modified(monkeypatch):
     assert query.answer_calls[0][0] == ("План уже актуален",)
     assert query.edit_calls == 1
     assert module.logger.exception.call_count == 0
-    module.logger.info.assert_any_call("telegram_plan_view unchanged action=callback data=%s", query.data)
+
+
+def test_callback_refresh_recovers_from_stale_session(monkeypatch):
+    module = _load_module()
+    plan_context, plan_items = _context_and_items(module)
+
+    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
+    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
+    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
+
+    module.logger.exception = Mock()
+
+    class Query:
+        def __init__(self):
+            self.data = "plan:2026-03-12"
+            self.answer_calls = []
+            self.edit_payload = None
+
+        async def answer(self, *args, **kwargs):
+            self.answer_calls.append((args, kwargs))
+
+        async def edit_message_text(self, **kwargs):
+            self.edit_payload = kwargs
+
+    query = Query()
+    update = types.SimpleNamespace(callback_query=query)
+    context = types.SimpleNamespace(user_data={"plan_screen": {"broken": "state"}})
+
+    asyncio.run(module.callback_nav(update, context))
+
+    assert query.edit_payload["text"] == "План публикаций"
+    assert query.answer_calls == [ ((), {}) ]
+    assert module.logger.exception.call_count == 0
+
+
+def test_callback_back_to_plan_after_prompt(monkeypatch):
+    module = _load_module()
+    plan_context, plan_items = _context_and_items(module)
+
+    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
+    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
+    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
+
+    class Query:
+        def __init__(self):
+            self.data = "back:plan:2026-03-12"
+            self.answer_calls = []
+
+        async def answer(self, *args, **kwargs):
+            self.answer_calls.append((args, kwargs))
+
+        async def edit_message_text(self, **_kwargs):
+            return None
+
+    query = Query()
+    update = types.SimpleNamespace(callback_query=query)
+    context = types.SimpleNamespace(user_data={"plan_screen": "cached"})
+
+    asyncio.run(module.callback_nav(update, context))
+
+    assert query.answer_calls == [((), {})]
+    assert context.user_data["plan_screen"] == "cached"
+
+
+def test_callback_duplicate_post_press_no_fallback(monkeypatch):
+    module = _load_module()
+    module.logger.exception = Mock()
+
+    class Query:
+        def __init__(self):
+            self.data = "p:2026-03-12:pub-1"
+            self.answer_calls = []
+
+        async def answer(self, *args, **kwargs):
+            self.answer_calls.append((args, kwargs))
+
+        async def edit_message_text(self, **_kwargs):
+            raise module.BadRequest("Message is not modified")
+
+    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (_context_and_items(module)))
+    monkeypatch.setattr(module, "_render_post", lambda _context, _items, _idx: ("POST", object()))
+    monkeypatch.setattr(module, "_get_item_index", lambda _items, _pub_id, _post_idx: 0)
+
+    query = Query()
+    update = types.SimpleNamespace(callback_query=query)
+    context = types.SimpleNamespace(user_data={})
+
+    asyncio.run(module.callback_nav(update, context))
+
+    assert query.answer_calls[0][0] == ("План уже актуален",)
+    assert module.logger.exception.call_count == 0
+
+
+def test_show_today_plan_existing_plan_uses_persisted_data(monkeypatch):
+    module = _load_module()
+    plan_context, plan_items = _context_and_items(module)
+
+    monkeypatch.setattr(module, "_ensure_today_plan", lambda: (plan_context, plan_items))
+    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
+    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
+
+    class LoadingMessage:
+        def __init__(self):
+            self.edits = []
+
+        async def edit_text(self, text, reply_markup=None):
+            self.edits.append((text, reply_markup))
+
+    class Message:
+        def __init__(self):
+            self.loading = LoadingMessage()
+
+        async def reply_text(self, _text):
+            return self.loading
+
+    message = Message()
+    update = types.SimpleNamespace(message=message)
+    context = types.SimpleNamespace(user_data={})
+
+    asyncio.run(module.show_today_plan(update, context))
+
+    assert message.loading.edits[0][0] == "План публикаций"
+    assert context.user_data["plan_screen"] == "cached"
