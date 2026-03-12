@@ -221,3 +221,21 @@ def test_scene_decisions_are_written_with_fallback_metadata():
     assert "fallback_selected" in decisions.values()
     assert all(scene.publish_score is not None for scene in package.scenes)
     assert all(scene.decision_reason for scene in package.scenes)
+
+
+def test_publishing_plan_row_contains_timezone_and_decision_metadata():
+    state = DummyState()
+    engine = PublishingPlanEngine(state)
+
+    rows = engine.generate(_build_package(day_type="travel_day", phase="transition_phase"))
+
+    assert rows
+    first = rows[0]
+    assert first.post_timezone
+    assert first.publish_score is not None
+    assert first.selection_reason
+
+    persisted = state.rows[0]
+    assert persisted["post_timezone"]
+    assert persisted["publish_score"] is not None
+    assert persisted["selection_reason"]

@@ -76,6 +76,7 @@ class PublishingPlanEngine:
 
         assigned_times = self._assign_times(package, selected, rules)
         content_types = self._assign_content_types(selected, rules)
+        self._annotate_moment_decisions(package, ranked, selected, initial_selected_count, fallback_meta)
 
         items: List[PublishingPlanItem] = []
         for idx, ranked_moment in enumerate(selected):
@@ -83,6 +84,7 @@ class PublishingPlanEngine:
             content_type = content_types[idx]
             prompt_text = self._pick_prompt_text(package, scene, content_type)
             caption = package.content.post_caption
+            selection_reason = self._selection_reason(scene)
             item = PublishingPlanItem(
                 publication_id=f"{package.date.isoformat()}-{idx+1:02d}",
                 date=package.date,
@@ -104,13 +106,14 @@ class PublishingPlanEngine:
                 caption_text=caption,
                 short_caption=self._short_caption(caption),
                 post_timezone=persona_timezone,
+                publish_score=ranked_moment.score,
+                selection_reason=selection_reason,
                 delivery_status="planned",
                 notes=f"score={ranked_moment.score:.2f}; reasons={', '.join(ranked_moment.reasons[:3])}",
             )
             items.append(item)
 
         package.publishing_plan = items
-        self._annotate_moment_decisions(package, ranked, selected, initial_selected_count, fallback_meta)
 
         if hasattr(self.state, "append_publishing_plan"):
             for item in items:
@@ -434,7 +437,7 @@ class PublishingPlanEngine:
             for row in self.state.load_cities() or []:
                 if str(row.get("city", "")).strip().lower() == city.strip().lower() and row.get("timezone"):
                     return str(row.get("timezone")).strip()
-        return ""
+        return "UTC"
 
     def _load_rules(self) -> List[Dict[str, Any]]:
         if hasattr(self.state, "load_posting_rules"):
@@ -486,6 +489,16 @@ class PublishingPlanEngine:
         if package.content.photo_prompts:
             return package.content.photo_prompts[min(index, len(package.content.photo_prompts) - 1)]
         return scene.scene_moment or scene.description
+
+    @staticmethod
+    def _selection_reason(scene: DayScene) -> str:
+        reason = str(getattr(scene, "decision_reason", "") or "").strip()
+        if reason:
+            return reason
+        decision = str(getattr(scene, "publish_decision", "") or "").strip()
+        if decision:
+            return decision
+        return "selected_for_publication"
 
     @staticmethod
     def _item_to_row(item: PublishingPlanItem) -> Dict[str, Any]:

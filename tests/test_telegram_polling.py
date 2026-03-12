@@ -89,10 +89,18 @@ def _install_telegram_stubs() -> None:
 def _install_orchestrator_stub() -> None:
     orchestrator_module = types.ModuleType("virtual_persona.pipeline.orchestrator")
 
+    from virtual_persona.storage.state_store import TelegramStateView
+
     class PipelineOrchestrator:
         def __init__(self, _settings, mode="full"):
             self.mode = mode
-            self.state = types.SimpleNamespace(load_publishing_plan=lambda _d: [])
+            base = types.SimpleNamespace(
+                available=lambda: True,
+                load_publishing_plan=lambda _d=None: [],
+                load_cities=lambda: [],
+                load_life_state=lambda: [],
+            )
+            self.state = TelegramStateView(base)
             self.telegram_delivery_service = types.SimpleNamespace(_resolve_persona_timezone=lambda _city: "Europe/Prague")
 
     orchestrator_module.PipelineOrchestrator = PipelineOrchestrator
@@ -335,3 +343,49 @@ def test_show_today_plan_existing_plan_uses_persisted_data(monkeypatch):
 
     assert message.loading.edits[0][0] == "План публикаций"
     assert context.user_data["plan_screen"] == "cached"
+
+
+def test_callback_nav_stale_query_answer_is_recoverable(monkeypatch):
+    module = _load_module()
+    plan_context, plan_items = _context_and_items(module)
+
+    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
+    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
+    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
+    module.logger.exception = Mock()
+
+    class Query:
+        def __init__(self):
+            self.data = "plan:2026-03-12"
+
+        async def answer(self, *_args, **_kwargs):
+            raise module.BadRequest("Query is too old and response timeout expired")
+
+        async def edit_message_text(self, **_kwargs):
+            return None
+
+    asyncio.run(module.callback_nav(types.SimpleNamespace(callback_query=Query()), types.SimpleNamespace(user_data={})))
+    assert module.logger.exception.call_count == 0
+
+
+def test_callback_nav_invalid_query_id_is_recoverable(monkeypatch):
+    module = _load_module()
+    plan_context, plan_items = _context_and_items(module)
+
+    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
+    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
+    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
+    module.logger.exception = Mock()
+
+    class Query:
+        def __init__(self):
+            self.data = "plan:2026-03-12"
+
+        async def answer(self, *_args, **_kwargs):
+            raise module.BadRequest("query id is invalid")
+
+        async def edit_message_text(self, **_kwargs):
+            return None
+
+    asyncio.run(module.callback_nav(types.SimpleNamespace(callback_query=Query()), types.SimpleNamespace(user_data={})))
+    assert module.logger.exception.call_count == 0
