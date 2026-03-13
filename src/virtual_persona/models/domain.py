@@ -138,6 +138,7 @@ class GeneratedContent:
     video_prompts: List[str]
     publish_windows: List[str]
     creative_notes: List[str]
+    prompt_packages: List[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -159,8 +160,12 @@ class PublishingPlanItem:
     outfit_ids: List[str]
     prompt_type: str
     prompt_text: str
-    caption_text: str
-    short_caption: str
+    negative_prompt: str = ""
+    prompt_package_json: str = ""
+    shot_archetype: str = ""
+    platform_intent: str = ""
+    caption_text: str = ""
+    short_caption: str = ""
     post_timezone: str = ""
     publish_score: float | None = None
     selection_reason: str = ""

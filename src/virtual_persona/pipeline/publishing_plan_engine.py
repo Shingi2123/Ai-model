@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import json
 from datetime import date, datetime
 from typing import Any, Dict, List
 
@@ -64,6 +65,7 @@ class PublishingPlanEngine:
             scene = ranked_moment.scene
             content_type = content_types[idx]
             prompt_text = self._pick_prompt_text(package, scene, content_type)
+            prompt_meta = self._pick_prompt_package(package, scene, content_type)
             caption = package.content.post_caption
             selection_reason = self._selection_reason(scene)
             item = PublishingPlanItem(
@@ -84,6 +86,10 @@ class PublishingPlanEngine:
                 outfit_ids=list(package.outfit.item_ids),
                 prompt_type=content_type,
                 prompt_text=self._required_text(prompt_text, scene.scene_moment or scene.description or "daily lifestyle scene"),
+                negative_prompt=str(prompt_meta.get("negative_prompt", "")),
+                prompt_package_json=json.dumps(prompt_meta, ensure_ascii=False),
+                shot_archetype=str(prompt_meta.get("shot_archetype", "")),
+                platform_intent=str(prompt_meta.get("platform_intent", "")),
                 caption_text=self._required_text(caption, scene.scene_moment or scene.description or "A quiet daily moment."),
                 short_caption=self._short_caption(self._required_text(caption, scene.scene_moment or scene.description or "Daily moment"), limit=72),
                 post_timezone=persona_timezone or "UTC",
@@ -511,6 +517,22 @@ class PublishingPlanEngine:
         if package.content.photo_prompts:
             return package.content.photo_prompts[min(index, len(package.content.photo_prompts) - 1)]
         return scene.scene_moment or scene.description
+
+
+    @staticmethod
+    def _pick_prompt_package(package: DailyPackage, scene: DayScene, content_type: str) -> Dict[str, Any]:
+        packages = getattr(package.content, "prompt_packages", []) or []
+        index = next((i for i, s in enumerate(package.scenes) if s == scene), 0)
+        if not packages:
+            return {}
+        payload = packages[min(index, len(packages) - 1)]
+        if not isinstance(payload, dict):
+            return {}
+        candidate = payload.get(content_type) or payload.get("photo") or {}
+        if isinstance(candidate, dict):
+            candidate.setdefault("platform_intent", "instagram_feed" if content_type in {"photo", "carousel"} else ("reel_cover" if content_type in {"video", "reel"} else "story_lifestyle"))
+            return candidate
+        return {}
 
     @staticmethod
     def _selection_reason(scene: DayScene) -> str:
