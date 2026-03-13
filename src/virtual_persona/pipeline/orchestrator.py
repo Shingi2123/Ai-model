@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, date
+import json
 
 from virtual_persona.config.settings import AppSettings
 from virtual_persona.delivery.formatter import package_to_markdown
@@ -24,6 +25,13 @@ from virtual_persona.pipeline.world_expansion_engine import WorldExpansionEngine
 from virtual_persona.pipeline.wardrobe_brain import WardrobeBrain
 from virtual_persona.services.wardrobe import WardrobeManager
 from virtual_persona.storage.state_store import build_state_store
+
+
+def short_text(text: str, limit: int) -> str:
+    compact = " ".join((text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 1].rstrip() + "…"
 
 
 class PipelineOrchestrator:
@@ -188,7 +196,10 @@ class PipelineOrchestrator:
         self.state.save_content_package(package)
         self.state.append_history(package)
         if hasattr(self.state, "append_content_moment_memory"):
-            for scene in package.scenes:
+            prompt_packages = getattr(package.content, "prompt_packages", []) or []
+            for idx, scene in enumerate(package.scenes):
+                meta = prompt_packages[min(idx, len(prompt_packages) - 1)] if prompt_packages else {}
+                photo_meta = meta.get("photo") if isinstance(meta, dict) else {}
                 self.state.append_content_moment_memory(
                     {
                         "date": package.date.isoformat(),
@@ -199,6 +210,8 @@ class PipelineOrchestrator:
                         "moment_signature": getattr(scene, "moment_signature", ""),
                         "visual_focus": getattr(scene, "visual_focus", ""),
                         "scene_source": getattr(scene, "scene_source", ""),
+                        "shot_archetype": (photo_meta or {}).get("shot_archetype", ""),
+                        "platform_intent": (photo_meta or {}).get("platform_behavior", ""),
                         "publish_score": getattr(scene, "publish_score", ""),
                         "publish_decision": getattr(scene, "publish_decision", ""),
                         "decision_reason": getattr(scene, "decision_reason", ""),
@@ -220,11 +233,22 @@ class PipelineOrchestrator:
         primary = package.publishing_plan[0] if package.publishing_plan else None
         tone = next((note for note in (package.content.creative_notes or []) if str(note).startswith("caption_tone=")), "caption_tone=unknown")
         continuity = context.get("continuity_context") or {}
+        prompt_meta = {}
+        if primary and getattr(primary, "prompt_package_json", ""):
+            try:
+                prompt_meta = json.loads(primary.prompt_package_json or "{}")
+            except Exception:
+                prompt_meta = {}
         self.state.save_run_log(
             "debug",
             "quality_trace "
             f"date={package.date.isoformat()} mode={mode} "
-            f"primary_archetype={getattr(primary, 'scene_moment_type', '-') if primary else '-'} "
+            f"primary_scene_type={getattr(primary, 'scene_moment_type', '-') if primary else '-'} "
+            f"shot_archetype={prompt_meta.get('shot_archetype', getattr(primary, 'shot_archetype', '-')) if primary else '-'} "
+            f"device_identity={short_text(str(prompt_meta.get('device_identity', '-')), 96)} "
+            f"platform_intent={prompt_meta.get('platform_intent', getattr(primary, 'platform_intent', '-')) if primary else '-'} "
+            f"layers=camera_behavior:{bool(prompt_meta.get('camera_behavior_memory'))},face:{bool(prompt_meta.get('face_consistency'))},micro:{bool(prompt_meta.get('micro_imperfections'))},physics:{bool(prompt_meta.get('camera_physics'))},anti_generic:{bool(prompt_meta.get('anti_generic_constraints'))} "
+            f"favorite_location={short_text(str(prompt_meta.get('favorite_locations', '-')), 72)} "
             f"moment_signature={getattr(primary, 'moment_signature', '-') if primary else '-'} "
             f"city_context={package.city}:{continuity.get('arc_hint', 'stable_routine')} "
             f"outfit_items={','.join(package.outfit.item_ids)} {tone}",

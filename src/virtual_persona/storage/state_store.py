@@ -550,7 +550,7 @@ class GoogleSheetsStateStore:
             ],
             "content_moment_memory": [
                 "date", "city", "day_type", "scene_moment", "scene_moment_type", "moment_signature", "visual_focus",
-                "scene_source", "publish_score", "publish_decision", "decision_reason",
+                "scene_source", "shot_archetype", "platform_intent", "publish_score", "publish_decision", "decision_reason",
             ],
         }
         for title, headers in sheets_with_headers.items():
@@ -880,7 +880,7 @@ class GoogleSheetsStateStore:
     def append_content_moment_memory(self, row: Dict[str, Any]) -> None:
         headers = [
             "date", "city", "day_type", "scene_moment", "scene_moment_type", "moment_signature", "visual_focus", "scene_source",
-            "publish_score", "publish_decision", "decision_reason",
+            "shot_archetype", "platform_intent", "publish_score", "publish_decision", "decision_reason",
         ]
         self._ensure_headers("content_moment_memory", headers)
         self._append_dict_row("content_moment_memory", headers, row)

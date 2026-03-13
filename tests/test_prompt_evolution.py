@@ -52,6 +52,9 @@ BASE_CONTEXT = {
         "skin_realism_profile": "real pores",
         "signature_appearance_cues": "freckles and soft brows",
         "device_profile": "iPhone 16 Pro natural color profile",
+        "recurring_phone_device": "graphite iPhone-class device with clear case",
+        "face_signature": "soft straight brows, medium-full lips, balanced eye spacing, rounded cheek contour",
+        "favorite_locations_memory": "kitchen window corner, hallway mirror, neighborhood cafe corner",
     },
 }
 
@@ -70,7 +73,10 @@ def test_prompt_v2_contains_all_required_semantic_blocks():
         "sensor_realism",
         "smartphone_behavior",
         "micro_imperfections",
+        "camera_behavior_memory",
+        "face_consistency",
         "device_identity",
+        "favorite_locations",
         "platform_intent",
         "composition_and_lighting",
         "realism_cues",
@@ -133,3 +139,101 @@ def test_outfit_binding_and_continuity_cues_influence_final_prompt():
     assert "cream cardigan + vintage denim" in final_prompt
     assert "arrival_and_adaptation" in final_prompt
     assert "not fully unpacked luggage" in final_prompt
+
+
+def test_face_consistency_signature_appears_in_prompt():
+    composer = PromptComposer(DummyState())
+    package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan", "photo", ["top_1"])
+
+    assert "face consistency signature" in package["face_consistency"]
+    assert "balanced eye spacing" in package["final_prompt"]
+
+
+def test_device_identity_is_consistent_for_selfie_and_mirror_and_mirror_geometry_present():
+    composer = PromptComposer(DummyState())
+
+    mirror_scene = Scene()
+    mirror_scene.scene_moment = "Mirror selfie in hallway before leaving"
+    mirror_scene.scene_moment_type = "diary_mirror"
+    mirror_package = composer.compose_package(BASE_CONTEXT, mirror_scene, "cream cardigan", "photo", ["top_1"])
+
+    selfie_scene = Scene()
+    selfie_scene.scene_moment = "Front selfie while waiting for coffee"
+    selfie_scene.scene_moment_type = "selfie"
+    selfie_package = composer.compose_package(BASE_CONTEXT, selfie_scene, "cream cardigan", "photo", ["top_1"])
+
+    assert "graphite iPhone-class device with clear case" in mirror_package["device_identity"]
+    assert "graphite iPhone-class device with clear case" in selfie_package["device_identity"]
+    assert "phone visible in reflection" in mirror_package["camera_context"]
+
+
+def test_candid_friend_shot_has_observer_and_handheld_realism():
+    composer = PromptComposer(DummyState())
+    scene = Scene()
+    scene.scene_moment = "Candid frame while crossing the street"
+    scene.scene_moment_type = "street_candid"
+
+    package = composer.compose_package(BASE_CONTEXT, scene, "cream cardigan", "photo", ["top_1"])
+
+    assert package["shot_archetype"] in {"candid_handheld", "friend_shot"}
+    assert "handheld" in package["camera_context"].lower() or "observer" in package["camera_context"].lower()
+    assert "micro-motion" in package["camera_physics"]
+
+
+def test_negative_prompt_changes_by_archetype_and_scene():
+    composer = PromptComposer(DummyState())
+
+    mirror_scene = Scene()
+    mirror_scene.scene_moment = "Mirror selfie in hotel room"
+    mirror_scene.location = "hotel room"
+    mirror_package = composer.compose_package(BASE_CONTEXT, mirror_scene, "tee", "photo", ["tee_1"])
+
+    candid_scene = Scene()
+    candid_scene.scene_moment = "Street candid near tram stop"
+    candid_scene.location = "city street"
+    candid_scene.scene_moment_type = "street_candid"
+    candid_package = composer.compose_package(BASE_CONTEXT, candid_scene, "tee", "photo", ["tee_1"])
+
+    assert "broken mirror geometry" in mirror_package["negative_prompt"]
+    assert "broken mirror geometry" not in candid_package["negative_prompt"]
+    assert "impossible pedestrian scale" in candid_package["negative_prompt"]
+
+
+def test_platform_intent_changes_behavior_mode_and_polish_cues():
+    composer = PromptComposer(DummyState())
+
+    feed_pkg = composer.compose_package(BASE_CONTEXT, Scene(), "tee", "photo", ["tee_1"], platform_intent="instagram_feed")
+    story_pkg = composer.compose_package(BASE_CONTEXT, Scene(), "tee", "story", ["tee_1"], platform_intent="story_lifestyle")
+
+    assert "behavior_mode=instagram_feed" in feed_pkg["platform_intent"]
+    assert "behavior_mode=story_lifestyle" in story_pkg["platform_intent"]
+    assert feed_pkg["platform_intent"] != story_pkg["platform_intent"]
+
+
+def test_favorite_location_memory_can_surface_in_prompt():
+    composer = PromptComposer(DummyState())
+    scene = Scene()
+    scene.location = "kitchen window corner"
+
+    package = composer.compose_package(BASE_CONTEXT, scene, "tee", "photo", ["tee_1"])
+
+    assert "favorite location memory" in package["favorite_locations"]
+    assert "kitchen window corner" in package["favorite_locations"]
+
+
+def test_required_realism_blocks_are_structurally_present_and_anti_generic_constraints_enabled():
+    composer = PromptComposer(DummyState())
+    package = composer.compose_package(BASE_CONTEXT, Scene(), "tee", "photo", ["tee_1"])
+
+    for key in [
+        "camera_behavior_memory",
+        "camera_physics",
+        "sensor_realism",
+        "smartphone_behavior",
+        "micro_imperfections",
+        "face_consistency",
+        "favorite_locations",
+        "anti_generic_constraints",
+    ]:
+        assert package.get(key)
+    assert "fashion catalog mood" in package["anti_generic_constraints"]
