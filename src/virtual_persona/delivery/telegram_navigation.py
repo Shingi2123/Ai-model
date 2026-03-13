@@ -75,9 +75,21 @@ def _format_detail_header(item: PublishingPlanItem, post_index: int) -> str:
 
 
 def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
-    prompt = (item.prompt_text or "").strip()
-    body = prompt if prompt else "⚠️ Для этого поста пока нет сохранённого prompt."
-    return f"{_format_detail_header(item, post_index)}\n\n🖼 Промпт:\n{body}"
+    prompt = (item.prompt_text or "").strip() or "⚠️ Для этого поста пока нет сохранённого prompt."
+    caption = (item.caption_text or "").strip() or "⚠️ Нет сохранённой подписи."
+    short_caption = (item.short_caption or item.caption_text or "").strip() or "⚠️ Нет короткой подписи."
+    negative = (item.negative_prompt or "").strip() or "⚠️ Нет negative prompt."
+    shot_archetype = (item.shot_archetype or "").strip() or "⚠️ Не задан"
+    platform_intent = (item.platform_intent or "").strip() or "⚠️ Не задан"
+    return (
+        f"{_format_detail_header(item, post_index)}\n\n"
+        f"✍️ Caption:\n{caption}\n\n"
+        f"📝 Short caption:\n{short_caption}\n\n"
+        f"🖼 Prompt:\n{prompt}\n\n"
+        f"🚫 Negative prompt:\n{negative}\n\n"
+        f"📷 Shot archetype: {shot_archetype}\n"
+        f"🎯 Platform intent: {platform_intent}"
+    )
 
 
 def format_caption_screen(item: PublishingPlanItem, post_index: int) -> str:
@@ -208,6 +220,9 @@ def serialize_context(context: PlanScreenContext, items: list[PublishingPlanItem
                 "outfit_ids": item.outfit_ids,
                 "prompt_type": item.prompt_type,
                 "prompt_text": item.prompt_text,
+                "negative_prompt": item.negative_prompt,
+                "shot_archetype": item.shot_archetype,
+                "platform_intent": item.platform_intent,
                 "caption_text": item.caption_text,
                 "short_caption": item.short_caption,
                 "post_timezone": item.post_timezone,
@@ -249,6 +264,9 @@ def deserialize_context(raw: dict) -> tuple[PlanScreenContext, list[PublishingPl
                 outfit_ids=list(row.get("outfit_ids") or []),
                 prompt_type=str(row.get("prompt_type", "")),
                 prompt_text=str(row.get("prompt_text", "")),
+                negative_prompt=str(row.get("negative_prompt", "")),
+                shot_archetype=str(row.get("shot_archetype", "")),
+                platform_intent=str(row.get("platform_intent", "")),
                 caption_text=str(row.get("caption_text", "")),
                 short_caption=str(row.get("short_caption", "")),
                 post_timezone=str(row.get("post_timezone", "")),
@@ -288,6 +306,9 @@ def item_from_row(row: dict, fallback_date: date) -> PublishingPlanItem:
         outfit_ids=outfit_ids,
         prompt_type=str(row.get("prompt_type", "")),
         prompt_text=str(row.get("prompt_text", "")),
+        negative_prompt=str(row.get("negative_prompt", "")),
+        shot_archetype=str(row.get("shot_archetype", "")),
+        platform_intent=str(row.get("platform_intent", "")),
         caption_text=str(row.get("caption_text", "")),
         short_caption=str(row.get("short_caption", "")),
         post_timezone=str(row.get("post_timezone", "")),

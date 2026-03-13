@@ -119,6 +119,22 @@ class PromptComposer:
             f"camera_archetype={shot_archetype}; perspective={camera_profile['perspective']}; "
             f"framing={camera_profile['framing']}; device_realism={camera_profile['device']}; {self._device_profile(context)}"
         )
+        camera_physics = (
+            "camera physics: 35mm smartphone lens equivalent, slight handheld micro motion, "
+            "natural depth-of-field, minor motion softness."
+        )
+        sensor_realism = (
+            "sensor realism: natural sensor grain, subtle HDR balance, minor exposure rolloff."
+        )
+        smartphone_behavior = (
+            "smartphone behavior: smartphone computational photography, realistic HDR window balance, "
+            "slight dynamic range compression."
+        )
+        micro_imperfections = (
+            "micro imperfections: minor natural skin imperfections, subtle asymmetry, "
+            "non studio lighting imperfections."
+        )
+        device_identity = self._device_identity_layer(shot_archetype)
         platform_intent_block = self._platform_intent(context, content_type, platform_intent)
         composition_and_lighting = (
             f"composition: layered foreground/background, believable depth, no studio symmetry. "
@@ -141,6 +157,11 @@ class PromptComposer:
             "scene_context": scene_context,
             "wardrobe_context": wardrobe_context,
             "camera_context": camera_context,
+            "camera_physics": camera_physics,
+            "sensor_realism": sensor_realism,
+            "smartphone_behavior": smartphone_behavior,
+            "micro_imperfections": micro_imperfections,
+            "device_identity": device_identity,
             "platform_intent": platform_intent_block,
             "composition_and_lighting": composition_and_lighting,
             "realism_cues": realism_cues,
@@ -150,10 +171,11 @@ class PromptComposer:
         }
 
         prefix = blocks.get("prompt_v2_prefix", "Prompt System v2")
+        include_negative_prompt = content_type.lower() in {"photo", "carousel", "video", "reel", "story", "stories"}
         final_prompt = (
             f"{prefix}: "
             + " ".join(f"[{key}] {value}" for key, value in ordered_blocks.items() if key != "negative_prompt")
-            + f" [negative_prompt] {negative_prompt}"
+            + (f" [negative_prompt] {negative_prompt}" if include_negative_prompt else "")
         )
         return {
             **ordered_blocks,
@@ -223,26 +245,36 @@ class PromptComposer:
         return f"arc={arc}; continuity_hint={hint}; scene_source={scene_source}; signature={getattr(scene, 'moment_signature', '')}."
 
     def _negative_prompt(self, shot_archetype: str, scene_loc: str) -> str:
-        universal = [
-            "extra fingers", "bad anatomy", "duplicate person", "deformed hands", "doll-like face",
-            "hyper-smooth plastic skin", "fashion catalog perfection", "studio symmetry", "impossible reflection",
-            "broken hand pose", "fake luxury background", "incoherent city backdrop", "broken fabric folds",
-            "overexposed highlights", "underexposed muddy image", "duplicated accessories", "wrong limb placement",
-            "generic model photo"
+        universal_negative = [
+            "extra fingers",
+            "deformed hands",
+            "duplicate person",
+            "plastic skin",
+            "doll face",
+            "bad anatomy",
+            "broken hand pose",
+            "wrong limb placement",
+            "generic model photo",
         ]
-        shot_specific = {
-            "mirror_selfie": ["phone not visible in mirror", "wrong phone reflection geometry"],
+        shot_negative = {
+            "mirror_selfie": ["wrong reflection", "floating phone", "broken mirror geometry"],
             "front_selfie": ["rear-camera perspective", "detached floating arm"],
             "candid_handheld": ["posed studio stance", "perfect catalog centering"],
             "close_portrait": ["wax skin", "beauty filter look"],
         }
-        location_specific = []
+        location_negative: list[str] = []
         loc = str(scene_loc).lower()
         if any(token in loc for token in ["street", "city", "outdoor"]):
-            location_specific.extend(["empty fake street", "background perspective mismatch"])
+            location_negative.extend(["empty fake street", "background perspective mismatch"])
         if any(token in loc for token in ["hotel", "room", "indoor"]):
-            location_specific.extend(["impossible room layout", "floating furniture"])
-        return ", ".join(universal + shot_specific.get(shot_archetype, []) + location_specific)
+            location_negative.extend(["impossible room layout", "floating furniture"])
+        return ", ".join(universal_negative + shot_negative.get(shot_archetype, []) + location_negative)
+
+    @staticmethod
+    def _device_identity_layer(shot_archetype: str) -> str:
+        if shot_archetype in {"front_selfie", "mirror_selfie"}:
+            return "captured on Alina's recurring smartphone device (consistent model across days)"
+        return ""
 
     def _resolve_shot_archetype(self, scene: Any) -> str:
         explicit = getattr(scene, "camera_archetype", "") or getattr(scene, "shot_archetype", "")
