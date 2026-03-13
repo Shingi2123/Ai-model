@@ -179,3 +179,15 @@ def test_post_and_detail_keyboards_keep_same_post_identity():
     assert post_keyboard[0][0][1] == "pv:2026-03-12:pub-1:prompt"
     assert post_keyboard[2][0][1] == "back:plan:2026-03-12"
     assert detail_keyboard[0][0][1] == "back:post:2026-03-12:pub-1"
+
+
+def test_prompt_screen_is_copy_ready_and_does_not_leak_prompt_package_json():
+    item = _item()
+    item.prompt_package_json = '{"internal":"must_not_render"}'
+
+    text = format_prompt_screen(item, 0)
+
+    assert "```" in text
+    assert "copy-ready" in text
+    assert "prompt_package_json" not in text
+    assert "must_not_render" not in text

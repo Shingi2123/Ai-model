@@ -94,8 +94,10 @@ class PromptComposer:
     ) -> Dict[str, str]:
         blocks = self.load_blocks()
         continuity = context.get("continuity_context") or {}
+        recent_moment_memory = context.get("recent_moment_memory") or []
         persona_voice = context.get("persona_voice") or {}
         shot_archetype = self._resolve_shot_archetype(scene)
+        platform_behavior = self._platform_behavior_intent(content_type, platform_intent)
         camera_profile = self.CAMERA_ARCHETYPES.get(shot_archetype, self.CAMERA_ARCHETYPES["friend_shot"])
 
         item_ids_text = ", ".join(outfit_item_ids or [])
@@ -119,23 +121,15 @@ class PromptComposer:
             f"camera_archetype={shot_archetype}; perspective={camera_profile['perspective']}; "
             f"framing={camera_profile['framing']}; device_realism={camera_profile['device']}; {self._device_profile(context)}"
         )
-        camera_physics = (
-            "camera physics: 35mm smartphone lens equivalent, slight handheld micro motion, "
-            "natural depth-of-field, minor motion softness."
-        )
-        sensor_realism = (
-            "sensor realism: natural sensor grain, subtle HDR balance, minor exposure rolloff."
-        )
-        smartphone_behavior = (
-            "smartphone behavior: smartphone computational photography, realistic HDR window balance, "
-            "slight dynamic range compression."
-        )
-        micro_imperfections = (
-            "micro imperfections: minor natural skin imperfections, subtle asymmetry, "
-            "non studio lighting imperfections."
-        )
-        device_identity = self._device_identity_layer(shot_archetype)
-        platform_intent_block = self._platform_intent(context, content_type, platform_intent)
+        camera_behavior_memory = self._camera_behavior_memory(shot_archetype, continuity, recent_moment_memory)
+        camera_physics = self._camera_physics_layer(shot_archetype, scene_loc)
+        sensor_realism = self._sensor_realism_layer(time_of_day, scene_loc)
+        smartphone_behavior = self._smartphone_behavior_layer(scene_loc, time_of_day)
+        micro_imperfections = self._micro_imperfections_layer(shot_archetype, platform_behavior)
+        face_consistency = self._face_consistency_layer(context)
+        device_identity = self._device_identity_layer(shot_archetype, context, platform_behavior)
+        favorite_location_memory = self._favorite_location_memory_layer(context, scene_loc)
+        platform_intent_block = self._platform_intent(context, content_type, platform_intent, platform_behavior)
         composition_and_lighting = (
             f"composition: layered foreground/background, believable depth, no studio symmetry. "
             f"lighting: {self._lighting_hint(time_of_day)} with natural exposure and practical light sources."
@@ -149,7 +143,8 @@ class PromptComposer:
             f"persona tone: restrained={persona_voice.get('restraint', 0.7)}, reflective={persona_voice.get('reflection', 0.65)}, "
             f"self_irony={persona_voice.get('self_irony', 0.3)}, understated lifestyle delivery."
         )
-        negative_prompt = self._negative_prompt(shot_archetype, scene_loc)
+        anti_generic_constraints = self._anti_generic_constraints_layer()
+        negative_prompt = self._negative_prompt(shot_archetype, scene_loc, platform_behavior)
 
         ordered_blocks = {
             "identity_core": identity_core,
@@ -157,15 +152,19 @@ class PromptComposer:
             "scene_context": scene_context,
             "wardrobe_context": wardrobe_context,
             "camera_context": camera_context,
+            "camera_behavior_memory": camera_behavior_memory,
             "camera_physics": camera_physics,
             "sensor_realism": sensor_realism,
             "smartphone_behavior": smartphone_behavior,
             "micro_imperfections": micro_imperfections,
+            "face_consistency": face_consistency,
             "device_identity": device_identity,
+            "favorite_locations": favorite_location_memory,
             "platform_intent": platform_intent_block,
             "composition_and_lighting": composition_and_lighting,
             "realism_cues": realism_cues,
             "continuity_cues": continuity_cues,
+            "anti_generic_constraints": anti_generic_constraints,
             "persona_voice_cues": persona_voice_cues,
             "negative_prompt": negative_prompt,
         }
@@ -177,10 +176,12 @@ class PromptComposer:
             + " ".join(f"[{key}] {value}" for key, value in ordered_blocks.items() if key != "negative_prompt")
             + (f" [negative_prompt] {negative_prompt}" if include_negative_prompt else "")
         )
+        final_prompt = self._clean_generic_prompt_terms(final_prompt)
         return {
             **ordered_blocks,
             "final_prompt": final_prompt,
             "shot_archetype": shot_archetype,
+            "platform_behavior": platform_behavior,
         }
 
     def _identity_core(self, context: Dict[str, Any]) -> str:
@@ -212,23 +213,30 @@ class PromptComposer:
         return f"device_profile={device}"
 
     @staticmethod
-    def _platform_intent(context: Dict[str, Any], content_type: str, platform_intent: str | None) -> str:
-        intent = (platform_intent or "").strip().lower()
-        if not intent:
-            if content_type in {"video", "reel"}:
-                intent = "reel_cover"
-            elif content_type in {"story", "stories"}:
-                intent = "story_lifestyle"
-            else:
-                intent = "instagram_feed"
+    def _platform_intent(context: Dict[str, Any], content_type: str, platform_intent: str | None, behavior_mode: str) -> str:
+        intent = PromptComposer._platform_behavior_intent(content_type, platform_intent)
         mapping = {
-            "instagram_feed": "confident but natural composition, polished yet life-like, hero frame for feed.",
+            "instagram_feed": "slightly curated hero moment, coherent framing, social-ready but still lived-in.",
             "story_lifestyle": "spontaneous, intimate, less polished, diary-like everyday authenticity.",
             "reel_cover": "clear focal subject, energetic framing, thumbnail readability with realistic movement context.",
             "private_mirror": "private-feeling mirror documentation, casual posture, lived-in environment.",
             "travel_candid": "travel diary realism, environmental context matters more than perfection.",
         }
-        return f"platform=Instagram; intent={intent}; direction={mapping.get(intent, mapping['instagram_feed'])}"
+        return (
+            f"platform=Instagram; intent={intent}; behavior_mode={behavior_mode}; "
+            f"direction={mapping.get(intent, mapping['instagram_feed'])}"
+        )
+
+    @staticmethod
+    def _platform_behavior_intent(content_type: str, platform_intent: str | None) -> str:
+        intent = (platform_intent or "").strip().lower()
+        if intent:
+            return intent
+        if content_type in {"video", "reel"}:
+            return "reel_cover"
+        if content_type in {"story", "stories"}:
+            return "story_lifestyle"
+        return "instagram_feed"
 
     def _continuity_cues(self, context: Dict[str, Any], scene: Any) -> str:
         continuity = context.get("continuity_context") or {}
@@ -244,7 +252,7 @@ class PromptComposer:
         scene_source = getattr(scene, "scene_source", "") or getattr(scene, "source", "library")
         return f"arc={arc}; continuity_hint={hint}; scene_source={scene_source}; signature={getattr(scene, 'moment_signature', '')}."
 
-    def _negative_prompt(self, shot_archetype: str, scene_loc: str) -> str:
+    def _negative_prompt(self, shot_archetype: str, scene_loc: str, platform_behavior: str) -> str:
         universal_negative = [
             "extra fingers",
             "deformed hands",
@@ -255,26 +263,129 @@ class PromptComposer:
             "broken hand pose",
             "wrong limb placement",
             "generic model photo",
+            "fashion catalog symmetry",
+            "sterile beauty campaign polish",
         ]
         shot_negative = {
             "mirror_selfie": ["wrong reflection", "floating phone", "broken mirror geometry"],
             "front_selfie": ["rear-camera perspective", "detached floating arm"],
-            "candid_handheld": ["posed studio stance", "perfect catalog centering"],
+            "candid_handheld": ["posed studio stance", "perfect catalog centering", "tripod-like static shot"],
+            "friend_shot": ["subject looking directly at lens in every frame", "editorial posing"],
             "close_portrait": ["wax skin", "beauty filter look"],
+        }
+        platform_negative = {
+            "story_lifestyle": ["overproduced ad lighting", "commercial hero framing"],
+            "travel_candid": ["duplicate pedestrians", "background motion incoherence", "floating bag straps"],
+            "private_mirror": ["public street crowd", "non-mirror perspective"],
         }
         location_negative: list[str] = []
         loc = str(scene_loc).lower()
         if any(token in loc for token in ["street", "city", "outdoor"]):
-            location_negative.extend(["empty fake street", "background perspective mismatch"])
+            location_negative.extend(["empty fake street", "background perspective mismatch", "impossible pedestrian scale"])
         if any(token in loc for token in ["hotel", "room", "indoor"]):
-            location_negative.extend(["impossible room layout", "floating furniture"])
-        return ", ".join(universal_negative + shot_negative.get(shot_archetype, []) + location_negative)
+            location_negative.extend(["impossible room layout", "floating furniture", "impossible window lighting"])
+        if "kitchen" in loc:
+            location_negative.extend(["broken mug handle", "impossible cup grip"])
+        return ", ".join(universal_negative + shot_negative.get(shot_archetype, []) + platform_negative.get(platform_behavior, []) + location_negative)
 
     @staticmethod
-    def _device_identity_layer(shot_archetype: str) -> str:
+    def _device_identity_layer(shot_archetype: str, context: Dict[str, Any], platform_behavior: str) -> str:
+        profile = context.get("character_profile") or {}
+        recurring_device = profile.get("recurring_phone_device") or profile.get("device_profile") or "same recurring smartphone"
         if shot_archetype in {"front_selfie", "mirror_selfie"}:
-            return "captured on Alina's recurring smartphone device (consistent model across days)"
-        return ""
+            return f"captured on recurring phone device={recurring_device}; phone body visible and consistent with prior posts"
+        if shot_archetype in {"candid_handheld", "friend_shot", "candid_observer"}:
+            return f"observer capture plausibly from friend-held consumer phone; account device identity remains {recurring_device}"
+        return f"capture chain consistent with recurring account device identity={recurring_device}; mode={platform_behavior}"
+
+    @staticmethod
+    def _camera_behavior_memory(shot_archetype: str, continuity: Dict[str, Any], recent_moment_memory: List[Dict[str, Any]]) -> str:
+        recent_archetypes = [str(row.get("shot_archetype") or "").strip() for row in recent_moment_memory[:4] if str(row.get("shot_archetype") or "").strip()]
+        cadence = continuity.get("camera_behavior_cadence") or "calm handheld candid baseline with occasional mirror/selfie accents"
+        repetition_note = "avoid near-duplicate framing from previous day" if recent_archetypes and recent_archetypes[0] == shot_archetype else "allow controlled variation"
+        return f"camera behavior memory: baseline={cadence}; recent_archetypes={recent_archetypes}; current={shot_archetype}; {repetition_note}."
+
+    @staticmethod
+    def _camera_physics_layer(shot_archetype: str, scene_loc: str) -> str:
+        cues = [
+            "slight handheld micro-motion",
+            "smartphone lens perspective",
+            "slight imperfect framing",
+            "subtle depth falloff typical of phone optics",
+        ]
+        if shot_archetype in {"candid_handheld", "friend_shot", "candid_observer"}:
+            cues.append("minor motion softness from live movement")
+        if "street" in str(scene_loc).lower():
+            cues.append("observer alignment not perfectly level")
+        return f"camera physics: {', '.join(cues)}."
+
+    @staticmethod
+    def _sensor_realism_layer(time_of_day: str, scene_loc: str) -> str:
+        cues = ["natural dynamic range behavior", "highlight rolloff", "soft shadow clipping"]
+        loc = str(scene_loc).lower()
+        tod = str(time_of_day).lower()
+        if tod in {"morning", "late_morning"} and any(token in loc for token in ["window", "room", "kitchen", "indoor"]):
+            cues.append("natural HDR balancing window highlights and interior shadows")
+        if tod in {"evening", "night"}:
+            cues.extend(["slightly warmer white balance", "mild sensor grain in low light"])
+        return f"sensor realism: {', '.join(cues)}."
+
+    @staticmethod
+    def _smartphone_behavior_layer(scene_loc: str, time_of_day: str) -> str:
+        cue = "subtle sharpening behavior of smartphone computational photography"
+        if str(time_of_day).lower() in {"night", "evening"}:
+            cue += ", denoising kept mild and realistic"
+        if "window" in str(scene_loc).lower():
+            cue += ", local HDR near bright window edges"
+        return f"smartphone behavior: {cue}."
+
+    @staticmethod
+    def _micro_imperfections_layer(shot_archetype: str, platform_behavior: str) -> str:
+        base = [
+            "tiny loose hair strands",
+            "slight facial-expression asymmetry",
+            "believable fabric fold tension",
+            "natural posture imperfections",
+            "non-model-like hand placement",
+        ]
+        if shot_archetype in {"seated_table_shot", "friend_shot", "candid_handheld"}:
+            base.append("mild casual disorder in environment")
+            base.append("lived-in contact points like mug grip, book angle, bag strap")
+        if platform_behavior == "instagram_feed":
+            base.append("still clean enough for feed but not commercial perfect")
+        return f"micro imperfections: {', '.join(base)}."
+
+    @staticmethod
+    def _face_consistency_layer(context: Dict[str, Any]) -> str:
+        profile = context.get("character_profile") or {}
+        signature = profile.get("face_signature") or profile.get("signature_appearance_cues") or "soft brows, gentle cheek contour, familiar lip shape"
+        return f"face consistency signature: {signature}; preserve recurring face proportions and habitual expression style."
+
+    @staticmethod
+    def _favorite_location_memory_layer(context: Dict[str, Any], scene_loc: str) -> str:
+        profile = context.get("character_profile") or {}
+        favorites_raw = profile.get("favorite_locations_memory") or profile.get("favorite_spaces") or "window corner, kitchen table, familiar cafe seat"
+        favorites = [chunk.strip() for chunk in str(favorites_raw).split(",") if chunk.strip()]
+        current = str(scene_loc).lower()
+        recurrence = next((spot for spot in favorites if spot.lower() in current), favorites[0] if favorites else "familiar recurring micro-location")
+        return f"favorite location memory: recurring_spaces={favorites}; selected_recurring_anchor={recurrence}."
+
+    @staticmethod
+    def _anti_generic_constraints_layer() -> str:
+        return (
+            "forbid generic AI wording and campaign aesthetics: no 'beautiful young woman', no fashion catalog mood, "
+            "no sterile luxury vibe, no beauty-campaign language, no editorial over-posing."
+        )
+
+    @staticmethod
+    def _clean_generic_prompt_terms(text: str) -> str:
+        cleaned = text
+        banned = ["beautiful young woman", "photorealistic 8k", "8k", "highly detailed", "luxury campaign", "editorial fashion shoot"]
+        for token in banned:
+            cleaned = cleaned.replace(token, "")
+            cleaned = cleaned.replace(token.title(), "")
+            cleaned = cleaned.replace(token.upper(), "")
+        return " ".join(cleaned.split())
 
     def _resolve_shot_archetype(self, scene: Any) -> str:
         explicit = getattr(scene, "camera_archetype", "") or getattr(scene, "shot_archetype", "")
