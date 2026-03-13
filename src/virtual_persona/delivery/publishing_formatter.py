@@ -136,11 +136,18 @@ def _format_detailed_prompt(items: list[PublishingPlanItem], content_filter: set
         base = (
             f"🧠 #{idx} {item.platform} / {item.content_type.title()}\n"
             f"🎯 {item.scene_moment}\n\n"
-            f"{item.prompt_text}"
+            f"✍️ Caption:\n{item.caption_text}\n\n"
+            f"📝 Short caption:\n{item.short_caption or item.caption_text}\n\n"
+            f"🖼 Prompt:\n{item.prompt_text}"
         )
+        details = [base]
         if getattr(item, "negative_prompt", ""):
-            return f"{base}\n\n🚫 Negative prompt:\n{item.negative_prompt}"
-        return base
+            details.append(f"🚫 Negative prompt:\n{item.negative_prompt}")
+        if getattr(item, "shot_archetype", ""):
+            details.append(f"📷 Shot archetype: {item.shot_archetype}")
+        if getattr(item, "platform_intent", ""):
+            details.append(f"🎯 Platform intent: {item.platform_intent}")
+        return "\n\n".join(details)
 
     return "\n\n".join(_render(item, idx) for idx, item in enumerate(filtered, start=1))
 

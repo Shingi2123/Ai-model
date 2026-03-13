@@ -34,6 +34,9 @@ def _item(index: int = 1, publication_id: str | None = None) -> PublishingPlanIt
         outfit_ids=["o1"],
         prompt_type="photo",
         prompt_text="A cinematic candid in warm morning light",
+        negative_prompt="extra fingers, plastic skin",
+        shot_archetype="mirror_selfie",
+        platform_intent="instagram_feed",
         caption_text="Last quiet moments before heading out...",
         short_caption="Last quiet moments before heading out...",
         post_timezone="Europe/Paris",
@@ -93,12 +96,25 @@ def test_detail_views_have_fallback_for_empty_prompt_and_caption():
     empty.prompt_text = ""
     empty.caption_text = ""
     empty.short_caption = ""
+    empty.negative_prompt = ""
 
     prompt_text = format_prompt_screen(empty, 0)
     caption_text = format_caption_screen(empty, 0)
 
     assert "нет сохранённого prompt" in prompt_text
+    assert "Нет negative prompt" in prompt_text
     assert "нет сохранённой подписи" in caption_text
+
+
+def test_prompt_screen_contains_required_prompt_metadata():
+    text = format_prompt_screen(_item(), 0)
+
+    assert "Caption" in text
+    assert "Short caption" in text
+    assert "Prompt" in text
+    assert "Negative prompt" in text
+    assert "Shot archetype" in text
+    assert "Platform intent" in text
 
 
 def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():

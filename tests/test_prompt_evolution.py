@@ -66,6 +66,11 @@ def test_prompt_v2_contains_all_required_semantic_blocks():
         "scene_context",
         "wardrobe_context",
         "camera_context",
+        "camera_physics",
+        "sensor_realism",
+        "smartphone_behavior",
+        "micro_imperfections",
+        "device_identity",
         "platform_intent",
         "composition_and_lighting",
         "realism_cues",
@@ -99,8 +104,15 @@ def test_mirror_selfie_has_phone_and_reflection_cues_and_negative_prompt_not_emp
     package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan", "photo", ["top_1"])
 
     assert "phone visible in reflection" in package["camera_context"]
-    assert "wrong phone reflection geometry" in package["negative_prompt"]
+    assert "broken mirror geometry" in package["negative_prompt"]
     assert package["negative_prompt"].strip()
+
+
+def test_caption_prompt_does_not_inline_negative_prompt_block():
+    composer = PromptComposer(DummyState())
+    package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan", "caption", ["top_1"])
+
+    assert "[negative_prompt]" not in package["final_prompt"]
 
 
 def test_prompt_drops_degraded_generic_placeholders_in_final_prompt():
