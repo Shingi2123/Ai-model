@@ -131,13 +131,18 @@ def _format_detailed_prompt(items: list[PublishingPlanItem], content_filter: set
     filtered = [i for i in items if content_filter is None or i.content_type in content_filter]
     if not filtered:
         return "Нет подходящих публикаций."
-    return "\n\n".join(
-        f"🧠 #{idx} {item.platform} / {item.content_type.title()}\n"
-        f"🎯 {item.scene_moment}\n\n"
-        f"{item.prompt_text}"
-        for idx, item in enumerate(filtered, start=1)
-    )
 
+    def _render(item: PublishingPlanItem, idx: int) -> str:
+        base = (
+            f"🧠 #{idx} {item.platform} / {item.content_type.title()}\n"
+            f"🎯 {item.scene_moment}\n\n"
+            f"{item.prompt_text}"
+        )
+        if getattr(item, "negative_prompt", ""):
+            return f"{base}\n\n🚫 Negative prompt:\n{item.negative_prompt}"
+        return base
+
+    return "\n\n".join(_render(item, idx) for idx, item in enumerate(filtered, start=1))
 
 def format_command_message(package: DailyPackage, items: list[PublishingPlanItem], command: str, persona_timezone: str, user_timezone: str) -> str:
     cmd = command.strip().lower()

@@ -57,6 +57,7 @@ class ContentGenerator:
         photo_prompts: List[str] = []
         video_prompts: List[str] = []
         story_lines: List[str] = []
+        prompt_packages: List[Dict[str, Any]] = []
 
         weather_text = f"{weather.condition}, {weather.temp_c}C"
         short_story = " → ".join((scene.scene_moment or scene.description) for scene in scenes)
@@ -138,13 +139,24 @@ class ContentGenerator:
             if not story_template:
                 story_template = "{story_line}"
 
-            photo_prompt_text = f"{self.prompt_composer.compose(context, scene, outfit_summary, 'photo', outfit_item_ids)} {self._safe_format(photo_template, mapping)}"
-            video_prompt_text = f"{self.prompt_composer.compose(context, scene, outfit_summary, 'video', outfit_item_ids)} {self._safe_format(video_template, mapping)}"
-            story_text = f"{self.prompt_composer.compose(context, scene, outfit_summary, 'story', outfit_item_ids)} {self._safe_format(story_template, mapping)}"
+            photo_package = self.prompt_composer.compose_package(context, scene, outfit_summary, 'photo', outfit_item_ids)
+            video_package = self.prompt_composer.compose_package(context, scene, outfit_summary, 'video', outfit_item_ids)
+            story_package = self.prompt_composer.compose_package(context, scene, outfit_summary, 'story', outfit_item_ids)
+
+            photo_prompt_text = f"{photo_package['final_prompt']} {self._safe_format(photo_template, mapping)}"
+            video_prompt_text = f"{video_package['final_prompt']} {self._safe_format(video_template, mapping)}"
+            story_text = f"{story_package['final_prompt']} {self._safe_format(story_template, mapping)}"
 
             photo_prompts.append(self.provider.generate(photo_prompt_text))
             video_prompts.append(self.provider.generate(video_prompt_text))
             story_lines.append(self.provider.generate(story_text))
+            prompt_packages.append({
+                "scene_index": len(prompt_packages),
+                "scene_moment": scene_description,
+                "photo": photo_package,
+                "video": video_package,
+                "story": story_package,
+            })
 
         post_template = self._get_template("caption_instagram_medium", "post_caption")
         if not post_template:
@@ -186,6 +198,7 @@ class ContentGenerator:
                 "Character lifestyle must remain realistic and coherent.",
                 f"caption_tone={tone_profile}",
             ],
+            prompt_packages=prompt_packages,
         )
 
     @staticmethod

@@ -189,6 +189,7 @@ class ContextBuilder:
             "style_rules": style_rules,
             "continuity_context": continuity_context,
             "persona_voice": persona_voice,
+            "character_profile": profile,
         }
 
     def _build_continuity_context(
