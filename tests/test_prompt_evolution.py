@@ -63,6 +63,16 @@ BASE_CONTEXT = {
         "signature_appearance_cues": "freckles and soft brows",
         "device_profile": "iPhone 16 Pro natural color profile",
         "recurring_phone_device": "graphite iPhone-class device with clear case",
+        "primary_device_profile": {
+            "device_class": "premium smartphone",
+            "front_camera_behavior": "arm-length front camera with mild distortion",
+            "rear_camera_behavior": "rear camera handheld realism",
+            "processing_style": "natural contrast with mild HDR",
+            "expected_lens_character": "24mm equivalent wide lens",
+            "screen_mirror_visibility_rules": "mirror selfie keeps same phone silhouette",
+            "night_indoor_limitations": "mild grain in dim interiors",
+            "phone_shape": "graphite rounded rectangle with clear case",
+        },
         "face_signature": "soft straight brows, medium-full lips, balanced eye spacing, rounded cheek contour",
         "face_shape": "soft oval",
         "nose_bridge": "straight",
@@ -134,6 +144,7 @@ def test_mirror_selfie_has_phone_and_reflection_cues_and_negative_prompt_not_emp
 
     assert "phone visible in reflection" in package["camera_context"]
     assert "impossible reflection geometry" in package["negative_prompt"]
+    assert "wrong phone shape" in package["negative_prompt"]
     assert package["negative_prompt"].strip()
 
 
@@ -230,6 +241,8 @@ def test_platform_intent_changes_behavior_mode_and_polish_cues():
 
     assert "behavior_mode=instagram_feed" in feed_pkg["platform_intent"]
     assert "behavior_mode=story_lifestyle" in story_pkg["platform_intent"]
+    assert "slightly curated" in feed_pkg["social_behavior"]
+    assert "spontaneity" in story_pkg["social_behavior"]
     assert feed_pkg["platform_intent"] != story_pkg["platform_intent"]
 
 
@@ -250,9 +263,11 @@ def test_required_realism_blocks_are_structurally_present_and_anti_generic_const
 
     for key in [
         "camera_behavior_memory",
+        "framing_style",
         "camera_physics",
         "sensor_realism",
         "smartphone_behavior",
+        "social_behavior",
         "micro_imperfections",
         "face_consistency",
         "favorite_locations",
@@ -260,6 +275,39 @@ def test_required_realism_blocks_are_structurally_present_and_anti_generic_const
     ]:
         assert package.get(key)
     assert "fashion catalog mood" in package["anti_generic_constraints"]
+
+
+def test_device_profile_stays_consistent_between_selfie_and_mirror_variants():
+    composer = PromptComposer(DummyState())
+    mirror = Scene()
+    mirror.scene_moment = "Mirror selfie before leaving apartment"
+    selfie = Scene()
+    selfie.scene_moment = "Selfie while waiting for coffee"
+
+    mirror_pkg = composer.compose_package(BASE_CONTEXT, mirror, "tee", "photo", ["tee_1"])
+    selfie_pkg = composer.compose_package(BASE_CONTEXT, selfie, "tee", "photo", ["tee_1"])
+
+    assert "primary_device_profile=device_class=premium smartphone" in mirror_pkg["camera_context"]
+    assert "primary_device_profile=device_class=premium smartphone" in selfie_pkg["camera_context"]
+
+
+def test_micro_lived_in_cues_surface_for_home_like_scenes():
+    composer = PromptComposer(DummyState())
+    scene = Scene()
+    scene.location = "home kitchen"
+
+    package = composer.compose_package(BASE_CONTEXT, scene, "tee", "photo", ["tee_1"])
+
+    assert "slightly shifted chair angle" in package["micro_imperfections"]
+    assert "book or notebook not perfectly centered" in package["micro_imperfections"]
+
+
+def test_anti_synthetic_cleaner_removes_editorial_glamour_words():
+    composer = PromptComposer(DummyState())
+    raw = "Prompt System v3 editorial glamour perfect lighting stunning beauty"
+    cleaned = composer._clean_generic_prompt_terms(raw)
+    assert "editorial glamour" not in cleaned.lower()
+    assert "perfect lighting" not in cleaned.lower()
 
 
 def test_prompt_v3_layers_include_camera_behavior_fields_and_face_cues():
