@@ -269,7 +269,21 @@ class LocalStateStore:
         history_path = self.base_dir / "content_history.json"
         history = self._read_json(history_path, [])
         caption = getattr(package.content, "post_caption", "") if hasattr(package, "content") else ""
+        primary_publication = package.publishing_plan[0] if package.publishing_plan else None
         last_scene = package.scenes[-1] if package.scenes else None
+
+        scene_moment = getattr(primary_publication, "scene_moment", "") if primary_publication else ""
+        scene_source = getattr(primary_publication, "scene_source", "") if primary_publication else ""
+        scene_moment_type = getattr(primary_publication, "scene_moment_type", "") if primary_publication else ""
+        moment_signature = getattr(primary_publication, "moment_signature", "") if primary_publication else ""
+        visual_focus = getattr(primary_publication, "visual_focus", "") if primary_publication else ""
+
+        if not primary_publication and last_scene:
+            scene_moment = getattr(last_scene, "scene_moment", "")
+            scene_source = getattr(last_scene, "scene_source", "")
+            scene_moment_type = getattr(last_scene, "scene_moment_type", "")
+            moment_signature = getattr(last_scene, "moment_signature", "")
+            visual_focus = getattr(last_scene, "visual_focus", "")
 
         history.append(
             {
@@ -277,11 +291,11 @@ class LocalStateStore:
                 "city": package.city,
                 "day_type": package.day_type,
                 "scenes": " | ".join(s.description for s in package.scenes),
-                "scene_moment": getattr(last_scene, "scene_moment", "") if last_scene else "",
-                "scene_source": getattr(last_scene, "scene_source", "") if last_scene else "",
-                "scene_moment_type": getattr(last_scene, "scene_moment_type", "") if last_scene else "",
-                "moment_signature": getattr(last_scene, "moment_signature", "") if last_scene else "",
-                "visual_focus": getattr(last_scene, "visual_focus", "") if last_scene else "",
+                "scene_moment": scene_moment,
+                "scene_source": scene_source,
+                "scene_moment_type": scene_moment_type,
+                "moment_signature": moment_signature,
+                "visual_focus": visual_focus,
                 "outfit_ids": ", ".join(package.outfit.item_ids),
                 "post_caption": caption,
             }
@@ -480,6 +494,17 @@ class GoogleSheetsStateStore:
             logger.error("Google Sheets read failed for '%s': %s", title, exc)
             return []
 
+    @staticmethod
+    def _normalize_header(value: str) -> str:
+        return str(value or "").strip().lower()
+
+    def _row_values_for_headers(self, row: Dict[str, Any], headers: List[str]) -> List[Any]:
+        normalized_row = {
+            self._normalize_header(key): value
+            for key, value in row.items()
+        }
+        return [normalized_row.get(self._normalize_header(header), "") for header in headers]
+
     def _append_dict_row(self, title: str, headers: List[str], row: Dict[str, Any], *, prefer_sheet_header_order: bool = False) -> None:
         if not self.available():
             return
@@ -491,7 +516,7 @@ class GoogleSheetsStateStore:
                 if sheet_headers:
                     row_headers = sheet_headers
             self._with_retry(
-                lambda: ws.append_row([row.get(h, "") for h in row_headers]),
+                lambda: ws.append_row(self._row_values_for_headers(row, row_headers)),
                 operation_name=f"append row {title}",
             )
             self._invalidate_sheet_cache(title)
@@ -867,7 +892,21 @@ class GoogleSheetsStateStore:
             return
 
         caption = getattr(package.content, "post_caption", "") if hasattr(package, "content") else ""
+        primary_publication = package.publishing_plan[0] if package.publishing_plan else None
         last_scene = package.scenes[-1] if package.scenes else None
+        scene_moment = getattr(primary_publication, "scene_moment", "") if primary_publication else ""
+        scene_source = getattr(primary_publication, "scene_source", "") if primary_publication else ""
+        scene_moment_type = getattr(primary_publication, "scene_moment_type", "") if primary_publication else ""
+        moment_signature = getattr(primary_publication, "moment_signature", "") if primary_publication else ""
+        visual_focus = getattr(primary_publication, "visual_focus", "") if primary_publication else ""
+
+        if not primary_publication and last_scene:
+            scene_moment = getattr(last_scene, "scene_moment", "")
+            scene_source = getattr(last_scene, "scene_source", "")
+            scene_moment_type = getattr(last_scene, "scene_moment_type", "")
+            moment_signature = getattr(last_scene, "moment_signature", "")
+            visual_focus = getattr(last_scene, "visual_focus", "")
+
         headers = [
             "date", "city", "day_type", "outfit_ids", "scenes", "post_caption",
             "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus",
@@ -883,11 +922,11 @@ class GoogleSheetsStateStore:
                 "outfit_ids": ", ".join(package.outfit.item_ids),
                 "scenes": " | ".join(s.description for s in package.scenes),
                 "post_caption": caption,
-                "scene_moment": getattr(last_scene, "scene_moment", "") if last_scene else "",
-                "scene_source": getattr(last_scene, "scene_source", "") if last_scene else "",
-                "scene_moment_type": getattr(last_scene, "scene_moment_type", "") if last_scene else "",
-                "moment_signature": getattr(last_scene, "moment_signature", "") if last_scene else "",
-                "visual_focus": getattr(last_scene, "visual_focus", "") if last_scene else "",
+                "scene_moment": scene_moment,
+                "scene_source": scene_source,
+                "scene_moment_type": scene_moment_type,
+                "moment_signature": moment_signature,
+                "visual_focus": visual_focus,
             },
         )
 
@@ -949,6 +988,7 @@ class GoogleSheetsStateStore:
                 "social_behavior_mode": trace_fields.get("social_behavior_mode", ""),
                 "anti_synthetic_cleaner_applied": trace_fields.get("anti_synthetic_cleaner_applied", ""),
             },
+            prefer_sheet_header_order=True,
         )
         self._log_ws_fetch_stats()
 

@@ -1,4 +1,6 @@
 from virtual_persona.storage.state_store import GoogleSheetsStateStore, LocalStateStore, TelegramStateView, build_state_store
+from virtual_persona.models.domain import DailyPackage, GeneratedContent, OutfitSelection, PublishingPlanItem, SunSnapshot, WeatherSnapshot
+from datetime import date, datetime
 
 
 class FakeWS:
@@ -253,3 +255,87 @@ def test_google_store_run_log_persists_structured_trace_fields():
     assert values[6] == "corner cafe"
     assert values[7] == "observing"
     assert values[8] is True
+
+
+def test_google_store_run_log_uses_actual_sheet_header_order():
+    store = HelperGoogleStore()
+    ws = store._ws_map["run_log"]
+    ws.header = [
+        "timestamp",
+        "status",
+        "message",
+        "camera_behavior_used",
+        "framing_style_used",
+        "favorite_location_used",
+        "social_behavior_mode",
+        "anti_synthetic_cleaner_applied",
+        "device_profile",
+    ]
+
+    store.save_run_log(
+        "debug",
+        "quality_trace ...",
+        device_profile="pixel_7",
+        camera_behavior_used="handheld",
+        framing_style_used="off-center",
+        favorite_location_used="corner cafe",
+        social_behavior_mode="observing",
+        anti_synthetic_cleaner_applied=True,
+    )
+
+    values = ws.rows[0]
+    assert values[3] == "handheld"
+    assert values[8] == "pixel_7"
+
+
+def test_google_store_history_uses_selected_publication_moment():
+    store = HelperGoogleStore()
+    ws = store._ws_map["content_history"]
+    ws.header = [
+        "date", "city", "day_type", "outfit_ids", "scenes", "post_caption",
+        "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus",
+    ]
+
+    package = DailyPackage(
+        generated_at=datetime.utcnow(),
+        date=date(2026, 3, 14),
+        city="Paris",
+        day_type="work_day",
+        summary="",
+        weather=WeatherSnapshot(city="Paris", temp_c=20.0, condition="Clear", humidity=40, wind_speed=2.0, cloudiness=10),
+        sun=SunSnapshot(sunrise_local=datetime.utcnow(), sunset_local=datetime.utcnow()),
+        outfit=OutfitSelection(item_ids=["jacket"], summary="Look"),
+        scenes=[],
+        content=GeneratedContent(post_caption="Selected caption", story_lines=[], photo_prompts=[], video_prompts=[], publish_windows=[], creative_notes=[]),
+        publishing_plan=[
+            PublishingPlanItem(
+                publication_id="2026-03-14-01",
+                date=date(2026, 3, 14),
+                platform="Instagram",
+                post_time="10:00",
+                content_type="photo",
+                city="Paris",
+                day_type="work_day",
+                narrative_phase="routine_stability",
+                scene_moment="selected moment",
+                scene_source="selected source",
+                scene_moment_type="selected type",
+                moment_signature="selected-signature",
+                visual_focus="selected focus",
+                activity_type="walk",
+                outfit_ids=["jacket"],
+                prompt_type="photo",
+                prompt_text="prompt",
+            )
+        ],
+    )
+
+    store.append_history(package)
+
+    values = ws.rows[0]
+    assert values[5] == "Selected caption"
+    assert values[6] == "selected moment"
+    assert values[7] == "selected source"
+    assert values[8] == "selected type"
+    assert values[9] == "selected-signature"
+    assert values[10] == "selected focus"
