@@ -152,6 +152,12 @@ New life-memory sheets (self-management layer):
 
 `prompt_templates` is still supported for backward compatibility, while `prompt_blocks` is used by `PromptComposer` to inject persistent identity/realism/continuity rules.
 
+Prompt System v3 recommended `character_profile` fields for realism continuity:
+- `device_profile`, `recurring_phone_device`
+- `face_signature`, `face_shape`, `nose_bridge`, `cheekbone_softness`, `lip_fullness`, `brow_style`
+- `favorite_locations`, `recurring_spaces`
+
+
 Compatibility mode:
 - Legacy `wardrobe` remains supported as fallback catalog source.
 - If new memory sheets are absent/empty, pipeline still works with old behavior.

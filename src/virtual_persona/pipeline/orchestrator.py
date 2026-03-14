@@ -243,13 +243,12 @@ class PipelineOrchestrator:
             "debug",
             "quality_trace "
             f"date={package.date.isoformat()} mode={mode} "
-            f"primary_scene_type={getattr(primary, 'scene_moment_type', '-') if primary else '-'} "
             f"shot_archetype={prompt_meta.get('shot_archetype', getattr(primary, 'shot_archetype', '-')) if primary else '-'} "
-            f"device_identity={short_text(str(prompt_meta.get('device_identity', '-')), 96)} "
+            f"device_profile={short_text(str(prompt_meta.get('device_identity', '-')), 84)} "
+            f"camera_behavior_used={bool(prompt_meta.get('camera_behavior_memory'))} "
+            f"favorite_location_used={short_text(str(prompt_meta.get('favorite_locations', '-')), 56)} "
+            f"face_signature_used={short_text(str(prompt_meta.get('face_consistency', '-')), 56)} "
             f"platform_intent={prompt_meta.get('platform_intent', getattr(primary, 'platform_intent', '-')) if primary else '-'} "
-            f"layers=camera_behavior:{bool(prompt_meta.get('camera_behavior_memory'))},face:{bool(prompt_meta.get('face_consistency'))},micro:{bool(prompt_meta.get('micro_imperfections'))},physics:{bool(prompt_meta.get('camera_physics'))},anti_generic:{bool(prompt_meta.get('anti_generic_constraints'))} "
-            f"favorite_location={short_text(str(prompt_meta.get('favorite_locations', '-')), 72)} "
-            f"moment_signature={getattr(primary, 'moment_signature', '-') if primary else '-'} "
             f"city_context={package.city}:{continuity.get('arc_hint', 'stable_routine')} "
             f"outfit_items={','.join(package.outfit.item_ids)} {tone}",
         )

@@ -39,7 +39,17 @@ BASE_CONTEXT = {
     "life_state": LifeState(),
     "narrative_context": Narrative(),
     "story_arc": {"arc_type": "creative_phase", "title": "Creative month", "progress": 40},
-    "continuity_context": {"arc_hint": "arrival_and_adaptation", "previous_evening_moment": "hotel check-in"},
+    "continuity_context": {
+        "arc_hint": "arrival_and_adaptation",
+        "previous_evening_moment": "hotel check-in",
+        "camera_behavior_memory": {
+            "preferred_shot_archetypes": ["candid_handheld", "friend_shot"],
+            "average_camera_distance": "1.1m",
+            "preferred_framing_style": "eye-level",
+            "selfie_frequency": "rare",
+            "candid_frequency": "frequent",
+        },
+    },
     "persona_voice": {"restraint": 0.8, "reflection": 0.7, "self_irony": 0.2},
     "character_profile": {
         "display_name": "Alina Volkova",
@@ -54,7 +64,20 @@ BASE_CONTEXT = {
         "device_profile": "iPhone 16 Pro natural color profile",
         "recurring_phone_device": "graphite iPhone-class device with clear case",
         "face_signature": "soft straight brows, medium-full lips, balanced eye spacing, rounded cheek contour",
-        "favorite_locations_memory": "kitchen window corner, hallway mirror, neighborhood cafe corner",
+        "face_shape": "soft oval",
+        "nose_bridge": "straight",
+        "cheekbone_softness": "soft",
+        "lip_fullness": "medium-full",
+        "brow_style": "natural straight",
+        "favorite_locations": "kitchen window corner, favorite café table",
+        "recurring_spaces": "living room sofa, hallway mirror",
+        "camera_behavior_memory": {
+            "preferred_shot_archetypes": ["candid_handheld", "friend_shot"],
+            "average_camera_distance": "1.1m",
+            "preferred_framing_style": "eye-level",
+            "selfie_frequency": "rare",
+            "candid_frequency": "frequent",
+        },
     },
 }
 
@@ -110,7 +133,7 @@ def test_mirror_selfie_has_phone_and_reflection_cues_and_negative_prompt_not_emp
     package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan", "photo", ["top_1"])
 
     assert "phone visible in reflection" in package["camera_context"]
-    assert "broken mirror geometry" in package["negative_prompt"]
+    assert "impossible reflection geometry" in package["negative_prompt"]
     assert package["negative_prompt"].strip()
 
 
@@ -177,7 +200,7 @@ def test_candid_friend_shot_has_observer_and_handheld_realism():
 
     assert package["shot_archetype"] in {"candid_handheld", "friend_shot"}
     assert "handheld" in package["camera_context"].lower() or "observer" in package["camera_context"].lower()
-    assert "micro-motion" in package["camera_physics"]
+    assert "handheld motion" in package["camera_physics"]
 
 
 def test_negative_prompt_changes_by_archetype_and_scene():
@@ -194,8 +217,8 @@ def test_negative_prompt_changes_by_archetype_and_scene():
     candid_scene.scene_moment_type = "street_candid"
     candid_package = composer.compose_package(BASE_CONTEXT, candid_scene, "tee", "photo", ["tee_1"])
 
-    assert "broken mirror geometry" in mirror_package["negative_prompt"]
-    assert "broken mirror geometry" not in candid_package["negative_prompt"]
+    assert "impossible reflection geometry" in mirror_package["negative_prompt"]
+    assert "impossible reflection geometry" not in candid_package["negative_prompt"]
     assert "impossible pedestrian scale" in candid_package["negative_prompt"]
 
 
@@ -237,3 +260,22 @@ def test_required_realism_blocks_are_structurally_present_and_anti_generic_const
     ]:
         assert package.get(key)
     assert "fashion catalog mood" in package["anti_generic_constraints"]
+
+
+def test_prompt_v3_layers_include_camera_behavior_fields_and_face_cues():
+    composer = PromptComposer(DummyState())
+    package = composer.compose_package(BASE_CONTEXT, Scene(), "tee", "photo", ["tee_1"])
+
+    assert "preferred_shot_archetypes" in package["camera_behavior_memory"]
+    assert "average_camera_distance" in package["camera_behavior_memory"]
+    assert "selfie_frequency" in package["camera_behavior_memory"]
+    assert "face_shape" in package["face_consistency"]
+    assert "nose_bridge" in package["face_consistency"]
+
+
+def test_favorite_location_memory_includes_favorites_and_recurring_spaces():
+    composer = PromptComposer(DummyState())
+    package = composer.compose_package(BASE_CONTEXT, Scene(), "tee", "photo", ["tee_1"])
+
+    assert "favorite_locations=" in package["favorite_locations"]
+    assert "recurring_spaces=" in package["favorite_locations"]

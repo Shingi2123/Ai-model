@@ -209,7 +209,7 @@ class PromptComposer:
     @staticmethod
     def _device_profile(context: Dict[str, Any]) -> str:
         profile = context.get("character_profile") or {}
-        device = profile.get("device_profile") or "device_profile=consistent premium smartphone (e.g., iPhone 16 class)"
+        device = profile.get("device_profile") or "Alina's personal smartphone"
         return f"device_profile={device}"
 
     @staticmethod
@@ -265,9 +265,11 @@ class PromptComposer:
             "generic model photo",
             "fashion catalog symmetry",
             "sterile beauty campaign polish",
+            "perfect lighting",
+            "fashion model pose",
         ]
         shot_negative = {
-            "mirror_selfie": ["wrong reflection", "floating phone", "broken mirror geometry"],
+            "mirror_selfie": ["wrong reflection", "floating phone", "broken mirror reflection", "impossible reflection geometry"],
             "front_selfie": ["rear-camera perspective", "detached floating arm"],
             "candid_handheld": ["posed studio stance", "perfect catalog centering", "tripod-like static shot"],
             "friend_shot": ["subject looking directly at lens in every frame", "editorial posing"],
@@ -291,27 +293,38 @@ class PromptComposer:
     @staticmethod
     def _device_identity_layer(shot_archetype: str, context: Dict[str, Any], platform_behavior: str) -> str:
         profile = context.get("character_profile") or {}
-        recurring_device = profile.get("recurring_phone_device") or profile.get("device_profile") or "same recurring smartphone"
+        recurring_device = profile.get("recurring_phone_device") or profile.get("device_profile") or "Alina's personal smartphone"
         if shot_archetype in {"front_selfie", "mirror_selfie"}:
-            return f"captured on recurring phone device={recurring_device}; phone body visible and consistent with prior posts"
+            return f"captured on Alina's personal smartphone device ({recurring_device}); phone visible in mirror reflection and consistent with prior posts"
         if shot_archetype in {"candid_handheld", "friend_shot", "candid_observer"}:
             return f"observer capture plausibly from friend-held consumer phone; account device identity remains {recurring_device}"
         return f"capture chain consistent with recurring account device identity={recurring_device}; mode={platform_behavior}"
 
     @staticmethod
     def _camera_behavior_memory(shot_archetype: str, continuity: Dict[str, Any], recent_moment_memory: List[Dict[str, Any]]) -> str:
+        behavior = continuity.get("camera_behavior_memory") if isinstance(continuity.get("camera_behavior_memory"), dict) else {}
         recent_archetypes = [str(row.get("shot_archetype") or "").strip() for row in recent_moment_memory[:4] if str(row.get("shot_archetype") or "").strip()]
-        cadence = continuity.get("camera_behavior_cadence") or "calm handheld candid baseline with occasional mirror/selfie accents"
+        preferred_archetypes = behavior.get("preferred_shot_archetypes") or ["candid_handheld", "friend_shot"]
+        avg_distance = behavior.get("average_camera_distance") or "about 1.2m social distance"
+        framing_style = behavior.get("preferred_framing_style") or "mostly eye-level with slight off-center framing"
+        selfie_freq = behavior.get("selfie_frequency") or "rare"
+        candid_freq = behavior.get("candid_frequency") or "frequent"
         repetition_note = "avoid near-duplicate framing from previous day" if recent_archetypes and recent_archetypes[0] == shot_archetype else "allow controlled variation"
-        return f"camera behavior memory: baseline={cadence}; recent_archetypes={recent_archetypes}; current={shot_archetype}; {repetition_note}."
+        return (
+            "camera behavior memory: "
+            f"preferred_shot_archetypes={preferred_archetypes}; average_camera_distance={avg_distance}; "
+            f"preferred_framing_style={framing_style}; selfie_frequency={selfie_freq}; candid_frequency={candid_freq}; "
+            f"recent_archetypes={recent_archetypes}; current={shot_archetype}; {repetition_note}."
+        )
 
     @staticmethod
     def _camera_physics_layer(shot_archetype: str, scene_loc: str) -> str:
         cues = [
-            "slight handheld micro-motion",
-            "smartphone lens perspective",
+            "subtle handheld motion",
+            "natural smartphone lens perspective",
             "slight imperfect framing",
-            "subtle depth falloff typical of phone optics",
+            "natural depth falloff typical of phone optics",
+            "mild smartphone sensor noise",
         ]
         if shot_archetype in {"candid_handheld", "friend_shot", "candid_observer"}:
             cues.append("minor motion softness from live movement")
@@ -359,28 +372,40 @@ class PromptComposer:
     def _face_consistency_layer(context: Dict[str, Any]) -> str:
         profile = context.get("character_profile") or {}
         signature = profile.get("face_signature") or profile.get("signature_appearance_cues") or "soft brows, gentle cheek contour, familiar lip shape"
-        return f"face consistency signature: {signature}; preserve recurring face proportions and habitual expression style."
+        face_shape = profile.get("face_shape") or profile.get("appearance_face_shape") or "soft oval"
+        nose_bridge = profile.get("nose_bridge") or "straight delicate nose bridge"
+        cheekbone_softness = profile.get("cheekbone_softness") or "soft cheekbone transitions"
+        lip_fullness = profile.get("lip_fullness") or "medium-full lips"
+        brow_style = profile.get("brow_style") or "natural softly straight brows"
+        return (
+            f"face consistency signature: {signature}; face_shape={face_shape}; nose_bridge={nose_bridge}; "
+            f"cheekbone_softness={cheekbone_softness}; lip_fullness={lip_fullness}; brow_style={brow_style}; "
+            "preserve recurring face proportions and habitual expression style."
+        )
 
     @staticmethod
     def _favorite_location_memory_layer(context: Dict[str, Any], scene_loc: str) -> str:
         profile = context.get("character_profile") or {}
-        favorites_raw = profile.get("favorite_locations_memory") or profile.get("favorite_spaces") or "window corner, kitchen table, familiar cafe seat"
+        favorites_raw = profile.get("favorite_locations") or profile.get("favorite_locations_memory") or "kitchen window corner, favorite café table"
+        recurring_raw = profile.get("recurring_spaces") or profile.get("favorite_spaces") or "living room sofa, hallway mirror"
         favorites = [chunk.strip() for chunk in str(favorites_raw).split(",") if chunk.strip()]
+        recurring_spaces = [chunk.strip() for chunk in str(recurring_raw).split(",") if chunk.strip()]
         current = str(scene_loc).lower()
-        recurrence = next((spot for spot in favorites if spot.lower() in current), favorites[0] if favorites else "familiar recurring micro-location")
-        return f"favorite location memory: recurring_spaces={favorites}; selected_recurring_anchor={recurrence}."
+        anchors = favorites + [spot for spot in recurring_spaces if spot not in favorites]
+        recurrence = next((spot for spot in anchors if spot.lower() in current), anchors[0] if anchors else "familiar recurring micro-location")
+        return f"favorite location memory: favorite_locations={favorites}; recurring_spaces={recurring_spaces}; selected_recurring_anchor={recurrence}."
 
     @staticmethod
     def _anti_generic_constraints_layer() -> str:
         return (
             "forbid generic AI wording and campaign aesthetics: no 'beautiful young woman', no fashion catalog mood, "
-            "no sterile luxury vibe, no beauty-campaign language, no editorial over-posing."
+            "no sterile luxury vibe, no beauty-campaign language, no editorial over-posing, no '8k photorealistic', no 'perfect lighting', no 'fashion model pose'."
         )
 
     @staticmethod
     def _clean_generic_prompt_terms(text: str) -> str:
         cleaned = text
-        banned = ["beautiful young woman", "photorealistic 8k", "8k", "highly detailed", "luxury campaign", "editorial fashion shoot"]
+        banned = ["beautiful young woman", "photorealistic 8k", "8k", "highly detailed", "luxury campaign", "editorial fashion shoot", "perfect lighting", "fashion model pose"]
         for token in banned:
             cleaned = cleaned.replace(token, "")
             cleaned = cleaned.replace(token.title(), "")
