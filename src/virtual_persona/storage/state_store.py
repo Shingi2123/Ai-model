@@ -331,6 +331,12 @@ class LocalStateStore:
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "status": status,
                 "message": message,
+                "device_profile": "",
+                "camera_behavior_used": "",
+                "framing_style_used": "",
+                "favorite_location_used": "",
+                "social_behavior_mode": "",
+                "anti_synthetic_cleaner_applied": "",
             }
         )
         self._write_json(run_log_path, logs)
@@ -550,7 +556,7 @@ class GoogleSheetsStateStore:
             ],
             "content_moment_memory": [
                 "date", "city", "day_type", "scene_moment", "scene_moment_type", "moment_signature", "visual_focus",
-                "scene_source", "shot_archetype", "platform_intent", "publish_score", "publish_decision", "decision_reason",
+                "scene_source", "shot_archetype", "platform_intent", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "publish_score", "publish_decision", "decision_reason",
             ],
         }
         for title, headers in sheets_with_headers.items():
@@ -880,7 +886,7 @@ class GoogleSheetsStateStore:
     def append_content_moment_memory(self, row: Dict[str, Any]) -> None:
         headers = [
             "date", "city", "day_type", "scene_moment", "scene_moment_type", "moment_signature", "visual_focus", "scene_source",
-            "shot_archetype", "platform_intent", "publish_score", "publish_decision", "decision_reason",
+            "shot_archetype", "platform_intent", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "publish_score", "publish_decision", "decision_reason",
         ]
         self._ensure_headers("content_moment_memory", headers)
         self._append_dict_row("content_moment_memory", headers, row)
@@ -919,7 +925,7 @@ class GoogleSheetsStateStore:
         if not self.available():
             return
 
-        headers = ["timestamp", "status", "message"]
+        headers = ["timestamp", "status", "message", "device_profile", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "anti_synthetic_cleaner_applied"]
         self._ensure_headers("run_log", headers)
         self._append_dict_row(
             "run_log",
@@ -928,6 +934,12 @@ class GoogleSheetsStateStore:
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "status": status,
                 "message": message,
+                "device_profile": "",
+                "camera_behavior_used": "",
+                "framing_style_used": "",
+                "favorite_location_used": "",
+                "social_behavior_mode": "",
+                "anti_synthetic_cleaner_applied": "",
             },
         )
         self._log_ws_fetch_stats()

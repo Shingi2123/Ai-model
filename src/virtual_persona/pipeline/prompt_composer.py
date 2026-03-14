@@ -96,9 +96,10 @@ class PromptComposer:
         continuity = context.get("continuity_context") or {}
         recent_moment_memory = context.get("recent_moment_memory") or []
         persona_voice = context.get("persona_voice") or {}
-        shot_archetype = self._resolve_shot_archetype(scene)
+        shot_archetype = self._resolve_shot_archetype(scene, context, recent_moment_memory)
         platform_behavior = self._platform_behavior_intent(content_type, platform_intent)
         camera_profile = self.CAMERA_ARCHETYPES.get(shot_archetype, self.CAMERA_ARCHETYPES["friend_shot"])
+        device_profile = self._primary_device_profile(context)
 
         item_ids_text = ", ".join(outfit_item_ids or [])
         scene_loc = getattr(scene, "location", context.get("city", "city"))
@@ -119,16 +120,18 @@ class PromptComposer:
         wardrobe_context = self._wardrobe_context(outfit_summary, shot_archetype, item_ids_text)
         camera_context = (
             f"camera_archetype={shot_archetype}; perspective={camera_profile['perspective']}; "
-            f"framing={camera_profile['framing']}; device_realism={camera_profile['device']}; {self._device_profile(context)}"
+            f"framing={camera_profile['framing']}; device_realism={camera_profile['device']}; {self._device_profile(device_profile, shot_archetype)}"
         )
-        camera_behavior_memory = self._camera_behavior_memory(shot_archetype, continuity, recent_moment_memory)
+        camera_behavior_memory = self._camera_behavior_memory(shot_archetype, context, continuity, recent_moment_memory)
+        framing_style = self._framing_style_layer(context, shot_archetype)
         camera_physics = self._camera_physics_layer(shot_archetype, scene_loc)
         sensor_realism = self._sensor_realism_layer(time_of_day, scene_loc)
-        smartphone_behavior = self._smartphone_behavior_layer(scene_loc, time_of_day)
-        micro_imperfections = self._micro_imperfections_layer(shot_archetype, platform_behavior)
+        smartphone_behavior = self._smartphone_behavior_layer(scene_loc, time_of_day, device_profile)
+        social_behavior = self._social_behavior_layer(platform_behavior, scene_loc)
+        micro_imperfections = self._micro_imperfections_layer(shot_archetype, platform_behavior, scene_loc)
         face_consistency = self._face_consistency_layer(context)
-        device_identity = self._device_identity_layer(shot_archetype, context, platform_behavior)
-        favorite_location_memory = self._favorite_location_memory_layer(context, scene_loc)
+        device_identity = self._device_identity_layer(shot_archetype, context, platform_behavior, device_profile)
+        favorite_location_memory = self._favorite_location_memory_layer(context, scene_loc, continuity)
         platform_intent_block = self._platform_intent(context, content_type, platform_intent, platform_behavior)
         composition_and_lighting = (
             f"composition: layered foreground/background, believable depth, no studio symmetry. "
@@ -153,9 +156,11 @@ class PromptComposer:
             "wardrobe_context": wardrobe_context,
             "camera_context": camera_context,
             "camera_behavior_memory": camera_behavior_memory,
+            "framing_style": framing_style,
             "camera_physics": camera_physics,
             "sensor_realism": sensor_realism,
             "smartphone_behavior": smartphone_behavior,
+            "social_behavior": social_behavior,
             "micro_imperfections": micro_imperfections,
             "face_consistency": face_consistency,
             "device_identity": device_identity,
@@ -169,7 +174,7 @@ class PromptComposer:
             "negative_prompt": negative_prompt,
         }
 
-        prefix = blocks.get("prompt_v2_prefix", "Prompt System v2")
+        prefix = blocks.get("prompt_v2_prefix", "Prompt System v3")
         include_negative_prompt = content_type.lower() in {"photo", "carousel", "video", "reel", "story", "stories"}
         final_prompt = (
             f"{prefix}: "
@@ -207,10 +212,31 @@ class PromptComposer:
         return f"outfit={outfit_summary}; {visible_scope}; item_ids={outfit_item_ids}."
 
     @staticmethod
-    def _device_profile(context: Dict[str, Any]) -> str:
+    def _primary_device_profile(context: Dict[str, Any]) -> Dict[str, str]:
         profile = context.get("character_profile") or {}
-        device = profile.get("device_profile") or "Alina's personal smartphone"
-        return f"device_profile={device}"
+        raw = profile.get("primary_device_profile") or {}
+        if not isinstance(raw, dict):
+            raw = {}
+        return {
+            "device_class": str(raw.get("device_class") or profile.get("device_profile") or "modern premium smartphone"),
+            "front_camera_behavior": str(raw.get("front_camera_behavior") or "slight arm-length distortion, practical skin rendering"),
+            "rear_camera_behavior": str(raw.get("rear_camera_behavior") or "natural handheld perspective with mild perspective drift"),
+            "processing_style": str(raw.get("processing_style") or "natural processing, mild HDR, no beauty filter"),
+            "lens_character": str(raw.get("expected_lens_character") or raw.get("lens_character") or "equivalent 24-28mm wide camera look"),
+            "mirror_rules": str(raw.get("screen_mirror_visibility_rules") or "mirror selfies keep consistent personal phone silhouette and camera placement"),
+            "night_limitations": str(raw.get("night_indoor_limitations") or "night/indoor keeps believable grain and softer detail"),
+            "phone_shape": str(raw.get("phone_shape") or profile.get("recurring_phone_device") or "rounded-corner graphite phone with slim clear case"),
+        }
+
+    @staticmethod
+    def _device_profile(device_profile: Dict[str, str], shot_archetype: str) -> str:
+        camera_mode = device_profile["front_camera_behavior"] if shot_archetype in {"front_selfie", "mirror_selfie"} else device_profile["rear_camera_behavior"]
+        return (
+            f"primary_device_profile=device_class={device_profile['device_class']}; "
+            f"camera_mode={camera_mode}; processing_style={device_profile['processing_style']}; "
+            f"lens_character={device_profile['lens_character']}; mirror_rules={device_profile['mirror_rules']}; "
+            f"night_indoor_limitations={device_profile['night_limitations']}"
+        )
 
     @staticmethod
     def _platform_intent(context: Dict[str, Any], content_type: str, platform_intent: str | None, behavior_mode: str) -> str:
@@ -267,6 +293,9 @@ class PromptComposer:
             "sterile beauty campaign polish",
             "perfect lighting",
             "fashion model pose",
+            "wrong phone shape",
+            "broken phone reflection",
+            "impossible lens placement",
         ]
         shot_negative = {
             "mirror_selfie": ["wrong reflection", "floating phone", "broken mirror reflection", "impossible reflection geometry"],
@@ -291,31 +320,46 @@ class PromptComposer:
         return ", ".join(universal_negative + shot_negative.get(shot_archetype, []) + platform_negative.get(platform_behavior, []) + location_negative)
 
     @staticmethod
-    def _device_identity_layer(shot_archetype: str, context: Dict[str, Any], platform_behavior: str) -> str:
+    def _device_identity_layer(shot_archetype: str, context: Dict[str, Any], platform_behavior: str, device_profile: Dict[str, str]) -> str:
         profile = context.get("character_profile") or {}
         recurring_device = profile.get("recurring_phone_device") or profile.get("device_profile") or "Alina's personal smartphone"
         if shot_archetype in {"front_selfie", "mirror_selfie"}:
-            return f"captured on Alina's personal smartphone device ({recurring_device}); phone visible in mirror reflection and consistent with prior posts"
+            return f"captured on recurring personal smartphone ({recurring_device}); phone shape={device_profile['phone_shape']}; mirror geometry and lens placement stay consistent"
         if shot_archetype in {"candid_handheld", "friend_shot", "candid_observer"}:
-            return f"observer capture plausibly from friend-held consumer phone; account device identity remains {recurring_device}"
+            return f"observer capture plausibly from friend-held consumer phone; account owner device identity remains {recurring_device}"
         return f"capture chain consistent with recurring account device identity={recurring_device}; mode={platform_behavior}"
 
     @staticmethod
-    def _camera_behavior_memory(shot_archetype: str, continuity: Dict[str, Any], recent_moment_memory: List[Dict[str, Any]]) -> str:
+    def _camera_behavior_memory(shot_archetype: str, context: Dict[str, Any], continuity: Dict[str, Any], recent_moment_memory: List[Dict[str, Any]]) -> str:
         behavior = continuity.get("camera_behavior_memory") if isinstance(continuity.get("camera_behavior_memory"), dict) else {}
+        if not behavior:
+            behavior = (context.get("character_profile") or {}).get("camera_behavior_memory") or {}
         recent_archetypes = [str(row.get("shot_archetype") or "").strip() for row in recent_moment_memory[:4] if str(row.get("shot_archetype") or "").strip()]
         preferred_archetypes = behavior.get("preferred_shot_archetypes") or ["candid_handheld", "friend_shot"]
         avg_distance = behavior.get("average_camera_distance") or "about 1.2m social distance"
         framing_style = behavior.get("preferred_framing_style") or "mostly eye-level with slight off-center framing"
         selfie_freq = behavior.get("selfie_frequency") or "rare"
         candid_freq = behavior.get("candid_frequency") or "frequent"
+        mirror_freq = behavior.get("mirror_selfie_frequency") or "low"
+        friend_freq = behavior.get("friend_shot_frequency") or "medium"
+        camera_height = behavior.get("typical_camera_height") or "eye-level"
+        symmetry_tolerance = behavior.get("symmetry_tolerance") or "prefers natural asymmetry"
         repetition_note = "avoid near-duplicate framing from previous day" if recent_archetypes and recent_archetypes[0] == shot_archetype else "allow controlled variation"
         return (
             "camera behavior memory: "
             f"preferred_shot_archetypes={preferred_archetypes}; average_camera_distance={avg_distance}; "
             f"preferred_framing_style={framing_style}; selfie_frequency={selfie_freq}; candid_frequency={candid_freq}; "
+            f"mirror_selfie_frequency={mirror_freq}; friend_shot_frequency={friend_freq}; typical_camera_height={camera_height}; symmetry_tolerance={symmetry_tolerance}; "
             f"recent_archetypes={recent_archetypes}; current={shot_archetype}; {repetition_note}."
         )
+
+    @staticmethod
+    def _framing_style_layer(context: Dict[str, Any], shot_archetype: str) -> str:
+        behavior = ((context.get("continuity_context") or {}).get("camera_behavior_memory") if isinstance((context.get("continuity_context") or {}).get("camera_behavior_memory"), dict) else None) or ((context.get("character_profile") or {}).get("camera_behavior_memory") or {})
+        preferred_style = behavior.get("preferred_framing_style") or "slightly off-center calm framing"
+        distance = behavior.get("average_camera_distance") or "medium conversational distance"
+        height = behavior.get("typical_camera_height") or "eye-level"
+        return f"framing habits: style={preferred_style}; distance={distance}; camera_height={height}; archetype={shot_archetype}; controlled bias, not rigid repetition."
 
     @staticmethod
     def _camera_physics_layer(shot_archetype: str, scene_loc: str) -> str:
@@ -344,16 +388,28 @@ class PromptComposer:
         return f"sensor realism: {', '.join(cues)}."
 
     @staticmethod
-    def _smartphone_behavior_layer(scene_loc: str, time_of_day: str) -> str:
-        cue = "subtle sharpening behavior of smartphone computational photography"
+    def _smartphone_behavior_layer(scene_loc: str, time_of_day: str, device_profile: Dict[str, str]) -> str:
+        cue = f"{device_profile['processing_style']}"
         if str(time_of_day).lower() in {"night", "evening"}:
-            cue += ", denoising kept mild and realistic"
+            cue += f", {device_profile['night_limitations']}"
         if "window" in str(scene_loc).lower():
             cue += ", local HDR near bright window edges"
         return f"smartphone behavior: {cue}."
 
     @staticmethod
-    def _micro_imperfections_layer(shot_archetype: str, platform_behavior: str) -> str:
+    def _social_behavior_layer(platform_behavior: str, scene_loc: str) -> str:
+        mapping = {
+            "instagram_feed": "slightly curated but not sterile; moderate background control; polished yet lived-in",
+            "story_lifestyle": "story-like spontaneity; lower polish; private-feeling intimacy",
+            "private_mirror": "private documentation tone; casual framing; imperfect but believable mirror context",
+            "travel_candid": "travel diary rhythm; less staging; environmental context over perfection",
+            "reel_cover": "clear visual hook with social realism, avoid ad-like gloss",
+        }
+        home_bias = "home-life allows mild casual object asymmetry and non-perfect arrangement" if any(token in str(scene_loc).lower() for token in ["home", "room", "kitchen", "sofa", "apartment", "hotel"]) else ""
+        return f"social realism mode: {mapping.get(platform_behavior, mapping['instagram_feed'])}; {home_bias}".strip()
+
+    @staticmethod
+    def _micro_imperfections_layer(shot_archetype: str, platform_behavior: str, scene_loc: str) -> str:
         base = [
             "tiny loose hair strands",
             "slight facial-expression asymmetry",
@@ -364,6 +420,12 @@ class PromptComposer:
         if shot_archetype in {"seated_table_shot", "friend_shot", "candid_handheld"}:
             base.append("mild casual disorder in environment")
             base.append("lived-in contact points like mug grip, book angle, bag strap")
+        if any(token in str(scene_loc).lower() for token in ["home", "kitchen", "room", "hotel", "sofa"]):
+            base.extend([
+                "slightly shifted chair angle",
+                "book or notebook not perfectly centered",
+                "blanket or coat crease consistent with recent use",
+            ])
         if platform_behavior == "instagram_feed":
             base.append("still clean enough for feed but not commercial perfect")
         return f"micro imperfections: {', '.join(base)}."
@@ -384,7 +446,7 @@ class PromptComposer:
         )
 
     @staticmethod
-    def _favorite_location_memory_layer(context: Dict[str, Any], scene_loc: str) -> str:
+    def _favorite_location_memory_layer(context: Dict[str, Any], scene_loc: str, continuity: Dict[str, Any]) -> str:
         profile = context.get("character_profile") or {}
         favorites_raw = profile.get("favorite_locations") or profile.get("favorite_locations_memory") or "kitchen window corner, favorite café table"
         recurring_raw = profile.get("recurring_spaces") or profile.get("favorite_spaces") or "living room sofa, hallway mirror"
@@ -393,7 +455,8 @@ class PromptComposer:
         current = str(scene_loc).lower()
         anchors = favorites + [spot for spot in recurring_spaces if spot not in favorites]
         recurrence = next((spot for spot in anchors if spot.lower() in current), anchors[0] if anchors else "familiar recurring micro-location")
-        return f"favorite location memory: favorite_locations={favorites}; recurring_spaces={recurring_spaces}; selected_recurring_anchor={recurrence}."
+        reason = continuity.get("arc_hint") or "routine continuity"
+        return f"favorite location memory: favorite_locations={favorites}; recurring_spaces={recurring_spaces}; selected_recurring_anchor={recurrence}; recurrence_reason={reason}."
 
     @staticmethod
     def _anti_generic_constraints_layer() -> str:
@@ -405,14 +468,13 @@ class PromptComposer:
     @staticmethod
     def _clean_generic_prompt_terms(text: str) -> str:
         cleaned = text
-        banned = ["beautiful young woman", "photorealistic 8k", "8k", "highly detailed", "luxury campaign", "editorial fashion shoot", "perfect lighting", "fashion model pose"]
-        for token in banned:
+        for token in PromptComposer.BANNED_SYNTHETIC_PATTERNS:
             cleaned = cleaned.replace(token, "")
             cleaned = cleaned.replace(token.title(), "")
             cleaned = cleaned.replace(token.upper(), "")
         return " ".join(cleaned.split())
 
-    def _resolve_shot_archetype(self, scene: Any) -> str:
+    def _resolve_shot_archetype(self, scene: Any, context: Dict[str, Any], recent_moment_memory: List[Dict[str, Any]]) -> str:
         explicit = getattr(scene, "camera_archetype", "") or getattr(scene, "shot_archetype", "")
         if explicit and explicit in self.CAMERA_ARCHETYPES:
             return explicit
@@ -427,13 +489,21 @@ class PromptComposer:
             return "mirror_selfie"
         if "selfie" in text:
             return "front_selfie"
-        if "candid" in text:
-            return "candid_handheld"
         if "portrait" in text:
             return "close_portrait"
         if "table" in text or "coffee" in text:
             return "seated_table_shot"
-        return "friend_shot"
+        continuity_behavior = (context.get("continuity_context") or {}).get("camera_behavior_memory") if isinstance((context.get("continuity_context") or {}).get("camera_behavior_memory"), dict) else {}
+        profile_behavior = (context.get("character_profile") or {}).get("camera_behavior_memory") if isinstance((context.get("character_profile") or {}).get("camera_behavior_memory"), dict) else {}
+        behavior = continuity_behavior or profile_behavior
+        preferred = [str(v).strip() for v in (behavior.get("preferred_shot_archetypes") or ["candid_handheld", "friend_shot"]) if str(v).strip() in self.CAMERA_ARCHETYPES]
+        if "candid" in text:
+            return preferred[0] if preferred else "candid_handheld"
+        recent_archetypes = [str(row.get("shot_archetype") or "").strip() for row in recent_moment_memory[:2] if str(row.get("shot_archetype") or "").strip()]
+        for candidate in preferred:
+            if candidate and candidate != (recent_archetypes[0] if recent_archetypes else ""):
+                return candidate
+        return preferred[0] if preferred else "friend_shot"
 
     @staticmethod
     def _lighting_hint(time_of_day: str) -> str:
@@ -447,3 +517,19 @@ class PromptComposer:
             "evening": "warm evening ambient light",
             "night": "mixed city and practical interior light",
         }.get(str(time_of_day or "").lower(), "natural soft light")
+    BANNED_SYNTHETIC_PATTERNS: tuple[str, ...] = (
+        "beautiful young woman",
+        "photorealistic 8k",
+        "8k",
+        "highly detailed",
+        "stunning beauty",
+        "flawless skin",
+        "fashion magazine vibe",
+        "editorial glamour",
+        "studio-level symmetry",
+        "luxury campaign tone",
+        "pristine environment",
+        "perfect lighting",
+        "fashion model pose",
+        "editorial fashion shoot",
+    )

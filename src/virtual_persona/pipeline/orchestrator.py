@@ -212,6 +212,10 @@ class PipelineOrchestrator:
                         "scene_source": getattr(scene, "scene_source", ""),
                         "shot_archetype": (photo_meta or {}).get("shot_archetype", ""),
                         "platform_intent": (photo_meta or {}).get("platform_behavior", ""),
+                        "camera_behavior_used": (photo_meta or {}).get("camera_behavior_memory", ""),
+                        "framing_style_used": (photo_meta or {}).get("framing_style", ""),
+                        "favorite_location_used": (photo_meta or {}).get("favorite_locations", ""),
+                        "social_behavior_mode": (photo_meta or {}).get("social_behavior", ""),
                         "publish_score": getattr(scene, "publish_score", ""),
                         "publish_decision": getattr(scene, "publish_decision", ""),
                         "decision_reason": getattr(scene, "decision_reason", ""),
@@ -245,8 +249,11 @@ class PipelineOrchestrator:
             f"date={package.date.isoformat()} mode={mode} "
             f"shot_archetype={prompt_meta.get('shot_archetype', getattr(primary, 'shot_archetype', '-')) if primary else '-'} "
             f"device_profile={short_text(str(prompt_meta.get('device_identity', '-')), 84)} "
-            f"camera_behavior_used={bool(prompt_meta.get('camera_behavior_memory'))} "
+            f"camera_behavior_used={short_text(str(prompt_meta.get('camera_behavior_memory', '-')), 72)} "
+            f"framing_style_used={short_text(str(prompt_meta.get('framing_style', '-')), 60)} "
             f"favorite_location_used={short_text(str(prompt_meta.get('favorite_locations', '-')), 56)} "
+            f"social_behavior_mode={short_text(str(prompt_meta.get('social_behavior', '-')), 56)} "
+            f"anti_synthetic_cleaner_applied={bool(prompt_meta.get('anti_generic_constraints'))} "
             f"face_signature_used={short_text(str(prompt_meta.get('face_consistency', '-')), 56)} "
             f"platform_intent={prompt_meta.get('platform_intent', getattr(primary, 'platform_intent', '-')) if primary else '-'} "
             f"city_context={package.city}:{continuity.get('arc_hint', 'stable_routine')} "
