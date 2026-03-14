@@ -17,6 +17,23 @@ import os
 import gspread
 from google.oauth2.service_account import Credentials
 
+
+CHARACTER_PROFILE_V3_FIELDS = [
+    "display_name",
+    "age",
+    "device_profile",
+    "recurring_phone_device",
+    "face_signature",
+    "face_shape",
+    "nose_bridge",
+    "cheekbone_softness",
+    "lip_fullness",
+    "brow_style",
+    "favorite_locations",
+    "recurring_spaces",
+    "favorite_locations_memory",
+]
+
 SHEETS = {
     "character_profile": ["field", "value"],
     "wardrobe": ["id", "category", "name", "styles", "colors", "season", "temp_min_c", "temp_max_c", "weather_tags", "cooldown_days", "last_used"],
@@ -92,6 +109,9 @@ def main() -> None:
         print(f"  Created -> {', '.join(created)}")
     if updated:
         print(f"  Updated -> {', '.join(updated)}")
+
+    print("\nCharacter profile Prompt System v3 recommended keys:")
+    print("- " + ", ".join(CHARACTER_PROFILE_V3_FIELDS))
 
 
 if __name__ == "__main__":

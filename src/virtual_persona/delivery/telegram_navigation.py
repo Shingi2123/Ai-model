@@ -83,8 +83,6 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
     platform_intent = (item.platform_intent or "").strip() or "⚠️ Не задан"
     return (
         f"{_format_detail_header(item, post_index)}\n\n"
-        "📋 Prompt package\n"
-        f"📷 Shot archetype: {shot_archetype} • 🎯 Platform intent: {platform_intent}\n\n"
         f"✍️ Caption:\n{caption}\n\n"
         f"📝 Short caption:\n{short_caption}\n\n"
         "🖼 Prompt (copy-ready):\n"
@@ -94,7 +92,9 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
         "🚫 Negative prompt (copy-ready):\n"
         "```\n"
         f"{negative}\n"
-        "```"
+        "```\n\n"
+        f"📷 Shot archetype: {shot_archetype}\n"
+        f"🎯 Platform intent: {platform_intent}"
     )
 
 
