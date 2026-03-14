@@ -323,20 +323,23 @@ class LocalStateStore:
             )
             self._write_json(cities_path, cities)
 
-    def save_run_log(self, status: str, message: str) -> None:
+    def save_run_log(self, status: str, message: str, **trace_fields: Any) -> None:
         run_log_path = self.base_dir / "run_log.json"
         logs = self._read_json(run_log_path, [])
+        fields = {
+            "device_profile": trace_fields.get("device_profile", ""),
+            "camera_behavior_used": trace_fields.get("camera_behavior_used", ""),
+            "framing_style_used": trace_fields.get("framing_style_used", ""),
+            "favorite_location_used": trace_fields.get("favorite_location_used", ""),
+            "social_behavior_mode": trace_fields.get("social_behavior_mode", ""),
+            "anti_synthetic_cleaner_applied": trace_fields.get("anti_synthetic_cleaner_applied", ""),
+        }
         logs.append(
             {
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "status": status,
                 "message": message,
-                "device_profile": "",
-                "camera_behavior_used": "",
-                "framing_style_used": "",
-                "favorite_location_used": "",
-                "social_behavior_mode": "",
-                "anti_synthetic_cleaner_applied": "",
+                **fields,
             }
         )
         self._write_json(run_log_path, logs)
@@ -477,13 +480,18 @@ class GoogleSheetsStateStore:
             logger.error("Google Sheets read failed for '%s': %s", title, exc)
             return []
 
-    def _append_dict_row(self, title: str, headers: List[str], row: Dict[str, Any]) -> None:
+    def _append_dict_row(self, title: str, headers: List[str], row: Dict[str, Any], *, prefer_sheet_header_order: bool = False) -> None:
         if not self.available():
             return
         try:
             ws = self._get_ws(title)
+            row_headers = headers
+            if prefer_sheet_header_order:
+                sheet_headers = self._with_retry(lambda: ws.row_values(1), operation_name=f"read header {title}") or []
+                if sheet_headers:
+                    row_headers = sheet_headers
             self._with_retry(
-                lambda: ws.append_row([row.get(h, "") for h in headers]),
+                lambda: ws.append_row([row.get(h, "") for h in row_headers]),
                 operation_name=f"append row {title}",
             )
             self._invalidate_sheet_cache(title)
@@ -889,7 +897,7 @@ class GoogleSheetsStateStore:
             "shot_archetype", "platform_intent", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "publish_score", "publish_decision", "decision_reason",
         ]
         self._ensure_headers("content_moment_memory", headers)
-        self._append_dict_row("content_moment_memory", headers, row)
+        self._append_dict_row("content_moment_memory", headers, row, prefer_sheet_header_order=True)
 
     def append_daily_calendar(self, package: DailyPackage) -> None:
         if not self.available():
@@ -921,7 +929,7 @@ class GoogleSheetsStateStore:
             self._with_retry(lambda: ws.append_row([package.city, "", "", "", ""]), operation_name="append row cities")
             self._invalidate_sheet_cache("cities")
 
-    def save_run_log(self, status: str, message: str) -> None:
+    def save_run_log(self, status: str, message: str, **trace_fields: Any) -> None:
         if not self.available():
             return
 
@@ -934,12 +942,12 @@ class GoogleSheetsStateStore:
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "status": status,
                 "message": message,
-                "device_profile": "",
-                "camera_behavior_used": "",
-                "framing_style_used": "",
-                "favorite_location_used": "",
-                "social_behavior_mode": "",
-                "anti_synthetic_cleaner_applied": "",
+                "device_profile": trace_fields.get("device_profile", ""),
+                "camera_behavior_used": trace_fields.get("camera_behavior_used", ""),
+                "framing_style_used": trace_fields.get("framing_style_used", ""),
+                "favorite_location_used": trace_fields.get("favorite_location_used", ""),
+                "social_behavior_mode": trace_fields.get("social_behavior_mode", ""),
+                "anti_synthetic_cleaner_applied": trace_fields.get("anti_synthetic_cleaner_applied", ""),
             },
         )
         self._log_ws_fetch_stats()

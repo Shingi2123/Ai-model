@@ -258,6 +258,12 @@ class PipelineOrchestrator:
             f"platform_intent={prompt_meta.get('platform_intent', getattr(primary, 'platform_intent', '-')) if primary else '-'} "
             f"city_context={package.city}:{continuity.get('arc_hint', 'stable_routine')} "
             f"outfit_items={','.join(package.outfit.item_ids)} {tone}",
+            device_profile=short_text(str(prompt_meta.get("device_identity", "")), 84),
+            camera_behavior_used=short_text(str(prompt_meta.get("camera_behavior_memory", "")), 72),
+            framing_style_used=short_text(str(prompt_meta.get("framing_style", "")), 60),
+            favorite_location_used=short_text(str(prompt_meta.get("favorite_locations", "")), 56),
+            social_behavior_mode=short_text(str(prompt_meta.get("social_behavior", "")), 56),
+            anti_synthetic_cleaner_applied=bool(prompt_meta.get("anti_generic_constraints")),
         )
 
     def send_latest(self, package: DailyPackage) -> bool:
