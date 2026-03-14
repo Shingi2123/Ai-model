@@ -5,12 +5,22 @@ class FakeWS:
     def __init__(self):
         self.cleared = False
         self.updated = None
+        self.rows = []
+        self.header = []
 
     def clear(self):
         self.cleared = True
 
     def update(self, values):
         self.updated = values
+
+    def append_row(self, row):
+        self.rows.append(row)
+
+    def row_values(self, idx):
+        if idx == 1:
+            return list(self.header)
+        return []
 
 
 class HelperGoogleStore(GoogleSheetsStateStore):
@@ -26,9 +36,15 @@ class HelperGoogleStore(GoogleSheetsStateStore):
         self._headers_ensured = set()
         self._worksheet_fetch_count = 0
         self._ws_map = {
+            "publishing_plan": FakeWS(),
+            "life_state": FakeWS(),
+            "daily_calendar": FakeWS(),
+            "content_history": FakeWS(),
             "scene_memory": FakeWS(),
             "activity_memory": FakeWS(),
             "location_memory": FakeWS(),
+            "content_moment_memory": FakeWS(),
+            "run_log": FakeWS(),
         }
         self.records = {}
         self.replaced = {}
@@ -45,12 +61,12 @@ class HelperGoogleStore(GoogleSheetsStateStore):
         return list(self.records.get(title, []))
 
     def _replace_records(self, title, headers, rows):
+        self.replaced[title] = {"headers": headers, "rows": rows}
         if title in self._ws_map:
             ws = self._ws_map[title]
             ws.clear()
             ws.update([headers] + [[row.get(h, "") for h in headers] for row in rows])
             return
-        self.replaced[title] = {"headers": headers, "rows": rows}
 class CacheWS:
     def __init__(self):
         self.rows = []
@@ -174,3 +190,66 @@ def test_local_store_bootstraps_default_posting_rules(tmp_path):
     assert rules
     assert any(str(r.get("rule_id", "")).startswith("default-") for r in rules)
 
+
+def test_google_store_content_moment_memory_uses_actual_sheet_header_order():
+    store = HelperGoogleStore()
+    ws = store._ws_map["content_moment_memory"]
+    ws.header = [
+        "date", "city", "day_type", "scene_moment", "scene_moment_type", "moment_signature", "visual_focus", "scene_source",
+        "shot_archetype", "platform_intent", "publish_score", "publish_decision", "decision_reason",
+        "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode",
+    ]
+
+    row = {
+        "date": "2026-03-14",
+        "city": "Paris",
+        "day_type": "work_day",
+        "scene_moment": "coffee line",
+        "scene_moment_type": "micro",
+        "moment_signature": "sig",
+        "visual_focus": "hands",
+        "scene_source": "planner",
+        "shot_archetype": "close",
+        "platform_intent": "reach",
+        "camera_behavior_used": "handheld",
+        "framing_style_used": "off-center",
+        "favorite_location_used": "corner cafe",
+        "social_behavior_mode": "observing",
+        "publish_score": 0.88,
+        "publish_decision": "publish",
+        "decision_reason": "high novelty",
+    }
+    store.append_content_moment_memory(row)
+
+    assert ws.rows
+    values = ws.rows[0]
+    assert values[10] == 0.88
+    assert values[11] == "publish"
+    assert values[12] == "high novelty"
+    assert values[13] == "handheld"
+
+
+def test_google_store_run_log_persists_structured_trace_fields():
+    store = HelperGoogleStore()
+    ws = store._ws_map["run_log"]
+    ws.header = ["timestamp", "status", "message", "device_profile", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "anti_synthetic_cleaner_applied"]
+
+    store.save_run_log(
+        "debug",
+        "quality_trace ...",
+        device_profile="pixel_7",
+        camera_behavior_used="handheld",
+        framing_style_used="off-center",
+        favorite_location_used="corner cafe",
+        social_behavior_mode="observing",
+        anti_synthetic_cleaner_applied=True,
+    )
+
+    assert ws.rows
+    values = ws.rows[0]
+    assert values[3] == "pixel_7"
+    assert values[4] == "handheld"
+    assert values[5] == "off-center"
+    assert values[6] == "corner cafe"
+    assert values[7] == "observing"
+    assert values[8] is True
