@@ -3,56 +3,36 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from virtual_persona.pipeline.identity import CharacterIdentityManager
+
 
 @dataclass
 class PromptComposer:
     state_store: Any
 
     CAMERA_ARCHETYPES: Dict[str, Dict[str, str]] = None  # type: ignore[assignment]
+    GENERATION_MODE_REGISTRY: Dict[str, Dict[str, Any]] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.CAMERA_ARCHETYPES is None:
             self.CAMERA_ARCHETYPES = {
-                "front_selfie": {
-                    "perspective": "front phone camera perspective, arm-length framing, subtle lens distortion near edges",
-                    "framing": "upper torso or head-and-shoulders crop, imperfect but natural alignment",
-                    "device": "smartphone-origin realism, handheld micro-movement feel",
-                },
-                "mirror_selfie": {
-                    "perspective": "mirror reflection perspective, camera looking into mirror",
-                    "framing": "phone visible in reflection, one hand holding phone, practical bathroom/room mirror framing",
-                    "device": "phone model consistency in reflection, believable mirror geometry",
-                },
-                "candid_handheld": {
-                    "perspective": "handheld documentary perspective, observer at human eye level",
-                    "framing": "slightly off-center candid crop, natural motion imperfections",
-                    "device": "street-level smartphone camera realism, non-studio rendering",
-                },
-                "candid_observer": {
-                    "perspective": "captured from nearby observer distance, unposed interaction",
-                    "framing": "asymmetric candid composition, environmental context visible",
-                    "device": "natural capture feel, no studio or catalog perfection",
-                },
-                "tripod_photo": {
-                    "perspective": "fixed tripod perspective with realistic focal distance",
-                    "framing": "balanced full-body or 3/4 framing with visible environment depth",
-                    "device": "phone or compact camera timer-shot realism",
-                },
-                "friend_shot": {
-                    "perspective": "shot by a friend from conversational distance",
-                    "framing": "natural social framing, slight perspective drift, lived-in scene blocking",
-                    "device": "consumer smartphone realism, authentic skin and texture response",
-                },
-                "close_portrait": {
-                    "perspective": "tight close portrait perspective with shallow but realistic depth",
-                    "framing": "face-dominant frame, neck and shoulders partially visible",
-                    "device": "real lens behavior, natural skin detail and pores",
-                },
-                "seated_table_shot": {
-                    "perspective": "seated eye-level perspective across table or at slight side angle",
-                    "framing": "mid-shot with tabletop context and hands interacting with objects",
-                    "device": "lifestyle café realism, practical available light",
-                },
+                "front_selfie": {"perspective": "front phone camera perspective", "framing": "head-and-shoulders", "device": "smartphone handheld"},
+                "mirror_selfie": {"perspective": "mirror reflection perspective", "framing": "phone visible in reflection", "device": "mirror geometry consistent"},
+                "candid_handheld": {"perspective": "observer handheld perspective", "framing": "off-center candid", "device": "consumer smartphone"},
+                "friend_shot": {"perspective": "friend-shot social distance", "framing": "natural social framing", "device": "consumer smartphone"},
+                "close_portrait": {"perspective": "tight close portrait", "framing": "face dominant", "device": "real lens behavior"},
+                "seated_table_shot": {"perspective": "seated eye-level", "framing": "mid-shot with table context", "device": "lifestyle available light"},
+                "full_body": {"perspective": "full body eye-level", "framing": "head-to-toe", "device": "realistic smartphone lens"},
+                "waist_up": {"perspective": "waist-up framing", "framing": "torso centered with environment", "device": "natural handheld"},
+            }
+        if self.GENERATION_MODE_REGISTRY is None:
+            self.GENERATION_MODE_REGISTRY = {
+                "portrait_mode": {"shot_archetypes": ["close_portrait", "front_selfie"], "negative": ["wax skin", "beauty filter"]},
+                "waist-up_mode": {"shot_archetypes": ["waist_up", "seated_table_shot"], "negative": ["broken torso proportions"]},
+                "seated_lifestyle_mode": {"shot_archetypes": ["seated_table_shot"], "negative": ["impossible seated geometry", "feet on table unless explicitly requested"]},
+                "full-body_mode": {"shot_archetypes": ["full_body", "friend_shot"], "negative": ["floating shoe", "broken ankle angle"]},
+                "selfie_mode": {"shot_archetypes": ["front_selfie"], "negative": ["rear-camera perspective"]},
+                "mirror_selfie_mode": {"shot_archetypes": ["mirror_selfie"], "negative": ["broken mirror reflection", "floating phone"]},
             }
 
     def load_blocks(self) -> Dict[str, str]:
@@ -65,193 +45,192 @@ class PromptComposer:
                 pass
         return {}
 
-    def compose(
-        self,
-        context: Dict[str, Any],
-        scene: Any,
-        outfit_summary: str,
-        content_type: str,
-        outfit_item_ids: List[str] | None = None,
-        platform_intent: str | None = None,
-    ) -> str:
-        return self.compose_package(
-            context=context,
-            scene=scene,
-            outfit_summary=outfit_summary,
-            content_type=content_type,
-            outfit_item_ids=outfit_item_ids,
-            platform_intent=platform_intent,
-        )["final_prompt"]
+    def compose(self, context: Dict[str, Any], scene: Any, outfit_summary: str, content_type: str, outfit_item_ids: List[str] | None = None, platform_intent: str | None = None) -> str:
+        return self.compose_package(context, scene, outfit_summary, content_type, outfit_item_ids, platform_intent)["final_prompt"]
 
-    def compose_package(
-        self,
-        context: Dict[str, Any],
-        scene: Any,
-        outfit_summary: str,
-        content_type: str,
-        outfit_item_ids: List[str] | None = None,
-        platform_intent: str | None = None,
-    ) -> Dict[str, str]:
+    def compose_package(self, context: Dict[str, Any], scene: Any, outfit_summary: str, content_type: str, outfit_item_ids: List[str] | None = None, platform_intent: str | None = None) -> Dict[str, str]:
         blocks = self.load_blocks()
-        continuity = context.get("continuity_context") or {}
-        recent_moment_memory = context.get("recent_moment_memory") or []
-        persona_voice = context.get("persona_voice") or {}
-        shot_archetype = self._resolve_shot_archetype(scene, context, recent_moment_memory)
+        recent = context.get("recent_moment_memory") or []
+        shot_archetype = self._resolve_shot_archetype(scene, context, recent)
+        generation_mode = self._resolve_generation_mode(scene, shot_archetype)
         platform_behavior = self._platform_behavior_intent(content_type, platform_intent)
-        camera_profile = self.CAMERA_ARCHETYPES.get(shot_archetype, self.CAMERA_ARCHETYPES["friend_shot"])
-        device_profile = self._primary_device_profile(context)
+        profile = context.get("character_profile") or {}
+        identity_manager = CharacterIdentityManager()
+        identity_pack = identity_manager.load_pack()
+        prompt_mode = self._prompt_mode(shot_archetype, content_type, getattr(scene, "scene_moment", ""))
 
-        item_ids_text = ", ".join(outfit_item_ids or [])
         scene_loc = getattr(scene, "location", context.get("city", "city"))
         scene_desc = getattr(scene, "scene_moment", "") or getattr(scene, "description", "daily lifestyle moment")
-        time_of_day = getattr(scene, "time_of_day", "day")
+        item_ids_text = ", ".join(outfit_item_ids or [])
 
-        identity_core = self._identity_core(context)
-        life_continuity_context = (
-            f"day_type={getattr(context.get('life_state'), 'day_type', context.get('day_type', 'daily_life'))}; "
-            f"season={getattr(context.get('life_state'), 'season', 'all-season')}; "
-            f"fatigue={getattr(context.get('life_state'), 'fatigue_level', 4)}/10; "
-            f"arc_hint={continuity.get('arc_hint', 'stable_routine')}; previous_evening={continuity.get('previous_evening_moment', '')}."
-        )
-        scene_context = (
-            f"{scene_desc}; location={scene_loc}, city={context.get('city')}, activity={getattr(scene, 'activity', '')}, "
-            f"mood={getattr(scene, 'mood', 'calm')}, time_of_day={time_of_day}, visual_focus={getattr(scene, 'visual_focus', '')}."
-        )
-        wardrobe_context = self._wardrobe_context(outfit_summary, shot_archetype, item_ids_text)
-        camera_context = (
-            f"camera_archetype={shot_archetype}; perspective={camera_profile['perspective']}; "
-            f"framing={camera_profile['framing']}; device_realism={camera_profile['device']}; {self._device_profile(device_profile, shot_archetype)}"
-        )
-        camera_behavior_memory = self._camera_behavior_memory(shot_archetype, context, continuity, recent_moment_memory)
-        framing_style = self._framing_style_layer(context, shot_archetype)
-        camera_physics = self._camera_physics_layer(shot_archetype, scene_loc)
-        sensor_realism = self._sensor_realism_layer(time_of_day, scene_loc)
-        smartphone_behavior = self._smartphone_behavior_layer(scene_loc, time_of_day, device_profile)
-        social_behavior = self._social_behavior_layer(platform_behavior, scene_loc)
-        micro_imperfections = self._micro_imperfections_layer(shot_archetype, platform_behavior, scene_loc)
-        face_consistency = self._face_consistency_layer(context)
-        device_identity = self._device_identity_layer(shot_archetype, context, platform_behavior, device_profile)
-        favorite_location_memory = self._favorite_location_memory_layer(context, scene_loc, continuity)
-        platform_intent_block = self._platform_intent(context, content_type, platform_intent, platform_behavior)
-        composition_and_lighting = (
-            f"composition: layered foreground/background, believable depth, no studio symmetry. "
-            f"lighting: {self._lighting_hint(time_of_day)} with natural exposure and practical light sources."
-        )
-        realism_cues = (
-            "realism: natural skin texture with pores, subtle under-eye detail, realistic fabric folds, "
-            "coherent city/background geometry, grounded body language and hand placement."
-        )
-        continuity_cues = self._continuity_cues(context, scene)
-        persona_voice_cues = (
-            f"persona tone: restrained={persona_voice.get('restraint', 0.7)}, reflective={persona_voice.get('reflection', 0.65)}, "
-            f"self_irony={persona_voice.get('self_irony', 0.3)}, understated lifestyle delivery."
-        )
-        anti_generic_constraints = self._anti_generic_constraints_layer()
-        negative_prompt = self._negative_prompt(shot_archetype, scene_loc, platform_behavior)
+        identity_anchor = identity_manager.identity_anchor(context, identity_pack)
+        body_anchor = identity_manager.body_anchor(shot_archetype, context, identity_pack)
+        scene_action = f"scene action: {scene_desc}; location={scene_loc}; activity={getattr(scene, 'activity', '')}; mood={getattr(scene, 'mood', '')}."
+        wardrobe_block = self._wardrobe_context(outfit_summary, shot_archetype, item_ids_text)
+        camera_block = self._camera_context(shot_archetype, context)
+        realism_block = self._realism_cues(shot_archetype, scene_loc)
+        continuity_block = self._continuity_cues(context, scene)
+        platform_block = self._platform_intent(context, content_type, platform_intent, platform_behavior)
+        negative_prompt = self._negative_prompt(shot_archetype, scene_loc, platform_behavior, generation_mode)
+        reference_bundle = self._reference_bundle(identity_pack, shot_archetype)
 
+        # backward-compatible keys (v3)
         ordered_blocks = {
-            "identity_core": identity_core,
-            "life_continuity_context": life_continuity_context,
-            "scene_context": scene_context,
-            "wardrobe_context": wardrobe_context,
-            "camera_context": camera_context,
-            "camera_behavior_memory": camera_behavior_memory,
-            "framing_style": framing_style,
-            "camera_physics": camera_physics,
-            "sensor_realism": sensor_realism,
-            "smartphone_behavior": smartphone_behavior,
-            "social_behavior": social_behavior,
-            "micro_imperfections": micro_imperfections,
-            "face_consistency": face_consistency,
-            "device_identity": device_identity,
-            "favorite_locations": favorite_location_memory,
-            "platform_intent": platform_intent_block,
-            "composition_and_lighting": composition_and_lighting,
-            "realism_cues": realism_cues,
-            "continuity_cues": continuity_cues,
-            "anti_generic_constraints": anti_generic_constraints,
-            "persona_voice_cues": persona_voice_cues,
+            "identity_core": self._identity_core(context),
+            "identity_anchor": identity_anchor,
+            "body_anchor": body_anchor,
+            "scene_action": scene_action,
+            "wardrobe_block": wardrobe_block,
+            "camera_block": camera_block,
+            "realism_block": realism_block,
+            "continuity_block": continuity_block,
+            "platform_intent": platform_block,
+            "prompt_mode": prompt_mode,
+            "generation_mode": generation_mode,
+            "reference_bundle": reference_bundle,
+            "life_continuity_context": continuity_block,
+            "scene_context": scene_action,
+            "wardrobe_context": wardrobe_block,
+            "camera_context": camera_block,
+            "framing_style": "imperfect framing, real handheld balance",
+            "camera_physics": "handheld motion with gravity-consistent body pose",
+            "sensor_realism": "smartphone dynamic range with mild grain in low light",
+            "smartphone_behavior": "natural smartphone photo, candid realism, no studio perfection",
+            "social_behavior": self._social_behavior(platform_behavior),
+            "micro_imperfections": self._micro_imperfections(scene_loc, platform_behavior),
+            "camera_behavior_memory": self._camera_behavior_memory(shot_archetype, context, context.get("continuity_context") or {}, recent),
+            "face_consistency": self._face_consistency_layer(context),
+            "device_identity": self._device_identity_layer(shot_archetype, context, platform_behavior, self._primary_device_profile(context)),
+            "favorite_locations": self._favorite_location_memory_layer(context, scene_loc, context.get("continuity_context") or {}),
+            "composition_and_lighting": f"{self._lighting_hint(getattr(scene, 'time_of_day', 'day'))}; natural posture; gravity-consistent pose.",
+            "realism_cues": realism_block,
+            "continuity_cues": continuity_block,
+            "anti_generic_constraints": self._anti_generic_constraints_layer(),
+            "persona_voice_cues": f"voice restraint={profile.get('voice_restrain', 'medium')}",
             "negative_prompt": negative_prompt,
+            "video_motion": "subtle body movement with stable identity",
+            "video_camera_motion": "light handheld or slow tripod drift",
         }
 
-        prefix = blocks.get("prompt_v2_prefix", "Prompt System v3")
+        prefix = blocks.get("prompt_v2_prefix", "Prompt System v4")
         include_negative_prompt = content_type.lower() in {"photo", "carousel", "video", "reel", "story", "stories"}
         final_prompt = (
             f"{prefix}: "
-            + " ".join(f"[{key}] {value}" for key, value in ordered_blocks.items() if key != "negative_prompt")
+            + " ".join(
+                f"[{k}] {v}"
+                for k, v in ordered_blocks.items()
+                if k
+                in {
+                    "identity_anchor",
+                    "body_anchor",
+                    "scene_action",
+                    "wardrobe_block",
+                    "camera_block",
+                    "realism_block",
+                    "continuity_block",
+                    "platform_intent",
+                    "prompt_mode",
+                    "generation_mode",
+                    "reference_bundle",
+                    "face_consistency",
+                    "social_behavior",
+                }
+            )
             + (f" [negative_prompt] {negative_prompt}" if include_negative_prompt else "")
         )
         final_prompt = self._clean_generic_prompt_terms(final_prompt)
-        return {
-            **ordered_blocks,
-            "final_prompt": final_prompt,
-            "shot_archetype": shot_archetype,
-            "platform_behavior": platform_behavior,
-        }
+        ordered_blocks["final_prompt"] = final_prompt
+        ordered_blocks["shot_archetype"] = shot_archetype
+        ordered_blocks["platform_behavior"] = platform_behavior
+        return ordered_blocks
 
-    def _identity_core(self, context: Dict[str, Any]) -> str:
+    @staticmethod
+    def _prompt_mode(shot_archetype: str, content_type: str, scene_text: str) -> str:
+        simple = shot_archetype in {"front_selfie", "mirror_selfie", "close_portrait"} and content_type in {"photo", "story"}
+        simple = simple and len(str(scene_text or "").split()) < 12
+        return "compact" if simple else "dense"
+
+    def _resolve_generation_mode(self, scene: Any, shot_archetype: str) -> str:
+        explicit = getattr(scene, "generation_mode", "")
+        if explicit and explicit in self.GENERATION_MODE_REGISTRY:
+            return explicit
+        for mode, cfg in self.GENERATION_MODE_REGISTRY.items():
+            if shot_archetype in cfg.get("shot_archetypes", []):
+                return mode
+        return "portrait_mode"
+
+    @staticmethod
+    def _reference_bundle(identity_pack: Any, shot_archetype: str) -> str:
+        refs = identity_pack.references if identity_pack else {}
+        preferred = "face_reference"
+        if shot_archetype in {"seated_table_shot", "waist_up"}:
+            preferred = "half_body_reference"
+        if shot_archetype in {"full_body", "friend_shot", "candid_handheld"}:
+            preferred = "full_body_reference"
+        selected = refs.get(preferred) or refs.get("face_reference") or "fallback_character_dna"
+        return f"preferred={preferred}; selected={selected}; pack_ready={getattr(identity_pack, 'ready', False)}"
+
+    @staticmethod
+    def _identity_core(context: Dict[str, Any]) -> str:
         profile = context.get("character_profile") or {}
-        character = context.get("character")
-        name = getattr(character, "name", None) or profile.get("display_name") or "Alina Volkova"
-        age = str(getattr(character, "age", None) or profile.get("age") or "22")
-        hair = profile.get("appearance_hair_color") or "light chestnut hair"
-        eyes = profile.get("appearance_eye_color") or "green eyes"
-        face = profile.get("appearance_face_shape") or "soft oval face"
-        body = profile.get("appearance_body_type") or "slim natural build"
-        makeup = profile.get("makeup_profile") or "soft everyday makeup"
-        skin = profile.get("skin_realism_profile") or "natural skin texture"
-        signature = profile.get("signature_appearance_cues") or "same recurring person across days"
         return (
-            f"{name}, {age} years old; identity DNA: {hair}, {eyes}, {face}, {body}; "
-            f"makeup={makeup}; skin={skin}; signature cues={signature}."
+            f"identity DNA: hair={profile.get('appearance_hair_color', 'light chestnut')}; "
+            f"eyes={profile.get('appearance_eye_color', 'green')}; "
+            f"face={profile.get('appearance_face_shape', 'soft oval')}; "
+            f"body={profile.get('appearance_body_type', 'slim natural build')}"
         )
 
     @staticmethod
     def _wardrobe_context(outfit_summary: str, shot_archetype: str, outfit_item_ids: str) -> str:
-        visible_scope = "focus on visible upper-body pieces" if shot_archetype in {"front_selfie", "close_portrait", "mirror_selfie", "seated_table_shot"} else "full outfit coherence"
-        return f"outfit={outfit_summary}; {visible_scope}; item_ids={outfit_item_ids}."
+        visible_scope = "upper-body focus" if shot_archetype in {"front_selfie", "close_portrait", "mirror_selfie", "seated_table_shot"} else "full outfit coherence"
+        return f"wardrobe: {outfit_summary}; {visible_scope}; item_ids={outfit_item_ids}."
+
+    def _camera_context(self, shot_archetype: str, context: Dict[str, Any]) -> str:
+        camera_profile = self.CAMERA_ARCHETYPES.get(shot_archetype, self.CAMERA_ARCHETYPES["friend_shot"])
+        device_profile = self._primary_device_profile(context)
+        return (
+            f"{camera_profile['perspective']}; {camera_profile['framing']}; {camera_profile['device']}; "
+            f"{self._device_profile(device_profile, shot_archetype)}"
+        )
 
     @staticmethod
     def _primary_device_profile(context: Dict[str, Any]) -> Dict[str, str]:
         profile = context.get("character_profile") or {}
-        raw = profile.get("primary_device_profile") or {}
-        if not isinstance(raw, dict):
-            raw = {}
+        raw = profile.get("primary_device_profile") if isinstance(profile.get("primary_device_profile"), dict) else {}
         return {
             "device_class": str(raw.get("device_class") or profile.get("device_profile") or "modern premium smartphone"),
-            "front_camera_behavior": str(raw.get("front_camera_behavior") or "slight arm-length distortion, practical skin rendering"),
-            "rear_camera_behavior": str(raw.get("rear_camera_behavior") or "natural handheld perspective with mild perspective drift"),
-            "processing_style": str(raw.get("processing_style") or "natural processing, mild HDR, no beauty filter"),
-            "lens_character": str(raw.get("expected_lens_character") or raw.get("lens_character") or "equivalent 24-28mm wide camera look"),
-            "mirror_rules": str(raw.get("screen_mirror_visibility_rules") or "mirror selfies keep consistent personal phone silhouette and camera placement"),
-            "night_limitations": str(raw.get("night_indoor_limitations") or "night/indoor keeps believable grain and softer detail"),
-            "phone_shape": str(raw.get("phone_shape") or profile.get("recurring_phone_device") or "rounded-corner graphite phone with slim clear case"),
+            "front_camera_behavior": str(raw.get("front_camera_behavior") or "arm-length front camera behavior"),
+            "rear_camera_behavior": str(raw.get("rear_camera_behavior") or "rear camera handheld behavior"),
+            "processing_style": str(raw.get("processing_style") or "natural processing"),
+            "lens_character": str(raw.get("expected_lens_character") or "24-28mm equivalent"),
+            "mirror_rules": str(raw.get("screen_mirror_visibility_rules") or "consistent mirror phone silhouette"),
+            "night_limitations": str(raw.get("night_indoor_limitations") or "mild grain at low light"),
+            "phone_shape": str(raw.get("phone_shape") or profile.get("recurring_phone_device") or "rounded phone"),
         }
 
     @staticmethod
     def _device_profile(device_profile: Dict[str, str], shot_archetype: str) -> str:
         camera_mode = device_profile["front_camera_behavior"] if shot_archetype in {"front_selfie", "mirror_selfie"} else device_profile["rear_camera_behavior"]
+        return f"primary_device_profile=device_class={device_profile['device_class']}; camera_mode={camera_mode}; lens_character={device_profile['lens_character']}"
+
+    @staticmethod
+    def _realism_cues(shot_archetype: str, scene_loc: str) -> str:
         return (
-            f"primary_device_profile=device_class={device_profile['device_class']}; "
-            f"camera_mode={camera_mode}; processing_style={device_profile['processing_style']}; "
-            f"lens_character={device_profile['lens_character']}; mirror_rules={device_profile['mirror_rules']}; "
-            f"night_indoor_limitations={device_profile['night_limitations']}"
+            f"realism: natural smartphone photo, candid realism, imperfect framing, real home light, lived-in environment, natural posture; "
+            f"shot={shot_archetype}; location={scene_loc}."
         )
 
     @staticmethod
     def _platform_intent(context: Dict[str, Any], content_type: str, platform_intent: str | None, behavior_mode: str) -> str:
         intent = PromptComposer._platform_behavior_intent(content_type, platform_intent)
         mapping = {
-            "instagram_feed": "slightly curated hero moment, coherent framing, social-ready but still lived-in.",
-            "story_lifestyle": "spontaneous, intimate, less polished, diary-like everyday authenticity.",
-            "reel_cover": "clear focal subject, energetic framing, thumbnail readability with realistic movement context.",
-            "private_mirror": "private-feeling mirror documentation, casual posture, lived-in environment.",
-            "travel_candid": "travel diary realism, environmental context matters more than perfection.",
+            "instagram_feed": "slightly curated but lived-in",
+            "story_lifestyle": "spontaneous and diary-like",
+            "reel_cover": "clear focal point with natural movement",
+            "travel_candid": "environment-first realism",
+            "private_mirror": "private mirror documentation",
         }
-        return (
-            f"platform=Instagram; intent={intent}; behavior_mode={behavior_mode}; "
-            f"direction={mapping.get(intent, mapping['instagram_feed'])}"
-        )
+        return f"platform=Instagram; intent={intent}; behavior_mode={behavior_mode}; direction={mapping.get(intent, 'lifestyle')}"
 
     @staticmethod
     def _platform_behavior_intent(content_type: str, platform_intent: str | None) -> str:
@@ -264,168 +243,70 @@ class PromptComposer:
             return "story_lifestyle"
         return "instagram_feed"
 
-    def _continuity_cues(self, context: Dict[str, Any], scene: Any) -> str:
+    def _negative_prompt(self, shot_archetype: str, scene_loc: str, platform_behavior: str, generation_mode: str) -> str:
+        universal = [
+            "extra fingers", "deformed hands", "duplicate person", "plastic skin", "bad anatomy", "wrong limb placement",
+            "generic model photo", "fashion catalog symmetry", "sterile beauty campaign polish", "wrong phone shape",
+        ]
+        shot_specific = {
+            "mirror_selfie": ["wrong reflection", "floating phone", "impossible reflection geometry"],
+            "front_selfie": ["rear-camera perspective", "detached floating arm"],
+            "seated_table_shot": ["impossible seated geometry", "feet on table unless explicitly requested", "broken ankle angle", "floating shoe"],
+            "full_body": ["broken body proportions", "misaligned shoes"],
+        }
+        location_specific: List[str] = []
+        loc = scene_loc.lower()
+        if "kitchen" in loc:
+            location_specific.extend(["broken mug handle", "impossible cup grip"])
+        if "street" in loc or "city" in loc:
+            location_specific.append("impossible pedestrian scale")
+        mode_negative = self.GENERATION_MODE_REGISTRY.get(generation_mode, {}).get("negative", [])
+        platform_negative = ["overproduced ad lighting"] if platform_behavior == "story_lifestyle" else []
+        return ", ".join(universal + shot_specific.get(shot_archetype, []) + location_specific + platform_negative + mode_negative)
+
+    @staticmethod
+    def _continuity_cues(context: Dict[str, Any], scene: Any) -> str:
         continuity = context.get("continuity_context") or {}
         arc = continuity.get("arc_hint", "stable_routine")
+        hint = "steady day-to-day continuity"
         if arc == "arrival_and_adaptation":
-            hint = "subtle arrival cues like not fully unpacked luggage or adaptation-to-space mood"
+            hint = "subtle arrival cues like not fully unpacked luggage"
         elif arc == "same_mode_continuation":
-            hint = "routine confidence, settled posture, familiar environment handling"
+            hint = "routine confidence and settled posture"
         elif arc == "recovery_continuation":
-            hint = "gentle pace, low-energy body language, quiet environment choices"
-        else:
-            hint = "steady day-to-day continuity with believable micro-variation"
-        scene_source = getattr(scene, "scene_source", "") or getattr(scene, "source", "library")
-        return f"arc={arc}; continuity_hint={hint}; scene_source={scene_source}; signature={getattr(scene, 'moment_signature', '')}."
-
-    def _negative_prompt(self, shot_archetype: str, scene_loc: str, platform_behavior: str) -> str:
-        universal_negative = [
-            "extra fingers",
-            "deformed hands",
-            "duplicate person",
-            "plastic skin",
-            "doll face",
-            "bad anatomy",
-            "broken hand pose",
-            "wrong limb placement",
-            "generic model photo",
-            "fashion catalog symmetry",
-            "sterile beauty campaign polish",
-            "perfect lighting",
-            "fashion model pose",
-            "wrong phone shape",
-            "broken phone reflection",
-            "impossible lens placement",
-        ]
-        shot_negative = {
-            "mirror_selfie": ["wrong reflection", "floating phone", "broken mirror reflection", "impossible reflection geometry"],
-            "front_selfie": ["rear-camera perspective", "detached floating arm"],
-            "candid_handheld": ["posed studio stance", "perfect catalog centering", "tripod-like static shot"],
-            "friend_shot": ["subject looking directly at lens in every frame", "editorial posing"],
-            "close_portrait": ["wax skin", "beauty filter look"],
-        }
-        platform_negative = {
-            "story_lifestyle": ["overproduced ad lighting", "commercial hero framing"],
-            "travel_candid": ["duplicate pedestrians", "background motion incoherence", "floating bag straps"],
-            "private_mirror": ["public street crowd", "non-mirror perspective"],
-        }
-        location_negative: list[str] = []
-        loc = str(scene_loc).lower()
-        if any(token in loc for token in ["street", "city", "outdoor"]):
-            location_negative.extend(["empty fake street", "background perspective mismatch", "impossible pedestrian scale"])
-        if any(token in loc for token in ["hotel", "room", "indoor"]):
-            location_negative.extend(["impossible room layout", "floating furniture", "impossible window lighting"])
-        if "kitchen" in loc:
-            location_negative.extend(["broken mug handle", "impossible cup grip"])
-        return ", ".join(universal_negative + shot_negative.get(shot_archetype, []) + platform_negative.get(platform_behavior, []) + location_negative)
+            hint = "gentle pace and low-energy body language"
+        return f"continuity: arc={arc}; hint={hint}; previous_evening={continuity.get('previous_evening_moment', '')}; signature={getattr(scene, 'moment_signature', '')}."
 
     @staticmethod
     def _device_identity_layer(shot_archetype: str, context: Dict[str, Any], platform_behavior: str, device_profile: Dict[str, str]) -> str:
-        profile = context.get("character_profile") or {}
-        recurring_device = profile.get("recurring_phone_device") or profile.get("device_profile") or "Alina's personal smartphone"
-        if shot_archetype in {"front_selfie", "mirror_selfie"}:
-            return f"captured on recurring personal smartphone ({recurring_device}); phone shape={device_profile['phone_shape']}; mirror geometry and lens placement stay consistent"
-        if shot_archetype in {"candid_handheld", "friend_shot", "candid_observer"}:
-            return f"observer capture plausibly from friend-held consumer phone; account owner device identity remains {recurring_device}"
-        return f"capture chain consistent with recurring account device identity={recurring_device}; mode={platform_behavior}"
+        recurring_device = (context.get("character_profile") or {}).get("recurring_phone_device") or "personal smartphone"
+        return f"capture chain consistent with recurring device={recurring_device}; phone shape={device_profile['phone_shape']}; mode={platform_behavior}; shot={shot_archetype}"
 
     @staticmethod
     def _camera_behavior_memory(shot_archetype: str, context: Dict[str, Any], continuity: Dict[str, Any], recent_moment_memory: List[Dict[str, Any]]) -> str:
         behavior = continuity.get("camera_behavior_memory") if isinstance(continuity.get("camera_behavior_memory"), dict) else {}
         if not behavior:
             behavior = (context.get("character_profile") or {}).get("camera_behavior_memory") or {}
-        recent_archetypes = [str(row.get("shot_archetype") or "").strip() for row in recent_moment_memory[:4] if str(row.get("shot_archetype") or "").strip()]
-        preferred_archetypes = behavior.get("preferred_shot_archetypes") or ["candid_handheld", "friend_shot"]
-        avg_distance = behavior.get("average_camera_distance") or "about 1.2m social distance"
-        framing_style = behavior.get("preferred_framing_style") or "mostly eye-level with slight off-center framing"
-        selfie_freq = behavior.get("selfie_frequency") or "rare"
-        candid_freq = behavior.get("candid_frequency") or "frequent"
-        mirror_freq = behavior.get("mirror_selfie_frequency") or "low"
-        friend_freq = behavior.get("friend_shot_frequency") or "medium"
-        camera_height = behavior.get("typical_camera_height") or "eye-level"
-        symmetry_tolerance = behavior.get("symmetry_tolerance") or "prefers natural asymmetry"
-        repetition_note = "avoid near-duplicate framing from previous day" if recent_archetypes and recent_archetypes[0] == shot_archetype else "allow controlled variation"
+        preferred = behavior.get("preferred_shot_archetypes") or ["candid_handheld", "friend_shot"]
         return (
-            "camera behavior memory: "
-            f"preferred_shot_archetypes={preferred_archetypes}; average_camera_distance={avg_distance}; "
-            f"preferred_framing_style={framing_style}; selfie_frequency={selfie_freq}; candid_frequency={candid_freq}; "
-            f"mirror_selfie_frequency={mirror_freq}; friend_shot_frequency={friend_freq}; typical_camera_height={camera_height}; symmetry_tolerance={symmetry_tolerance}; "
-            f"recent_archetypes={recent_archetypes}; current={shot_archetype}; {repetition_note}."
+            f"preferred_shot_archetypes={preferred}; average_camera_distance={behavior.get('average_camera_distance', '1.2m')}; "
+            f"preferred_framing_style={behavior.get('preferred_framing_style', 'eye-level')}; selfie_frequency={behavior.get('selfie_frequency', 'rare')}"
         )
 
-    @staticmethod
-    def _framing_style_layer(context: Dict[str, Any], shot_archetype: str) -> str:
-        behavior = ((context.get("continuity_context") or {}).get("camera_behavior_memory") if isinstance((context.get("continuity_context") or {}).get("camera_behavior_memory"), dict) else None) or ((context.get("character_profile") or {}).get("camera_behavior_memory") or {})
-        preferred_style = behavior.get("preferred_framing_style") or "slightly off-center calm framing"
-        distance = behavior.get("average_camera_distance") or "medium conversational distance"
-        height = behavior.get("typical_camera_height") or "eye-level"
-        return f"framing habits: style={preferred_style}; distance={distance}; camera_height={height}; archetype={shot_archetype}; controlled bias, not rigid repetition."
 
     @staticmethod
-    def _camera_physics_layer(shot_archetype: str, scene_loc: str) -> str:
-        cues = [
-            "subtle handheld motion",
-            "natural smartphone lens perspective",
-            "slight imperfect framing",
-            "natural depth falloff typical of phone optics",
-            "mild smartphone sensor noise",
-        ]
-        if shot_archetype in {"candid_handheld", "friend_shot", "candid_observer"}:
-            cues.append("minor motion softness from live movement")
-        if "street" in str(scene_loc).lower():
-            cues.append("observer alignment not perfectly level")
-        return f"camera physics: {', '.join(cues)}."
+    def _social_behavior(platform_behavior: str) -> str:
+        if platform_behavior == "instagram_feed":
+            return "slightly curated social behavior with natural asymmetry"
+        if platform_behavior == "story_lifestyle":
+            return "spontaneity-first diary behavior with lived-in movement"
+        return "spontaneity and lived-in environment cues"
 
     @staticmethod
-    def _sensor_realism_layer(time_of_day: str, scene_loc: str) -> str:
-        cues = ["natural dynamic range behavior", "highlight rolloff", "soft shadow clipping"]
-        loc = str(scene_loc).lower()
-        tod = str(time_of_day).lower()
-        if tod in {"morning", "late_morning"} and any(token in loc for token in ["window", "room", "kitchen", "indoor"]):
-            cues.append("natural HDR balancing window highlights and interior shadows")
-        if tod in {"evening", "night"}:
-            cues.extend(["slightly warmer white balance", "mild sensor grain in low light"])
-        return f"sensor realism: {', '.join(cues)}."
-
-    @staticmethod
-    def _smartphone_behavior_layer(scene_loc: str, time_of_day: str, device_profile: Dict[str, str]) -> str:
-        cue = f"{device_profile['processing_style']}"
-        if str(time_of_day).lower() in {"night", "evening"}:
-            cue += f", {device_profile['night_limitations']}"
-        if "window" in str(scene_loc).lower():
-            cue += ", local HDR near bright window edges"
-        return f"smartphone behavior: {cue}."
-
-    @staticmethod
-    def _social_behavior_layer(platform_behavior: str, scene_loc: str) -> str:
-        mapping = {
-            "instagram_feed": "slightly curated but not sterile; moderate background control; polished yet lived-in",
-            "story_lifestyle": "story-like spontaneity; lower polish; private-feeling intimacy",
-            "private_mirror": "private documentation tone; casual framing; imperfect but believable mirror context",
-            "travel_candid": "travel diary rhythm; less staging; environmental context over perfection",
-            "reel_cover": "clear visual hook with social realism, avoid ad-like gloss",
-        }
-        home_bias = "home-life allows mild casual object asymmetry and non-perfect arrangement" if any(token in str(scene_loc).lower() for token in ["home", "room", "kitchen", "sofa", "apartment", "hotel"]) else ""
-        return f"social realism mode: {mapping.get(platform_behavior, mapping['instagram_feed'])}; {home_bias}".strip()
-
-    @staticmethod
-    def _micro_imperfections_layer(shot_archetype: str, platform_behavior: str, scene_loc: str) -> str:
-        base = [
-            "tiny loose hair strands",
-            "slight facial-expression asymmetry",
-            "believable fabric fold tension",
-            "natural posture imperfections",
-            "non-model-like hand placement",
-        ]
-        if shot_archetype in {"seated_table_shot", "friend_shot", "candid_handheld"}:
-            base.append("mild casual disorder in environment")
-            base.append("lived-in contact points like mug grip, book angle, bag strap")
-        if any(token in str(scene_loc).lower() for token in ["home", "kitchen", "room", "hotel", "sofa"]):
-            base.extend([
-                "slightly shifted chair angle",
-                "book or notebook not perfectly centered",
-                "blanket or coat crease consistent with recent use",
-            ])
+    def _micro_imperfections(scene_loc: str, platform_behavior: str) -> str:
+        base = ["slightly shifted chair angle", "book or notebook not perfectly centered", "blanket or coat crease consistent with recent use"]
+        if "home" in scene_loc.lower():
+            base.append("small lived-in room asymmetry")
         if platform_behavior == "instagram_feed":
             base.append("still clean enough for feed but not commercial perfect")
         return f"micro imperfections: {', '.join(base)}."
@@ -433,37 +314,24 @@ class PromptComposer:
     @staticmethod
     def _face_consistency_layer(context: Dict[str, Any]) -> str:
         profile = context.get("character_profile") or {}
-        signature = profile.get("face_signature") or profile.get("signature_appearance_cues") or "soft brows, gentle cheek contour, familiar lip shape"
-        face_shape = profile.get("face_shape") or profile.get("appearance_face_shape") or "soft oval"
-        nose_bridge = profile.get("nose_bridge") or "straight delicate nose bridge"
-        cheekbone_softness = profile.get("cheekbone_softness") or "soft cheekbone transitions"
-        lip_fullness = profile.get("lip_fullness") or "medium-full lips"
-        brow_style = profile.get("brow_style") or "natural softly straight brows"
         return (
-            f"face consistency signature: {signature}; face_shape={face_shape}; nose_bridge={nose_bridge}; "
-            f"cheekbone_softness={cheekbone_softness}; lip_fullness={lip_fullness}; brow_style={brow_style}; "
-            "preserve recurring face proportions and habitual expression style."
+            f"face consistency signature: {profile.get('face_signature', 'soft brows, gentle cheek contour, familiar lip shape')}; "
+            f"face_shape={profile.get('face_shape', profile.get('appearance_face_shape', 'soft oval'))}; "
+            f"nose_bridge={profile.get('nose_bridge', 'straight')}; cheekbone_softness={profile.get('cheekbone_softness', 'soft')}; "
+            f"lip_fullness={profile.get('lip_fullness', 'medium-full')}; brow_style={profile.get('brow_style', 'natural')}"
         )
 
     @staticmethod
     def _favorite_location_memory_layer(context: Dict[str, Any], scene_loc: str, continuity: Dict[str, Any]) -> str:
         profile = context.get("character_profile") or {}
-        favorites_raw = profile.get("favorite_locations") or profile.get("favorite_locations_memory") or "kitchen window corner, favorite café table"
-        recurring_raw = profile.get("recurring_spaces") or profile.get("favorite_spaces") or "living room sofa, hallway mirror"
-        favorites = [chunk.strip() for chunk in str(favorites_raw).split(",") if chunk.strip()]
-        recurring_spaces = [chunk.strip() for chunk in str(recurring_raw).split(",") if chunk.strip()]
-        current = str(scene_loc).lower()
-        anchors = favorites + [spot for spot in recurring_spaces if spot not in favorites]
-        recurrence = next((spot for spot in anchors if spot.lower() in current), anchors[0] if anchors else "familiar recurring micro-location")
-        reason = continuity.get("arc_hint") or "routine continuity"
-        return f"favorite location memory: favorite_locations={favorites}; recurring_spaces={recurring_spaces}; selected_recurring_anchor={recurrence}; recurrence_reason={reason}."
+        favorites = [x.strip() for x in str(profile.get("favorite_locations") or "kitchen window corner, favorite café table").split(",") if x.strip()]
+        recurring = [x.strip() for x in str(profile.get("recurring_spaces") or "living room sofa, hallway mirror").split(",") if x.strip()]
+        selected = next((spot for spot in favorites + recurring if spot.lower() in scene_loc.lower()), favorites[0] if favorites else "familiar place")
+        return f"favorite location memory: favorite_locations={favorites}; recurring_spaces={recurring}; selected_recurring_anchor={selected}; recurrence_reason={continuity.get('arc_hint', 'routine continuity')}."
 
     @staticmethod
     def _anti_generic_constraints_layer() -> str:
-        return (
-            "forbid generic AI wording and campaign aesthetics: no 'beautiful young woman', no fashion catalog mood, "
-            "no sterile luxury vibe, no beauty-campaign language, no editorial over-posing, no '8k photorealistic', no 'perfect lighting', no 'fashion model pose'."
-        )
+        return "forbid generic AI wording and campaign aesthetics: no fashion catalog mood, no sterile luxury vibe, no editorial over-posing."
 
     @staticmethod
     def _clean_generic_prompt_terms(text: str) -> str:
@@ -478,13 +346,7 @@ class PromptComposer:
         explicit = getattr(scene, "camera_archetype", "") or getattr(scene, "shot_archetype", "")
         if explicit and explicit in self.CAMERA_ARCHETYPES:
             return explicit
-        text = " ".join(
-            [
-                str(getattr(scene, "scene_moment", "") or "").lower(),
-                str(getattr(scene, "description", "") or "").lower(),
-                str(getattr(scene, "scene_moment_type", "") or "").lower(),
-            ]
-        )
+        text = " ".join([str(getattr(scene, "scene_moment", "")).lower(), str(getattr(scene, "description", "")).lower()])
         if "mirror" in text:
             return "mirror_selfie"
         if "selfie" in text:
@@ -493,17 +355,13 @@ class PromptComposer:
             return "close_portrait"
         if "table" in text or "coffee" in text:
             return "seated_table_shot"
-        continuity_behavior = (context.get("continuity_context") or {}).get("camera_behavior_memory") if isinstance((context.get("continuity_context") or {}).get("camera_behavior_memory"), dict) else {}
-        profile_behavior = (context.get("character_profile") or {}).get("camera_behavior_memory") if isinstance((context.get("character_profile") or {}).get("camera_behavior_memory"), dict) else {}
-        behavior = continuity_behavior or profile_behavior
-        preferred = [str(v).strip() for v in (behavior.get("preferred_shot_archetypes") or ["candid_handheld", "friend_shot"]) if str(v).strip() in self.CAMERA_ARCHETYPES]
+        if "full body" in text or "full-body" in text:
+            return "full_body"
+        if "waist" in text:
+            return "waist_up"
         if "candid" in text:
-            return preferred[0] if preferred else "candid_handheld"
-        recent_archetypes = [str(row.get("shot_archetype") or "").strip() for row in recent_moment_memory[:2] if str(row.get("shot_archetype") or "").strip()]
-        for candidate in preferred:
-            if candidate and candidate != (recent_archetypes[0] if recent_archetypes else ""):
-                return candidate
-        return preferred[0] if preferred else "friend_shot"
+            return "candid_handheld"
+        return "friend_shot"
 
     @staticmethod
     def _lighting_hint(time_of_day: str) -> str:
@@ -517,6 +375,7 @@ class PromptComposer:
             "evening": "warm evening ambient light",
             "night": "mixed city and practical interior light",
         }.get(str(time_of_day or "").lower(), "natural soft light")
+
     BANNED_SYNTHETIC_PATTERNS: tuple[str, ...] = (
         "beautiful young woman",
         "photorealistic 8k",
@@ -532,4 +391,10 @@ class PromptComposer:
         "perfect lighting",
         "fashion model pose",
         "editorial fashion shoot",
+        "microscopic details",
+        "perfect composition",
+        "fashion catalog",
+        "cinematic lighting",
+        "hyper-detailed beauty",
+        "editorial symmetry",
     )
