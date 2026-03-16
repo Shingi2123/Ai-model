@@ -7,6 +7,7 @@ from typing import Dict, List, Any
 from virtual_persona.llm.provider import BaseLLMProvider
 from virtual_persona.models.domain import DayScene, GeneratedContent
 from virtual_persona.pipeline.prompt_composer import PromptComposer
+from virtual_persona.pipeline.provider_prompt_formatter import ReferenceAwarePromptFormatter
 
 
 class ContentGenerator:
@@ -21,6 +22,7 @@ class ContentGenerator:
         self.template_path = template_path
         self.templates = self._load_templates()
         self.prompt_composer = PromptComposer(state_store)
+        self.prompt_formatter = ReferenceAwarePromptFormatter()
 
     def _load_templates(self) -> Dict[str, str]:
         if self.state_store and hasattr(self.state_store, "load_prompt_templates"):
@@ -143,8 +145,8 @@ class ContentGenerator:
             video_package = self.prompt_composer.compose_package(context, scene, outfit_summary, 'video', outfit_item_ids)
             story_package = self.prompt_composer.compose_package(context, scene, outfit_summary, 'story', outfit_item_ids)
 
-            photo_prompt_text = f"{photo_package['final_prompt']} {self._safe_format(photo_template, mapping)}"
-            video_prompt_text = f"{video_package['final_prompt']} {self._safe_format(video_template, mapping)}"
+            photo_prompt_text = f"{self.prompt_formatter.format_for_provider(photo_package, 'flux')} {self._safe_format(photo_template, mapping)}"
+            video_prompt_text = f"{self.prompt_formatter.format_for_provider(video_package, 'image_to_video')} {self._safe_format(video_template, mapping)}"
             story_text = f"{story_package['final_prompt']} {self._safe_format(story_template, mapping)}"
 
             photo_prompts.append(self.provider.generate(photo_prompt_text))
@@ -154,7 +156,7 @@ class ContentGenerator:
                 "scene_index": len(prompt_packages),
                 "scene_moment": scene_description,
                 "photo": photo_package,
-                "video": video_package,
+                "video": {**video_package, "video_prompt_package": {"subject_identity": video_package.get("identity_anchor", ""), "motion": video_package.get("video_motion", ""), "camera_motion": video_package.get("video_camera_motion", ""), "scene_continuity": video_package.get("continuity_block", ""), "tempo": "calm social pace", "micro_expression_constraints": "keep habitual expression signature"}},
                 "story": story_package,
             })
 
@@ -182,7 +184,7 @@ class ContentGenerator:
         tone_profile = self._select_caption_tone(context, scenes)
         caption_prompt = (
             f"{self.prompt_composer.compose(context, scenes[-1] if scenes else None, outfit_summary, 'caption', outfit_item_ids)} "
-            f"Tone profile: {tone_profile}. Avoid generic AI phrasing, keep natural social media voice, no literal prompt retelling. "
+            f"Tone profile: {tone_profile}. Visual focus={post_mapping.get('visual_focus', '')}. Avoid generic AI phrasing, keep natural social media voice, no literal prompt retelling. "
             f"{self._safe_format(post_template, post_mapping)}"
         )
         post_caption = self.provider.generate(caption_prompt)

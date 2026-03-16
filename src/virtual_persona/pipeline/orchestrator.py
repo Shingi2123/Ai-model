@@ -21,6 +21,7 @@ from virtual_persona.pipeline.scene_activity_engine import SceneActivityExpansio
 from virtual_persona.pipeline.story_arc_engine import StoryArcEngine
 from virtual_persona.pipeline.scene_moment_engine import SceneMomentGenerator
 from virtual_persona.pipeline.publishing_plan_engine import PublishingPlanEngine
+from virtual_persona.pipeline.quality import SceneSanityChecker
 from virtual_persona.pipeline.world_expansion_engine import WorldExpansionEngine
 from virtual_persona.pipeline.wardrobe_brain import WardrobeBrain
 from virtual_persona.services.wardrobe import WardrobeManager
@@ -55,6 +56,7 @@ class PipelineOrchestrator:
         self.delivery = TelegramDelivery(settings)
         self.publishing_plan_engine = PublishingPlanEngine(self.state)
         self.telegram_delivery_service = TelegramDeliveryService(settings, self.state)
+        self.scene_sanity_checker = SceneSanityChecker()
 
         if settings.llm_provider.lower() == "openai" and settings.llm_api_key and settings.llm_model:
             llm = OpenAIProvider(settings.llm_api_key, settings.llm_model)
@@ -243,6 +245,7 @@ class PipelineOrchestrator:
                 prompt_meta = json.loads(primary.prompt_package_json or "{}")
             except Exception:
                 prompt_meta = {}
+        sanity = self.scene_sanity_checker.evaluate({"shot_archetype": prompt_meta.get("shot_archetype", ""), "location": getattr(primary, "scene_moment", "") if primary else ""})
         self.state.save_run_log(
             "debug",
             "quality_trace "
@@ -264,6 +267,13 @@ class PipelineOrchestrator:
             favorite_location_used=short_text(str(prompt_meta.get("favorite_locations", "")), 56),
             social_behavior_mode=short_text(str(prompt_meta.get("social_behavior", "")), 56),
             anti_synthetic_cleaner_applied=bool(prompt_meta.get("anti_generic_constraints")),
+            face_similarity=prompt_meta.get("face_similarity", ""),
+            scene_logic_score=sanity.get("scene_logic_score", ""),
+            hand_integrity_flag=not any("hand" in f for f in sanity.get("artifact_flags", [])),
+            body_consistency_flag=not any("body" in f or "ankle" in f for f in sanity.get("artifact_flags", [])),
+            artifact_flags=", ".join(sanity.get("artifact_flags", [])),
+            prompt_mode=prompt_meta.get("prompt_mode", ""),
+            reference_pack_used=prompt_meta.get("reference_bundle", ""),
         )
 
     def send_latest(self, package: DailyPackage) -> bool:

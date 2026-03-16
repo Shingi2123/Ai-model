@@ -171,6 +171,25 @@ class PublishingPlanItem:
     selection_reason: str = ""
     delivery_status: str = "planned"
     notes: str = ""
+    selected_image_path: str = ""
+    clean_image_export_path: str = ""
+    generation_diagnostics: str = ""
+    identity_mode: str = ""
+    reference_pack_type: str = ""
+    face_similarity_score: float | None = None
+
+
+@dataclass
+class PublishingPackage:
+    selected_image_path: str
+    clean_image_export_path: str
+    caption: str
+    short_caption: str
+    post_time: str
+    platform: str
+    hashtags: str = ""
+    publishing_notes: str = ""
+    generation_diagnostics: str = ""
 
 
 @dataclass

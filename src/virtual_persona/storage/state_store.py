@@ -347,6 +347,13 @@ class LocalStateStore:
             "favorite_location_used": trace_fields.get("favorite_location_used", ""),
             "social_behavior_mode": trace_fields.get("social_behavior_mode", ""),
             "anti_synthetic_cleaner_applied": trace_fields.get("anti_synthetic_cleaner_applied", ""),
+            "face_similarity": trace_fields.get("face_similarity", ""),
+            "scene_logic_score": trace_fields.get("scene_logic_score", ""),
+            "hand_integrity_flag": trace_fields.get("hand_integrity_flag", ""),
+            "body_consistency_flag": trace_fields.get("body_consistency_flag", ""),
+            "artifact_flags": trace_fields.get("artifact_flags", ""),
+            "prompt_mode": trace_fields.get("prompt_mode", ""),
+            "reference_pack_used": trace_fields.get("reference_pack_used", ""),
         }
         logs.append(
             {
@@ -576,7 +583,7 @@ class GoogleSheetsStateStore:
                 "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
                 "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
                 "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "caption_text", "short_caption", "post_timezone", "publish_score",
-                "selection_reason", "delivery_status", "notes",
+                "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score",
             ],
             "life_state": [
                 "date", "current_city", "day_type", "season", "fatigue_level", "mood_base", "reason", "continuity_note",
@@ -585,7 +592,7 @@ class GoogleSheetsStateStore:
             "daily_calendar": ["date", "city", "day_type", "notes"],
             "content_history": [
                 "date", "city", "day_type", "outfit_ids", "scenes", "post_caption", "scene_moment", "scene_source",
-                "scene_moment_type", "moment_signature", "visual_focus",
+                "scene_moment_type", "moment_signature", "visual_focus", "reference_pack_type", "prompt_mode", "face_similarity", "scene_logic_score", "artifact_flags",
             ],
             "content_moment_memory": [
                 "date", "city", "day_type", "scene_moment", "scene_moment_type", "moment_signature", "visual_focus",
@@ -618,7 +625,7 @@ class GoogleSheetsStateStore:
             "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
             "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
             "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "caption_text", "short_caption", "post_timezone", "publish_score",
-            "selection_reason", "delivery_status", "notes",
+            "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score",
         ]
         self._ensure_headers("publishing_plan", headers)
         rows = self._safe_records("publishing_plan")
@@ -631,7 +638,7 @@ class GoogleSheetsStateStore:
             "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
             "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
             "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "caption_text", "short_caption", "post_timezone", "publish_score",
-            "selection_reason", "delivery_status", "notes",
+            "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score",
         ]
         self._ensure_headers("publishing_plan", headers)
         self._append_dict_row("publishing_plan", headers, row)
@@ -972,7 +979,7 @@ class GoogleSheetsStateStore:
         if not self.available():
             return
 
-        headers = ["timestamp", "status", "message", "device_profile", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "anti_synthetic_cleaner_applied"]
+        headers = ["timestamp", "status", "message", "device_profile", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "anti_synthetic_cleaner_applied", "face_similarity", "scene_logic_score", "hand_integrity_flag", "body_consistency_flag", "artifact_flags", "prompt_mode", "reference_pack_used"]
         self._ensure_headers("run_log", headers)
         self._append_dict_row(
             "run_log",
@@ -987,6 +994,13 @@ class GoogleSheetsStateStore:
                 "favorite_location_used": trace_fields.get("favorite_location_used", ""),
                 "social_behavior_mode": trace_fields.get("social_behavior_mode", ""),
                 "anti_synthetic_cleaner_applied": trace_fields.get("anti_synthetic_cleaner_applied", ""),
+                "face_similarity": trace_fields.get("face_similarity", ""),
+                "scene_logic_score": trace_fields.get("scene_logic_score", ""),
+                "hand_integrity_flag": trace_fields.get("hand_integrity_flag", ""),
+                "body_consistency_flag": trace_fields.get("body_consistency_flag", ""),
+                "artifact_flags": trace_fields.get("artifact_flags", ""),
+                "prompt_mode": trace_fields.get("prompt_mode", ""),
+                "reference_pack_used": trace_fields.get("reference_pack_used", ""),
             },
             prefer_sheet_header_order=True,
         )

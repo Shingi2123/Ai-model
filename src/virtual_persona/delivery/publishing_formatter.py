@@ -147,6 +147,12 @@ def _format_detailed_prompt(items: list[PublishingPlanItem], content_filter: set
             details.append(f"📷 Shot archetype: {item.shot_archetype}")
         if getattr(item, "platform_intent", ""):
             details.append(f"🎯 Platform intent: {item.platform_intent}")
+        if getattr(item, "identity_mode", ""):
+            details.append(f"🧬 Identity mode: {item.identity_mode}")
+        if getattr(item, "reference_pack_type", ""):
+            details.append(f"🧩 Reference pack: {item.reference_pack_type}")
+        if getattr(item, "face_similarity_score", None) is not None:
+            details.append(f"🪞 Face similarity: {item.face_similarity_score}")
         return "\n\n".join(details)
 
     return "\n\n".join(_render(item, idx) for idx, item in enumerate(filtered, start=1))

@@ -19,6 +19,9 @@ from google.oauth2.service_account import Credentials
 
 
 CHARACTER_PROFILE_V3_FIELDS = [
+    "identity_mode",
+    "identity_pack_status",
+
     "display_name",
     "age",
     "device_profile",
@@ -35,6 +38,8 @@ CHARACTER_PROFILE_V3_FIELDS = [
     "primary_device_profile",
     "camera_behavior_memory",
     "social_behavior_profile",
+    "identity_manifest_version",
+    "face_similarity_threshold",
 ]
 
 SHEETS = {
@@ -56,9 +61,9 @@ SHEETS = {
     "story_arcs": ["arc_id", "arc_type", "title", "status", "start_date", "progress", "description"],
     "activity_evolution": ["activity_id", "origin_activity", "generated_variant", "reason", "status"],
     "daily_calendar": ["date", "city", "day_type", "notes"],
-    "content_history": ["date", "city", "day_type", "outfit_ids", "scenes", "post_caption", "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus"],
+    "content_history": ["date", "city", "day_type", "outfit_ids", "scenes", "post_caption", "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "reference_pack_type", "prompt_mode", "face_similarity", "scene_logic_score", "artifact_flags"],
     "content_moment_memory": ["date", "city", "day_type", "scene_moment", "scene_moment_type", "moment_signature", "visual_focus", "scene_source", "shot_archetype", "platform_intent", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "publish_score", "publish_decision", "decision_reason"],
-    "publishing_plan": ["publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase", "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type", "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "caption_text", "short_caption", "post_timezone", "publish_score", "selection_reason", "delivery_status", "notes"],
+    "publishing_plan": ["publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase", "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type", "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "caption_text", "short_caption", "post_timezone", "publish_score", "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score"],
     "posting_rules": ["rule_id", "platform", "content_type", "preferred_time", "enabled", "priority", "min_per_day", "max_per_day", "day_type_filter", "narrative_phase_filter", "city_filter", "weekday_filter", "notes"],
     "delivery_log": ["date", "delivery_type", "status", "message_id", "error", "details"],
     "continuity_flags": ["date", "level", "code", "message"],
@@ -67,7 +72,10 @@ SHEETS = {
     "route_pool": ["route_id", "origin_city", "destination_city", "flight_type", "weight", "active"],
     "life_state": ["date", "current_city", "day_type", "season", "fatigue_level", "mood_base", "reason", "continuity_note", "narrative_phase", "energy_state", "rhythm_state", "novelty_pressure", "recovery_need"],
     "narrative_memory": ["date", "narrative_phase", "energy_state", "rhythm_state", "novelty_pressure", "recovery_need", "reason"],
-    "run_log": ["timestamp", "status", "message", "device_profile", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "anti_synthetic_cleaner_applied"],
+    "run_log": ["timestamp", "status", "message", "device_profile", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "anti_synthetic_cleaner_applied", "face_similarity", "scene_logic_score", "hand_integrity_flag", "body_consistency_flag", "artifact_flags", "prompt_mode", "reference_pack_used"],
+    "character_identity": ["field", "value", "source", "updated_at"],
+    "identity_references": ["reference_type", "path", "status", "notes"],
+    "asset_quality": ["asset_id", "date", "face_similarity", "scene_logic_score", "hand_integrity_flag", "body_consistency_flag", "artifact_flags", "prompt_mode", "reference_pack_used", "rank"],
 }
 
 

@@ -220,3 +220,105 @@ Before production usage:
 - Add stronger transport constraints between cities
 - Add content moderation and governance policy checks
 - Add structured monitoring/alerts around failed runs
+
+## Identity Pipeline (production upgrade)
+
+### 1) Character Identity Pack
+
+New storage root: `data/character_identity/`.
+
+Contains:
+- `character_identity_profile.json` (Character DNA / Identity Manifest)
+- `references/face_reference.*`
+- `references/half_body_reference.*`
+- `references/full_body_reference.*`
+- optional `expressions_pack`, `angles_pack`, lighting/style-neutral refs, walking/seated refs
+
+Fallback behavior:
+- If identity pack is incomplete, prompt system falls back to Character DNA + existing `character_profile` fields.
+- Daily pipeline, publishing plan, Telegram output and day-freeze remain compatible.
+
+### 2) Bootstrap workflow for new character (semi-automatic)
+
+```bash
+python scripts/bootstrap_identity_pack.py --input-dir data/identity_sources
+```
+
+Input: 3–8 user-selected source photos.
+Output: initialized manifest and checklist.
+
+Manual step required:
+- Generate/select best synthetic base face candidate and set `reference_pack.face_reference`.
+
+### 3) Identity pack expansion workflow (semi-automatic)
+
+```bash
+python scripts/expand_identity_pack.py --identity-root data/character_identity
+```
+
+Creates/updates expansion checklist for:
+- half-body
+- full-body
+- expression and angle packs
+- walking/seated references
+
+Manual step required:
+- User validates generated refs and rejects artifacts before marking references as ready.
+
+### 4) Prompt System v4
+
+Prompt blocks now follow strict structure:
+1. identity anchor
+2. body anchor
+3. scene action
+4. wardrobe block
+5. camera block
+6. realism block
+7. continuity block
+8. platform intent
+9. negative prompt
+
+Includes:
+- adaptive `prompt_mode` (`compact` / `dense`)
+- generation mode registry (`portrait`, `waist-up`, `seated`, `full-body`, `selfie`, `mirror-selfie`)
+- layered negative prompts (universal + shot/location/mode)
+- reference-aware bundle selection per shot archetype
+
+### 5) Quality review and scoring
+
+`run_log` now supports quality trace fields:
+- `face_similarity`
+- `scene_logic_score`
+- `hand_integrity_flag`
+- `body_consistency_flag`
+- `artifact_flags`
+- `prompt_mode`
+- `reference_pack_used`
+
+Scene sanity checker provides rule-based flags and allows manual rejection reason flow via metadata.
+
+### 6) Clean image export
+
+Utility: `virtual_persona.utils.export_utils.clean_image_export(source_path, target_path)`
+- Removes metadata via Pillow re-save when available
+- Falls back to safe byte-copy if Pillow unavailable
+
+### 7) Publishing package output
+
+Publishing plan rows now include additional package fields:
+- `selected_image_path`
+- `clean_image_export_path`
+- `generation_diagnostics`
+- `identity_mode`
+- `reference_pack_type`
+- `face_similarity_score`
+
+### 8) Google Sheets update
+
+`python scripts/bootstrap_google_sheet.py` now updates/creates headers for identity and quality analytics, including:
+- `character_identity`
+- `identity_references`
+- `asset_quality`
+- expanded `publishing_plan`, `content_history`, `run_log`
+
+All writes use header names (not fixed column indexes), including reordered sheet headers.
