@@ -72,9 +72,9 @@ class PromptComposer:
         continuity_block = self._continuity_cues(context, scene)
         platform_block = self._platform_intent(context, content_type, platform_intent, platform_behavior)
         negative_prompt = self._negative_prompt(shot_archetype, scene_loc, platform_behavior, generation_mode)
-        reference_bundle = self._reference_bundle(identity_pack, shot_archetype)
+        reference_selection = identity_manager.select_reference_bundle(shot_archetype, generation_mode, identity_pack)
+        reference_bundle = self._reference_bundle(reference_selection)
 
-        # backward-compatible keys (v3)
         ordered_blocks = {
             "identity_core": self._identity_core(context),
             "identity_anchor": identity_anchor,
@@ -88,6 +88,13 @@ class PromptComposer:
             "prompt_mode": prompt_mode,
             "generation_mode": generation_mode,
             "reference_bundle": reference_bundle,
+            "reference_primary_type": reference_selection.get("requested_type", ""),
+            "reference_selected": reference_selection.get("selected", ""),
+            "reference_primary_anchors": ", ".join(reference_selection.get("primary_anchors", [])),
+            "reference_secondary_anchors": ", ".join(reference_selection.get("secondary_anchors", [])),
+            "reference_manual_step": reference_selection.get("manual_user_step", ""),
+            "identity_mode": "reference_manifest" if identity_pack.reference_types else ("legacy_reference_pack" if identity_pack.references else "dna_fallback"),
+            "reference_pack_type": reference_selection.get("requested_type", ""),
             "life_continuity_context": continuity_block,
             "scene_context": scene_action,
             "wardrobe_context": wardrobe_block,
@@ -160,15 +167,17 @@ class PromptComposer:
         return "portrait_mode"
 
     @staticmethod
-    def _reference_bundle(identity_pack: Any, shot_archetype: str) -> str:
-        refs = identity_pack.references if identity_pack else {}
-        preferred = "face_reference"
-        if shot_archetype in {"seated_table_shot", "waist_up"}:
-            preferred = "half_body_reference"
-        if shot_archetype in {"full_body", "friend_shot", "candid_handheld"}:
-            preferred = "full_body_reference"
-        selected = refs.get(preferred) or refs.get("face_reference") or "fallback_character_dna"
-        return f"preferred={preferred}; selected={selected}; pack_ready={getattr(identity_pack, 'ready', False)}"
+    def _reference_bundle(reference_selection: Dict[str, Any]) -> str:
+        requested_type = str(reference_selection.get("requested_type") or "face")
+        legacy_key = str(reference_selection.get("legacy_key") or "face_reference")
+        selected = str(reference_selection.get("selected") or "fallback_character_dna")
+        primary = ",".join(reference_selection.get("primary_anchors", []))
+        secondary = ",".join(reference_selection.get("secondary_anchors", []))
+        pack_ready = bool(reference_selection.get("pack_ready"))
+        return (
+            f"preferred_type={requested_type}; preferred={legacy_key}; selected={selected}; "
+            f"primary={primary or '-'}; secondary={secondary or '-'}; pack_ready={pack_ready}"
+        )
 
     @staticmethod
     def _identity_core(context: Dict[str, Any]) -> str:
@@ -292,7 +301,6 @@ class PromptComposer:
             f"preferred_shot_archetypes={preferred}; average_camera_distance={behavior.get('average_camera_distance', '1.2m')}; "
             f"preferred_framing_style={behavior.get('preferred_framing_style', 'eye-level')}; selfie_frequency={behavior.get('selfie_frequency', 'rare')}"
         )
-
 
     @staticmethod
     def _social_behavior(platform_behavior: str) -> str:

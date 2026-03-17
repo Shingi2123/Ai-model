@@ -96,9 +96,9 @@ def _build_package(day_type: str = "work_day", phase: str = "growth", scenes=Non
             publish_windows=["09:00", "09:00", "09:00"],
             creative_notes=[],
             prompt_packages=[
-                {"photo": {"final_prompt": "photo-1", "negative_prompt": "bad anatomy", "shot_archetype": "friend_shot", "platform_intent": "instagram_feed"}},
-                {"photo": {"final_prompt": "photo-2", "negative_prompt": "bad anatomy", "shot_archetype": "mirror_selfie", "platform_intent": "instagram_feed"}},
-                {"photo": {"final_prompt": "photo-3", "negative_prompt": "bad anatomy", "shot_archetype": "candid_handheld", "platform_intent": "instagram_feed"}},
+                {"photo": {"final_prompt": "photo-1", "negative_prompt": "bad anatomy", "shot_archetype": "friend_shot", "platform_intent": "instagram_feed", "identity_mode": "reference_manifest", "reference_pack_type": "full_body"}},
+                {"photo": {"final_prompt": "photo-2", "negative_prompt": "bad anatomy", "shot_archetype": "mirror_selfie", "platform_intent": "instagram_feed", "identity_mode": "reference_manifest", "reference_pack_type": "selfie"}},
+                {"photo": {"final_prompt": "photo-3", "negative_prompt": "bad anatomy", "shot_archetype": "candid_handheld", "platform_intent": "instagram_feed", "identity_mode": "reference_manifest", "reference_pack_type": "lifestyle"}},
             ],
         ),
         life_state=LifeState(
@@ -245,6 +245,8 @@ def test_publishing_plan_row_contains_timezone_and_decision_metadata():
     assert persisted["publish_score"] is not None
     assert persisted["selection_reason"]
     assert "negative_prompt" in persisted
+    assert first.identity_mode == "reference_manifest"
+    assert first.reference_pack_type
 
 
 def test_publishing_plan_keeps_required_text_fields_non_empty_even_with_empty_caption():

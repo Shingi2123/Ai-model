@@ -97,6 +97,8 @@ class PublishingPlanEngine:
                 selection_reason=selection_reason or "selected_for_publication",
                 delivery_status="planned",
                 notes=f"score={ranked_moment.score:.2f}; reasons={', '.join(ranked_moment.reasons[:3])}",
+                identity_mode=str(prompt_meta.get("identity_mode", "")),
+                reference_pack_type=str(prompt_meta.get("reference_pack_type", "")),
             )
             items.append(item)
 

@@ -1,34 +1,119 @@
 {
-  "version": 1,
+  "version": 2,
   "character_dna": {
-    "age": "22",
-    "estimated_height": "167cm",
+    "age": "24",
+    "estimated_height": "170cm",
     "body_type": "slim natural build",
     "face_type": "soft oval",
     "jawline": "softly defined",
     "nose": "straight natural",
-    "eyes": "green almond",
+    "eyes": "light almond eyes",
     "lips": "medium natural",
-    "skin_tone": "light neutral",
-    "freckles": "subtle",
-    "hair": "light chestnut medium length",
-    "hairstyle": "natural loose",
+    "skin_tone": "light neutral with natural skin texture",
+    "freckles": "subtle or absent",
+    "hair": "long copper-red hair",
+    "hairstyle": "natural loose waves",
     "shoulder_set": "relaxed",
     "posture": "natural upright",
-    "wardrobe_style": "casual urban",
+    "wardrobe_style": "casual lifestyle and elegant cabin crew",
     "makeup": "light natural",
     "accessories": "minimal everyday",
-    "visual_vibe": "grounded candid lifestyle"
+    "visual_vibe": "grounded candid lifestyle realism"
   },
   "reference_pack": {
-    "face_reference": "references/face_reference.jpg",
-    "half_body_reference": "references/half_body_reference.jpg",
-    "full_body_reference": "references/full_body_reference.jpg",
-    "expressions_pack": "references/expressions_pack/",
-    "angles_pack": "references/angles_pack/",
-    "lighting_neutral_reference": "references/lighting_neutral.jpg",
-    "style_neutral_reference": "references/style_neutral.jpg",
-    "walking_pose_reference": "references/walking_pose.jpg",
-    "seated_pose_reference": "references/seated_pose.jpg"
+    "face_reference": "references/base/face_anchor.png",
+    "half_body_reference": "references/base/half_body_01.png",
+    "full_body_reference": "references/full_body/full_body_anchor.png",
+    "expressions_pack": "references/expressions/expression_02.png",
+    "angles_pack": "references/angles/angle_01.png",
+    "lighting_neutral_reference": "references/identity_lock/lock_01.png",
+    "style_neutral_reference": "references/wardrobe/lifestyle/life_04.png",
+    "walking_pose_reference": "references/body_consistency/body_06.png",
+    "seated_pose_reference": "references/body_consistency/body_05.png"
+  },
+  "reference_manifest": {
+    "schema": "character_identity_pack_v2",
+    "folder_mapping": {
+      "base": "references/base",
+      "angles": "references/angles",
+      "body_consistency": "references/body_consistency",
+      "expressions": "references/expressions",
+      "full_body": "references/full_body",
+      "identity_lock": "references/identity_lock",
+      "selfies": "references/selfies",
+      "wardrobe_lifestyle": "references/wardrobe/lifestyle",
+      "wardrobe_uniform": "references/wardrobe/uniform"
+    },
+    "anchors": {
+      "face": {
+        "primary": [
+          "base/face_anchor.png",
+          "base/base_face_v1.png",
+          "identity_lock/lock_01.png",
+          "identity_lock/lock_04.png"
+        ],
+        "secondary": [
+          "angles/angle_01.png",
+          "angles/angle_02.png",
+          "expressions/expression_02.png",
+          "expressions/expression_03.png",
+          "expressions/expression_01.png"
+        ]
+      },
+      "selfie": {
+        "primary": [
+          "selfies/selfie_01.png",
+          "selfies/selfie_02.png",
+          "identity_lock/lock_01.png"
+        ],
+        "secondary": [
+          "selfies/selfie_04.png",
+          "selfies/selfie_03.png",
+          "expressions/expression_02.png",
+          "identity_lock/lock_02.png"
+        ]
+      },
+      "full_body": {
+        "primary": [
+          "full_body/full_body_anchor.png",
+          "body_consistency/body_03.png",
+          "body_consistency/body_01.png",
+          "identity_lock/lock_01.png"
+        ],
+        "secondary": [
+          "full_body/three_quarter_body_01.png",
+          "body_consistency/body_04.png",
+          "identity_lock/lock_04.png"
+        ]
+      },
+      "lifestyle": {
+        "primary": [
+          "wardrobe/lifestyle/life_04.png",
+          "wardrobe/lifestyle/life_02.png",
+          "body_consistency/body_03.png",
+          "identity_lock/lock_01.png"
+        ],
+        "secondary": [
+          "wardrobe/lifestyle/life_01.png",
+          "wardrobe/lifestyle/life_03.png",
+          "expressions/expression_02.png",
+          "full_body/three_quarter_body_01.png"
+        ]
+      },
+      "uniform": {
+        "primary": [
+          "wardrobe/uniform/uniform_01.png",
+          "wardrobe/uniform/uniform_03.png",
+          "full_body/full_body_anchor.png",
+          "identity_lock/lock_01.png"
+        ],
+        "secondary": [
+          "wardrobe/uniform/uniform_04.png",
+          "wardrobe/uniform/uniform_02.png",
+          "body_consistency/body_03.png",
+          "identity_lock/lock_04.png"
+        ]
+      }
+    }
   }
 }

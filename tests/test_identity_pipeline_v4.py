@@ -1,3 +1,5 @@
+import json
+
 from virtual_persona.pipeline.identity import CharacterIdentityManager, default_identity_manifest
 from virtual_persona.pipeline.prompt_composer import PromptComposer
 from virtual_persona.pipeline.provider_prompt_formatter import ReferenceAwarePromptFormatter
@@ -93,3 +95,60 @@ def test_default_identity_manifest_structure_contains_reference_pack():
     assert "character_dna" in payload
     assert "reference_pack" in payload
     assert "face_reference" in payload["reference_pack"]
+    assert "reference_manifest" in payload
+    assert "anchors" in payload["reference_manifest"]
+
+
+def test_identity_pack_supports_reference_manifest_folder_mapping(tmp_path):
+    root = tmp_path / "identity"
+    for rel in [
+        "references/base",
+        "references/selfies",
+        "references/body_consistency",
+        "references/full_body",
+        "references/wardrobe/lifestyle",
+        "references/wardrobe/uniform",
+        "references/angles",
+        "references/expressions",
+        "references/identity_lock",
+    ]:
+        (root / rel).mkdir(parents=True, exist_ok=True)
+
+    manifest = default_identity_manifest()
+    (root / "character_identity_profile.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    pack = CharacterIdentityManager(root).load_pack()
+
+    assert pack.references["face_reference"] == "references/face_reference.jpg"
+    assert pack.references["half_body_reference"] == "references/wardrobe/lifestyle/"
+    assert pack.references["full_body_reference"] == "references/full_body/"
+    assert pack.reference_types["selfie"]["primary_anchors"][0] == "references/selfies/"
+
+
+def test_reference_selection_uses_generation_mode_and_shot_type(tmp_path):
+    root = tmp_path / "identity"
+    for rel in [
+        "references/base",
+        "references/selfies",
+        "references/full_body",
+        "references/body_consistency",
+        "references/wardrobe/lifestyle",
+        "references/identity_lock",
+    ]:
+        (root / rel).mkdir(parents=True, exist_ok=True)
+
+    manifest = default_identity_manifest()
+    manifest["reference_pack"]["face_reference"] = ""
+    manifest["reference_pack"]["full_body_reference"] = ""
+    (root / "character_identity_profile.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    mgr = CharacterIdentityManager(root)
+    pack = mgr.load_pack()
+
+    selfie = mgr.select_reference_bundle("front_selfie", "selfie_mode", pack)
+    full_body = mgr.select_reference_bundle("friend_shot", "full-body_mode", pack)
+
+    assert selfie["requested_type"] == "selfie"
+    assert selfie["selected"] == "references/selfies/"
+    assert full_body["requested_type"] == "full_body"
+    assert full_body["selected"] == "references/full_body/"
