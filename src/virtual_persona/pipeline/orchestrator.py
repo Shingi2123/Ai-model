@@ -7,6 +7,7 @@ from virtual_persona.config.settings import AppSettings
 from virtual_persona.delivery.formatter import package_to_markdown
 from virtual_persona.delivery.telegram_bot import TelegramDelivery
 from virtual_persona.delivery.telegram_delivery_service import TelegramDeliveryService
+from virtual_persona.delivery.telegram_navigation import item_from_row
 from virtual_persona.llm.provider import OpenAIProvider, TemplateFallbackProvider
 from virtual_persona.models.domain import DailyPackage, GeneratedContent, OutfitSelection, PublishingPlanItem, SunSnapshot, WeatherSnapshot
 from virtual_persona.narrative.life_narrative_engine import LifeNarrativeEngine
@@ -85,35 +86,24 @@ class PipelineOrchestrator:
             scenes=[],
             content=GeneratedContent(post_caption="", story_lines=[], photo_prompts=[], video_prompts=[], publish_windows=[], creative_notes=[]),
         )
-        package.publishing_plan = [
-            PublishingPlanItem(
-                publication_id=str(r.get("publication_id") or f"{target_date.isoformat()}-{idx+1:02d}"),
-                date=target_date,
-                platform=str(r.get("platform") or "Instagram"),
-                post_time=str(r.get("post_time") or "09:30"),
-                content_type=str(r.get("content_type") or "photo"),
-                city=str(r.get("city") or city),
-                day_type=str(r.get("day_type") or day_type),
-                narrative_phase=str(r.get("narrative_phase") or "routine_stability"),
-                scene_moment=str(r.get("scene_moment") or ""),
-                scene_source=str(r.get("scene_source") or ""),
-                scene_moment_type=str(r.get("scene_moment_type") or ""),
-                moment_signature=str(r.get("moment_signature") or ""),
-                visual_focus=str(r.get("visual_focus") or ""),
-                activity_type=str(r.get("activity_type") or ""),
-                outfit_ids=[x.strip() for x in str(r.get("outfit_ids") or "").split(",") if x.strip()],
-                prompt_type=str(r.get("prompt_type") or ""),
-                prompt_text=str(r.get("prompt_text") or ""),
-                caption_text=str(r.get("caption_text") or ""),
-                short_caption=str(r.get("short_caption") or ""),
-                post_timezone=str(r.get("post_timezone") or "UTC"),
-                publish_score=float(r.get("publish_score") or 0.0),
-                selection_reason=str(r.get("selection_reason") or "selected_for_publication"),
-                delivery_status=str(r.get("delivery_status") or "planned"),
-                notes=str(r.get("notes") or ""),
-            )
-            for idx, r in enumerate(rows)
-        ]
+        package.publishing_plan = []
+        for idx, row in enumerate(rows):
+            item = item_from_row(row, target_date)
+            if not item.publication_id:
+                item.publication_id = f"{target_date.isoformat()}-{idx+1:02d}"
+            if not item.city:
+                item.city = city
+            if not item.day_type:
+                item.day_type = day_type
+            if not item.narrative_phase:
+                item.narrative_phase = "routine_stability"
+            if not item.post_timezone:
+                item.post_timezone = "UTC"
+            if item.publish_score is None:
+                item.publish_score = float(row.get("publish_score") or 0.0)
+            if not item.selection_reason:
+                item.selection_reason = str(row.get("selection_reason") or "selected_for_publication")
+            package.publishing_plan.append(item)
         return package
 
     def generate_day(self, target_date: date | None = None, override_city: str | None = None, force_regenerate: bool = False) -> DailyPackage:

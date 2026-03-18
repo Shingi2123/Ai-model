@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date
 
@@ -143,6 +144,98 @@ def _format_manual_generation_step(step: str | None) -> str:
     if lowered in known_translations:
         return known_translations[lowered]
     return text
+
+
+def _stringify(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _load_prompt_meta(row: dict) -> dict:
+    raw = row.get("prompt_package_json")
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(str(raw))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _detail_value(row: dict, key: str, *, prompt_meta: dict | None = None, aliases: tuple[str, ...] = ()) -> str:
+    candidates = (key,) + aliases
+    for candidate in candidates:
+        value = row.get(candidate)
+        if value is not None and str(value).strip():
+            return str(value)
+    meta = prompt_meta or {}
+    for candidate in candidates:
+        value = meta.get(candidate)
+        if value is not None and str(value).strip():
+            return str(value)
+    return ""
+
+
+def _item_kwargs_from_row(row: dict, fallback_date: date, *, default_city: str = "", default_day_type: str = "work_day", default_narrative_phase: str = "routine_stability") -> dict:
+    row_date = str(row.get("date", fallback_date.isoformat()))
+    try:
+        target_date = date.fromisoformat(row_date)
+    except ValueError:
+        target_date = fallback_date
+
+    outfit_ids_raw = row.get("outfit_ids") or []
+    if isinstance(outfit_ids_raw, str):
+        outfit_ids = [x.strip() for x in outfit_ids_raw.split(",") if x.strip()]
+    else:
+        outfit_ids = list(outfit_ids_raw)
+
+    prompt_meta = _load_prompt_meta(row)
+    return {
+        "publication_id": _stringify(row.get("publication_id", "")),
+        "date": target_date,
+        "platform": _stringify(row.get("platform", "Instagram")),
+        "post_time": _stringify(row.get("post_time", "09:30")),
+        "content_type": _stringify(row.get("content_type", "photo")),
+        "city": _stringify(row.get("city", default_city)),
+        "day_type": _stringify(row.get("day_type", default_day_type)),
+        "narrative_phase": _stringify(row.get("narrative_phase", default_narrative_phase)),
+        "scene_moment": _stringify(row.get("scene_moment", "")),
+        "scene_source": _stringify(row.get("scene_source", "")),
+        "scene_moment_type": _stringify(row.get("scene_moment_type", "")),
+        "moment_signature": _stringify(row.get("moment_signature", "")),
+        "visual_focus": _stringify(row.get("visual_focus", "")),
+        "activity_type": _stringify(row.get("activity_type", "")),
+        "outfit_ids": outfit_ids,
+        "prompt_type": _stringify(row.get("prompt_type", "")),
+        "prompt_text": _stringify(row.get("prompt_text", "")),
+        "negative_prompt": _detail_value(row, "negative_prompt", prompt_meta=prompt_meta),
+        "prompt_package_json": _stringify(row.get("prompt_package_json", "")),
+        "shot_archetype": _detail_value(row, "shot_archetype", prompt_meta=prompt_meta),
+        "platform_intent": _detail_value(row, "platform_intent", prompt_meta=prompt_meta),
+        "generation_mode": _detail_value(row, "generation_mode", prompt_meta=prompt_meta),
+        "framing_mode": _detail_value(row, "framing_mode", prompt_meta=prompt_meta),
+        "prompt_mode": _detail_value(row, "prompt_mode", prompt_meta=prompt_meta),
+        "reference_type": _detail_value(row, "reference_type", prompt_meta=prompt_meta, aliases=("reference_pack_type",)),
+        "primary_anchors": _detail_value(row, "primary_anchors", prompt_meta=prompt_meta),
+        "secondary_anchors": _detail_value(row, "secondary_anchors", prompt_meta=prompt_meta),
+        "manual_generation_step": _detail_value(row, "manual_generation_step", prompt_meta=prompt_meta),
+        "caption_text": _detail_value(row, "caption_text", prompt_meta=prompt_meta, aliases=("caption",)),
+        "short_caption": _detail_value(row, "short_caption", prompt_meta=prompt_meta),
+        "post_timezone": _stringify(row.get("post_timezone", "")),
+        "publish_score": row.get("publish_score"),
+        "selection_reason": _stringify(row.get("selection_reason", "")),
+        "delivery_status": _stringify(row.get("delivery_status", "planned")),
+        "notes": _stringify(row.get("notes", "")),
+        "selected_image_path": _stringify(row.get("selected_image_path", "")),
+        "clean_image_export_path": _stringify(row.get("clean_image_export_path", "")),
+        "generation_diagnostics": _stringify(row.get("generation_diagnostics", "")),
+        "identity_mode": _detail_value(row, "identity_mode", prompt_meta=prompt_meta),
+        "reference_pack_type": _detail_value(row, "reference_pack_type", prompt_meta=prompt_meta, aliases=("reference_type",)),
+        "face_similarity_score": row.get("face_similarity_score"),
+    }
 
 
 def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
@@ -339,6 +432,7 @@ def serialize_context(context: PlanScreenContext, items: list[PublishingPlanItem
                 "primary_anchors": item.primary_anchors,
                 "secondary_anchors": item.secondary_anchors,
                 "manual_generation_step": item.manual_generation_step,
+                "caption": item.caption_text,
                 "caption_text": item.caption_text,
                 "short_caption": item.short_caption,
                 "post_timezone": item.post_timezone,
@@ -363,89 +457,17 @@ def deserialize_context(raw: dict) -> tuple[PlanScreenContext, list[PublishingPl
     for row in raw.get("items", []):
         items.append(
             PublishingPlanItem(
-                publication_id=str(row.get("publication_id", "")),
-                date=date.fromisoformat(str(row.get("date"))),
-                platform=str(row.get("platform", "Instagram")),
-                post_time=str(row.get("post_time", "09:30")),
-                content_type=str(row.get("content_type", "photo")),
-                city=str(row.get("city", context.city)),
-                day_type=str(row.get("day_type", context.day_type)),
-                narrative_phase=str(row.get("narrative_phase", context.narrative_phase)),
-                scene_moment=str(row.get("scene_moment", "")),
-                scene_source=str(row.get("scene_source", "")),
-                scene_moment_type=str(row.get("scene_moment_type", "")),
-                moment_signature=str(row.get("moment_signature", "")),
-                visual_focus=str(row.get("visual_focus", "")),
-                activity_type=str(row.get("activity_type", "")),
-                outfit_ids=list(row.get("outfit_ids") or []),
-                prompt_type=str(row.get("prompt_type", "")),
-                prompt_text=str(row.get("prompt_text", "")),
-                negative_prompt=str(row.get("negative_prompt", "")),
-                shot_archetype=str(row.get("shot_archetype", "")),
-                platform_intent=str(row.get("platform_intent", "")),
-                generation_mode=str(row.get("generation_mode", "")),
-                framing_mode=str(row.get("framing_mode", "")),
-                prompt_mode=str(row.get("prompt_mode", "")),
-                identity_mode=str(row.get("identity_mode", "")),
-                reference_type=str(row.get("reference_type", "")),
-                reference_pack_type=str(row.get("reference_pack_type", "")),
-                primary_anchors=str(row.get("primary_anchors", "")),
-                secondary_anchors=str(row.get("secondary_anchors", "")),
-                manual_generation_step=str(row.get("manual_generation_step", "")),
-                caption_text=str(row.get("caption_text", "")),
-                short_caption=str(row.get("short_caption", "")),
-                post_timezone=str(row.get("post_timezone", "")),
-                delivery_status=str(row.get("delivery_status", "planned")),
-                notes=str(row.get("notes", "")),
+                **_item_kwargs_from_row(
+                    row,
+                    context.target_date,
+                    default_city=context.city,
+                    default_day_type=context.day_type,
+                    default_narrative_phase=context.narrative_phase,
+                )
             )
         )
     return context, items
 
 
 def item_from_row(row: dict, fallback_date: date) -> PublishingPlanItem:
-    row_date = str(row.get("date", fallback_date.isoformat()))
-    try:
-        target_date = date.fromisoformat(row_date)
-    except ValueError:
-        target_date = fallback_date
-    outfit_ids_raw = row.get("outfit_ids") or []
-    if isinstance(outfit_ids_raw, str):
-        outfit_ids = [x.strip() for x in outfit_ids_raw.split(",") if x.strip()]
-    else:
-        outfit_ids = list(outfit_ids_raw)
-    return PublishingPlanItem(
-        publication_id=str(row.get("publication_id", "")),
-        date=target_date,
-        platform=str(row.get("platform", "Instagram")),
-        post_time=str(row.get("post_time", "09:30")),
-        content_type=str(row.get("content_type", "photo")),
-        city=str(row.get("city", "")),
-        day_type=str(row.get("day_type", "work_day")),
-        narrative_phase=str(row.get("narrative_phase", "routine_stability")),
-        scene_moment=str(row.get("scene_moment", "")),
-        scene_source=str(row.get("scene_source", "")),
-        scene_moment_type=str(row.get("scene_moment_type", "")),
-        moment_signature=str(row.get("moment_signature", "")),
-        visual_focus=str(row.get("visual_focus", "")),
-        activity_type=str(row.get("activity_type", "")),
-        outfit_ids=outfit_ids,
-        prompt_type=str(row.get("prompt_type", "")),
-        prompt_text=str(row.get("prompt_text", "")),
-        negative_prompt=str(row.get("negative_prompt", "")),
-        shot_archetype=str(row.get("shot_archetype", "")),
-        platform_intent=str(row.get("platform_intent", "")),
-        generation_mode=str(row.get("generation_mode", "")),
-        framing_mode=str(row.get("framing_mode", "")),
-        prompt_mode=str(row.get("prompt_mode", "")),
-        identity_mode=str(row.get("identity_mode", "")),
-        reference_type=str(row.get("reference_type", "")),
-        reference_pack_type=str(row.get("reference_pack_type", "")),
-        primary_anchors=str(row.get("primary_anchors", "")),
-        secondary_anchors=str(row.get("secondary_anchors", "")),
-        manual_generation_step=str(row.get("manual_generation_step", "")),
-        caption_text=str(row.get("caption_text", "")),
-        short_caption=str(row.get("short_caption", "")),
-        post_timezone=str(row.get("post_timezone", "")),
-        delivery_status=str(row.get("delivery_status", "planned")),
-        notes=str(row.get("notes", "")),
-    )
+    return PublishingPlanItem(**_item_kwargs_from_row(row, fallback_date))

@@ -5,6 +5,7 @@ from virtual_persona.delivery.telegram_navigation import (
     build_detail_keyboard,
     build_plan_keyboard,
     build_post_keyboard,
+    item_from_row,
     deserialize_context,
     format_caption_screen,
     format_plan_screen,
@@ -261,3 +262,65 @@ def test_serialize_context_preserves_detail_screen_metadata():
 
     assert items[0].identity_mode == "reference_manifest"
     assert items[0].reference_pack_type == "identity_lock"
+    assert items[0].caption_text == "Last quiet moments before heading out..."
+    assert items[0].generation_mode == "mirror_selfie_mode"
+    assert items[0].framing_mode == "mirror selfie, head-and-shoulders"
+    assert items[0].reference_type == "selfie"
+
+
+def test_item_from_row_recovers_detail_fields_from_canonical_snapshot_keys():
+    row = {
+        "publication_id": "pub-1",
+        "date": "2026-03-12",
+        "platform": "Instagram",
+        "post_time": "09:30",
+        "content_type": "photo",
+        "city": "Paris",
+        "day_type": "work_day",
+        "narrative_phase": "recovery_phase",
+        "scene_moment": "Final room check with luggage ready by the door",
+        "prompt_text": "Prompt body",
+        "caption": "Canonical caption",
+        "short_caption": "Short canonical caption",
+        "prompt_package_json": (
+            '{"shot_archetype":"mirror_selfie","framing_mode":"mirror selfie, head-and-shoulders",'
+            '"generation_mode":"mirror_selfie_mode","reference_type":"selfie","identity_mode":"reference_manifest",'
+            '"primary_anchors":"refs/selfies/, refs/base/","secondary_anchors":"refs/identity_lock/"}'
+        ),
+    }
+
+    item = item_from_row(row, date(2026, 3, 12))
+
+    assert item.caption_text == "Canonical caption"
+    assert item.short_caption == "Short canonical caption"
+    assert item.shot_archetype == "mirror_selfie"
+    assert item.framing_mode == "mirror selfie, head-and-shoulders"
+    assert item.generation_mode == "mirror_selfie_mode"
+    assert item.reference_type == "selfie"
+    assert item.identity_mode == "reference_manifest"
+    assert item.primary_anchors == "refs/selfies/, refs/base/"
+    assert item.secondary_anchors == "refs/identity_lock/"
+
+
+def test_prompt_screen_uses_only_canonical_detail_fields_not_debug_strings():
+    item = _item()
+    item.caption_text = "Real caption"
+    item.short_caption = "Real short caption"
+    item.reference_type = "selfie"
+    item.generation_mode = "mirror_selfie_mode"
+    item.identity_mode = "reference_manifest"
+    item.framing_mode = "mirror selfie, head-and-shoulders"
+    item.notes = "score=9.5; explanation text that must not replace generation mode"
+    item.selection_reason = "selected_by_primary_decision_and_diversity"
+    item.generation_diagnostics = "debug-string"
+
+    text = format_prompt_screen(item, 0)
+
+    assert "Real caption" in text
+    assert "Real short caption" in text
+    assert "selfie" in text
+    assert "mirror_selfie_mode" in text
+    assert "reference_manifest" in text
+    assert "mirror selfie, head-and-shoulders" in text
+    assert "debug-string" not in text
+    assert "score=9.5" not in text
