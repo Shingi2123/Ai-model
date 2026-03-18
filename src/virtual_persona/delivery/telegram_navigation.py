@@ -72,44 +72,72 @@ def _format_detail_header(item: PublishingPlanItem, post_index: int) -> str:
     return f"POST #{post_index + 1} - {item.platform} / {item.content_type.title()}"
 
 
+def _display_value(value: str | None, fallback: str) -> str:
+    return (value or "").strip() or fallback
+
+
+def _format_manual_generation_step(step: str | None) -> str:
+    text = (step or "").strip()
+    if not text:
+        return "Приложите основные референсы из списка ниже."
+
+    lowered = " ".join(text.lower().split())
+    known_translations = {
+        "attach 2-3 primary anchors, add 1 secondary anchor if the generator starts drifting.": (
+            "Прикрепите 2-3 основных референса. "
+            "Если генерация начинает уходить, добавьте 1 дополнительный."
+        ),
+        "use the primary anchors first. add secondary anchors only if you need to reinforce angle, emotion, or body consistency.": (
+            "Сначала используйте основные референсы. "
+            "Дополнительные подключайте только если нужно усилить ракурс, эмоцию или тело."
+        ),
+        "attach the primary anchors listed below for generation.": (
+            "Для генерации приложите основные референсы из списка ниже."
+        ),
+    }
+    if lowered in known_translations:
+        return known_translations[lowered]
+    return text
+
+
 def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
-    prompt = (item.prompt_text or "").strip() or "No saved prompt for this post yet."
-    caption = (item.caption_text or "").strip() or "No saved caption."
-    short_caption = (item.short_caption or item.caption_text or "").strip() or "No short caption."
-    negative = (item.negative_prompt or "").strip() or "No negative prompt."
-    shot_archetype = (item.shot_archetype or "").strip() or "Not set"
-    platform_intent = (item.platform_intent or "").strip() or "Not set"
-    generation_mode = (item.generation_mode or "").strip() or "Not set"
-    framing_mode = (item.framing_mode or "").strip() or "Not set"
-    prompt_mode = (item.prompt_mode or "").strip() or "Not set"
-    identity_mode = (item.identity_mode or "").strip() or "Not set"
-    reference_type = (item.reference_type or item.reference_pack_type or "").strip() or "Not set"
-    primary_anchors = (item.primary_anchors or "").strip() or "No primary anchors"
-    secondary_anchors = (item.secondary_anchors or "").strip() or "No secondary anchors"
-    manual_generation_step = (item.manual_generation_step or "").strip() or "No manual generation instruction."
+    prompt = _display_value(item.prompt_text, "Нет сохранённого промта для этого поста.")
+    caption = _display_value(item.caption_text, "Нет сохранённой подписи.")
+    short_caption = _display_value(item.short_caption or item.caption_text, "Нет короткой подписи.")
+    negative = _display_value(item.negative_prompt, "No negative prompt.")
+    shot_archetype = _display_value(item.shot_archetype, "Не задано")
+    platform_intent = _display_value(item.platform_intent, "Не задано")
+    generation_mode = _display_value(item.generation_mode, "Не задано")
+    framing_mode = _display_value(item.framing_mode, "Не задано")
+    prompt_mode = _display_value(item.prompt_mode, "Не задано")
+    identity_mode = _display_value(item.identity_mode, "Не задано")
+    reference_type = _display_value(item.reference_type or item.reference_pack_type, "Не задано")
+    primary_anchors = _display_value(item.primary_anchors, "Нет основных референсов")
+    secondary_anchors = _display_value(item.secondary_anchors, "Нет дополнительных референсов")
+    manual_generation_step = _format_manual_generation_step(item.manual_generation_step)
     return (
         f"{_format_detail_header(item, post_index)}\n\n"
-        "Technical meta:\n"
-        f"- Shot archetype: {shot_archetype}\n"
-        f"- Generation mode: {generation_mode}\n"
-        f"- Framing mode: {framing_mode}\n"
-        f"- Prompt mode: {prompt_mode}\n"
-        f"- Identity mode: {identity_mode}\n"
-        f"- Reference type: {reference_type}\n"
-        f"- Platform intent: {platform_intent}\n\n"
-        "Reference workflow:\n"
-        f"- Primary anchors: {primary_anchors}\n"
-        f"- Secondary anchors: {secondary_anchors}\n"
-        f"- Manual generation step: {manual_generation_step}\n\n"
-        "Caption (copy-ready):\n"
+        "Технические параметры:\n"
+        f"- Тип кадра: {shot_archetype}\n"
+        f"- Режим генерации: {generation_mode}\n"
+        f"- Фрейминг: {framing_mode}\n"
+        f"- Режим промта: {prompt_mode}\n"
+        f"- Режим identity: {identity_mode}\n"
+        f"- Тип референсов: {reference_type}\n"
+        f"- Платформенный режим: {platform_intent}\n\n"
+        "Референсы для генерации:\n"
+        f"- Основные референсы: {primary_anchors}\n"
+        f"- Дополнительные референсы: {secondary_anchors}\n"
+        f"- Как использовать: {manual_generation_step}\n\n"
+        "Подпись (скопировать):\n"
         "```\n"
         f"{caption}\n"
         "```\n\n"
-        "Short caption (copy-ready):\n"
+        "Короткая подпись (скопировать):\n"
         "```\n"
         f"{short_caption}\n"
         "```\n\n"
-        "Prompt (copy-ready):\n"
+        "Промт (скопировать):\n"
         "```\n"
         f"{prompt}\n"
         "```\n\n"

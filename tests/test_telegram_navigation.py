@@ -109,7 +109,7 @@ def test_detail_views_have_fallback_for_empty_prompt_and_caption():
     prompt_text = format_prompt_screen(empty, 0)
     caption_text = format_caption_screen(empty, 0)
 
-    assert "No saved prompt" in prompt_text
+    assert "Нет сохранённого промта" in prompt_text
     assert "No negative prompt" in prompt_text
     assert "No saved caption" in caption_text
 
@@ -117,16 +117,17 @@ def test_detail_views_have_fallback_for_empty_prompt_and_caption():
 def test_prompt_screen_contains_required_prompt_metadata():
     text = format_prompt_screen(_item(), 0)
 
-    assert "Caption" in text
-    assert "Short caption" in text
-    assert "Prompt" in text
+    assert "Подпись" in text
+    assert "Короткая подпись" in text
+    assert "Промт" in text
     assert "Negative prompt" in text
-    assert "Shot archetype" in text
-    assert "Generation mode" in text
-    assert "Framing mode" in text
-    assert "Reference type" in text
-    assert "Primary anchors" in text
-    assert "Manual generation step" in text
+    assert "Тип кадра" in text
+    assert "Режим генерации" in text
+    assert "Фрейминг" in text
+    assert "Тип референсов" in text
+    assert "Основные референсы" in text
+    assert "Как использовать" in text
+    assert "Прикрепите 2-3 основных референса" in text
 
 
 def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():
@@ -200,6 +201,6 @@ def test_prompt_screen_is_copy_ready_and_does_not_leak_prompt_package_json():
     text = format_prompt_screen(item, 0)
 
     assert "```" in text
-    assert "copy-ready" in text
+    assert "скопировать" in text
     assert "prompt_package_json" not in text
     assert "must_not_render" not in text
