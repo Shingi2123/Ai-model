@@ -32,24 +32,43 @@ def short_text(text: str, limit: int) -> str:
     return compact[: limit - 1].rstrip() + "..."
 
 
+def _is_missing_value(value: str | None) -> bool:
+    normalized = (value or "").strip()
+    return not normalized or normalized.lower() == "unknown"
+
+
+def _format_compact_meta(context: PlanScreenContext) -> list[str]:
+    lines: list[str] = []
+    if not _is_missing_value(context.city):
+        lines.append(f"📍 {context.city}")
+    lines.append(f"🕒 {context.persona_timezone} -> {context.user_timezone}")
+    lines.append(f"🧭 {context.day_type} • {context.narrative_phase}")
+    return lines
+
+
 def format_plan_screen(context: PlanScreenContext, items: list[PublishingPlanItem]) -> str:
-    header = (
-        f"Plan - {context.target_date.isoformat()}\n\n"
-        f"City: {context.city}\n"
-        f"Persona timezone: {context.persona_timezone}\n"
-        f"Your timezone: {context.user_timezone}\n\n"
-        f"Day type: {context.day_type}\n"
-        f"Narrative phase: {context.narrative_phase}"
-    )
+    header_lines = [f"📅 Plan - {context.target_date.isoformat()}"]
+    header_lines.extend(_format_compact_meta(context))
+    header = "\n".join(header_lines)
 
     if not items:
-        return f"{header}\n\nNo planned posts for this day."
+        return f"{header}\n\nПока нет запланированных постов на этот день."
 
     rows = []
     for idx, item in enumerate(items, start=1):
         source_tz = item.post_timezone or context.persona_timezone
         user_time = _convert_time_for_user(context.target_date, item.post_time, source_tz, context.user_timezone)
-        rows.append(f"POST #{idx} - {item.platform} / {item.content_type.title()} - {item.post_time} / {user_time}")
+        rows.append(
+            "\n".join(
+                [
+                    f"📌 POST #{idx}",
+                    f"- {item.platform} / {item.content_type.title()}",
+                    f"- Persona: {item.post_time} ({source_tz})",
+                    f"- You: {user_time} ({context.user_timezone})",
+                    f"- Moment: {short_text(item.scene_moment, 90)}",
+                ]
+            )
+        )
     return f"{header}\n\n" + "\n".join(rows)
 
 

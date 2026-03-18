@@ -64,7 +64,7 @@ def _inline_markup(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
 
 
 def _build_context(target_date: date, rows: list[dict], items: list):
-    city = str(rows[0].get("city") or (items[0].city if items else "Unknown")) if rows or items else "Unknown"
+    city = str(rows[0].get("city") or (items[0].city if items else "")) if rows or items else ""
     day_type = str(rows[0].get("day_type") or (items[0].day_type if items else "work_day")) if rows or items else "work_day"
     narrative_phase = (
         str(rows[0].get("narrative_phase") or (items[0].narrative_phase if items else "routine_stability"))

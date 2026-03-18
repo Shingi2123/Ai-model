@@ -96,8 +96,9 @@ def test_format_plan_and_post_card_contains_core_fields():
     plan_text = format_plan_screen(context, [_item()])
     post_text = format_post_screen(context, _item(), 0)
 
-    assert "Plan -" in plan_text
-    assert "POST #1 - Instagram / Photo" in plan_text
+    assert "📅 Plan -" in plan_text
+    assert "📌 POST #1" in plan_text
+    assert "- Instagram / Photo" in plan_text
     assert "Platform: Instagram" in post_text
     assert "Your time: 13:30 (Asia/Pavlodar)" in post_text
 
@@ -159,7 +160,7 @@ def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():
     plan_text = format_plan_screen(context, [])
     keyboard = build_plan_keyboard([], date(2026, 3, 12))
 
-    assert "No planned posts" in plan_text
+    assert "Пока нет запланированных постов" in plan_text
     assert keyboard == [[("Refresh", "plan:2026-03-12")]]
 
 
@@ -176,9 +177,26 @@ def test_plan_screen_with_single_post_shows_post_card_not_empty_state():
     plan_text = format_plan_screen(context, [_item()])
     keyboard = build_plan_keyboard([_item()], date(2026, 3, 12))
 
-    assert "POST #1" in plan_text
-    assert "No planned posts" not in plan_text
+    assert "📌 POST #1" in plan_text
+    assert "Пока нет запланированных постов" not in plan_text
     assert keyboard[0][0][0] == "POST 1"
+
+
+def test_plan_screen_hides_unknown_city_and_keeps_compact_meta():
+    context = PlanScreenContext(
+        target_date=date(2026, 3, 19),
+        city="Unknown",
+        day_type="work_day",
+        narrative_phase="routine_stability",
+        persona_timezone="Europe/Prague",
+        user_timezone="Asia/Pavlodar",
+    )
+
+    text = format_plan_screen(context, [])
+
+    assert "Unknown" not in text
+    assert "🕒 Europe/Prague -> Asia/Pavlodar" in text
+    assert "🧭 work_day • routine_stability" in text
 
 
 def test_normalize_plan_items_deduplicates_same_publication_id():
