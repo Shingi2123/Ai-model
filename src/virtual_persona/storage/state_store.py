@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -582,14 +582,7 @@ class GoogleSheetsStateStore:
             "publishing_plan": [
                 "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
                 "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
-<<<<<<< ours
                 "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "generation_mode", "framing_mode", "prompt_mode", "reference_type", "primary_anchors", "secondary_anchors", "manual_generation_step", "caption_text", "short_caption", "post_timezone", "publish_score",
-=======
-                "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "caption_text", "short_caption", "post_timezone", "publish_score",
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
                 "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score",
             ],
             "life_state": [
@@ -631,14 +624,7 @@ class GoogleSheetsStateStore:
         headers = [
             "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
             "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
-<<<<<<< ours
             "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "generation_mode", "framing_mode", "prompt_mode", "reference_type", "primary_anchors", "secondary_anchors", "manual_generation_step", "caption_text", "short_caption", "post_timezone", "publish_score",
-=======
-            "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "caption_text", "short_caption", "post_timezone", "publish_score",
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
             "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score",
         ]
         self._ensure_headers("publishing_plan", headers)
@@ -651,14 +637,7 @@ class GoogleSheetsStateStore:
         headers = [
             "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
             "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
-<<<<<<< ours
             "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "generation_mode", "framing_mode", "prompt_mode", "reference_type", "primary_anchors", "secondary_anchors", "manual_generation_step", "caption_text", "short_caption", "post_timezone", "publish_score",
-=======
-            "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "caption_text", "short_caption", "post_timezone", "publish_score",
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
             "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score",
         ]
         self._ensure_headers("publishing_plan", headers)

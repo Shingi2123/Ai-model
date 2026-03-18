@@ -7,13 +7,7 @@ from typing import Any, Dict, List
 
 
 IDENTITY_ROOT = Path("data/character_identity")
-<<<<<<< ours
-<<<<<<< ours
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
 
 
 @dataclass
@@ -21,13 +15,7 @@ class IdentityPack:
     root: Path
     manifest: Dict[str, Any] = field(default_factory=dict)
     references: Dict[str, str] = field(default_factory=dict)
-<<<<<<< ours
-<<<<<<< ours
     reference_types: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
     missing_required: List[str] = field(default_factory=list)
 
     @property
@@ -45,8 +33,6 @@ class CharacterIdentityManager:
         "walking_pose_reference",
         "seated_pose_reference",
     ]
-<<<<<<< ours
-<<<<<<< ours
     DEFAULT_FOLDER_MAP = {
         "base": "references/base",
         "angles": "references/angles",
@@ -85,25 +71,18 @@ class CharacterIdentityManager:
         "uniform_mode": "uniform",
         "lifestyle_mode": "lifestyle",
     }
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
 
     def __init__(self, root: Path | str = IDENTITY_ROOT) -> None:
         self.root = Path(root)
 
     def ensure_structure(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        refs_dir = self.root / "references"
-        refs_dir.mkdir(parents=True, exist_ok=True)
+        (self.root / "references").mkdir(parents=True, exist_ok=True)
 
     def load_pack(self) -> IdentityPack:
         self.ensure_structure()
         manifest_path = self.root / "character_identity_profile.json"
         manifest = self._read_json(manifest_path, fallback={})
-<<<<<<< ours
-<<<<<<< ours
         folder_map = self._folder_map(manifest)
         reference_types = self._reference_types(manifest, folder_map)
         refs = self._legacy_reference_pack(manifest, reference_types)
@@ -115,18 +94,6 @@ class CharacterIdentityManager:
             reference_types=reference_types,
             missing_required=missing,
         )
-=======
-=======
->>>>>>> theirs
-
-        refs = manifest.get("reference_pack") if isinstance(manifest.get("reference_pack"), dict) else {}
-        refs = {k: str(v) for k, v in refs.items()}
-        missing = [key for key in self.REQUIRED_REFERENCE_KEYS if not refs.get(key)]
-        return IdentityPack(root=self.root, manifest=manifest, references=refs, missing_required=missing)
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
 
     @staticmethod
     def _read_json(path: Path, fallback: Dict[str, Any]) -> Dict[str, Any]:
@@ -188,8 +155,6 @@ class CharacterIdentityManager:
             f"preferred_reference={preferred_ref}; {cue}."
         )
 
-<<<<<<< ours
-<<<<<<< ours
     def select_reference_bundle(
         self,
         shot_archetype: str,
@@ -272,8 +237,7 @@ class CharacterIdentityManager:
         return normalized
 
     def _anchors_for_key(self, key: str, manifest: Dict[str, Any]) -> List[str]:
-        folder_map = self._folder_map(manifest)
-        return self._resolve_anchor_paths([key], folder_map)
+        return self._resolve_anchor_paths([key], self._folder_map(manifest))
 
     def _resolve_anchor_paths(self, keys: List[str], folder_map: Dict[str, str]) -> List[str]:
         resolved: List[str] = []
@@ -323,31 +287,20 @@ class CharacterIdentityManager:
 
     @staticmethod
     def _legacy_key_for_reference_type(reference_type: str, shot_archetype: str) -> str:
-        if reference_type == "face":
-            return "face_reference"
-        if reference_type == "selfie":
+        if reference_type in {"face", "selfie"}:
             return "face_reference"
         if reference_type == "full_body":
             return "full_body_reference"
         if reference_type in {"lifestyle", "uniform"}:
-            return "half_body_reference" if shot_archetype in {"seated_table_shot", "waist_up"} else "full_body_reference"
+            if shot_archetype in {"seated_table_shot", "waist_up"}:
+                return "half_body_reference"
+            return "full_body_reference"
         return "face_reference"
 
 
 def default_identity_manifest() -> Dict[str, Any]:
     return {
         "version": 2,
-=======
-=======
->>>>>>> theirs
-
-def default_identity_manifest() -> Dict[str, Any]:
-    return {
-        "version": 1,
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
         "character_dna": {
             "age": "22",
             "estimated_height": "167cm",
@@ -379,8 +332,6 @@ def default_identity_manifest() -> Dict[str, Any]:
             "walking_pose_reference": "",
             "seated_pose_reference": "",
         },
-<<<<<<< ours
-<<<<<<< ours
         "reference_manifest": {
             "schema": "character_identity_pack_v2",
             "folder_mapping": {
@@ -403,9 +354,3 @@ def default_identity_manifest() -> Dict[str, Any]:
             },
         },
     }
-=======
-    }
->>>>>>> theirs
-=======
-    }
->>>>>>> theirs
