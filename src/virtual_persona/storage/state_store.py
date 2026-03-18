@@ -641,7 +641,7 @@ class GoogleSheetsStateStore:
             "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score",
         ]
         self._ensure_headers("publishing_plan", headers)
-        self._append_dict_row("publishing_plan", headers, row)
+        self._append_dict_row("publishing_plan", headers, row, prefer_sheet_header_order=True)
 
     def load_posting_rules(self) -> List[Dict[str, Any]]:
         if not self.available():

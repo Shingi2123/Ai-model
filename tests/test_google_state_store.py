@@ -231,6 +231,65 @@ def test_google_store_content_moment_memory_uses_actual_sheet_header_order():
     assert values[13] == "handheld"
 
 
+def test_google_store_publishing_plan_uses_actual_sheet_header_order():
+    store = HelperGoogleStore()
+    ws = store._ws_map["publishing_plan"]
+    ws.header = [
+        "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
+        "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
+        "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "caption_text",
+        "short_caption", "shot_archetype", "framing_mode", "generation_mode", "reference_type", "publish_score",
+        "selection_reason", "notes", "identity_mode", "reference_pack_type",
+    ]
+
+    row = {
+        "publication_id": "pub-1",
+        "date": "2026-03-14",
+        "platform": "Instagram",
+        "post_time": "09:30",
+        "content_type": "photo",
+        "city": "Paris",
+        "day_type": "work_day",
+        "narrative_phase": "routine_stability",
+        "scene_moment": "Coffee line before boarding",
+        "scene_source": "planner",
+        "scene_moment_type": "transition",
+        "moment_signature": "sig-1",
+        "visual_focus": "coffee cup",
+        "activity_type": "coffee_pause",
+        "outfit_ids": "look-1",
+        "prompt_type": "photo",
+        "prompt_text": "Prompt body",
+        "negative_prompt": "bad anatomy",
+        "prompt_package_json": "{\"generation_mode\":\"friend_shot_mode\"}",
+        "caption_text": "Canonical caption",
+        "short_caption": "Canonical short caption",
+        "shot_archetype": "friend-shot",
+        "framing_mode": "friend-shot, 3/4 body",
+        "generation_mode": "friend_shot_mode",
+        "reference_type": "lifestyle",
+        "publish_score": 3.6,
+        "selection_reason": "selected_by_primary_decision_and_diversity",
+        "notes": "score=3.60; reasons=visual_focus",
+        "identity_mode": "reference_manifest",
+        "reference_pack_type": "identity_lock",
+    }
+
+    store.append_publishing_plan(row)
+
+    values = ws.rows[0]
+    assert values[19] == "Canonical caption"
+    assert values[20] == "Canonical short caption"
+    assert values[21] == "friend-shot"
+    assert values[22] == "friend-shot, 3/4 body"
+    assert values[23] == "friend_shot_mode"
+    assert values[24] == "lifestyle"
+    assert values[25] == 3.6
+    assert values[26] == "selected_by_primary_decision_and_diversity"
+    assert values[27] == "score=3.60; reasons=visual_focus"
+    assert values[28] == "reference_manifest"
+
+
 def test_google_store_run_log_persists_structured_trace_fields():
     store = HelperGoogleStore()
     ws = store._ws_map["run_log"]

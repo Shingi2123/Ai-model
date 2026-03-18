@@ -220,12 +220,14 @@ def _load_cached_screen(context: ContextTypes.DEFAULT_TYPE):
         return None, []
 
 
-def _select_screen_items(*, parsed, target_date: date, cached_context, cached_items: list, plan_items: list) -> list:
+def _select_screen_items(*, parsed, target_date: date, cached_context, cached_items: list, plan_items: list) -> tuple[list, str]:
     if parsed.view == "plan":
-        return plan_items
+        return plan_items, "publishing_plan"
+    if plan_items:
+        return plan_items, "publishing_plan"
     if cached_items and cached_context and cached_context.target_date == target_date:
-        return cached_items
-    return plan_items
+        return cached_items, "serialized_callback_context"
+    return plan_items, "publishing_plan"
 
 
 def _render_callback_screen(*, parsed, plan_context: PlanScreenContext, items: list):
@@ -296,12 +298,19 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             len(plan_items),
         )
 
-        items = _select_screen_items(
+        items, items_source = _select_screen_items(
             parsed=parsed,
             target_date=target_date,
             cached_context=cached_context,
             cached_items=cached_items,
             plan_items=plan_items,
+        )
+        logger.info(
+            "telegram_callback detail_source date=%s view=%s source=%s keys=%s",
+            target_date.isoformat(),
+            parsed.view,
+            items_source,
+            "caption_text,short_caption,reference_type,generation_mode,identity_mode,framing_mode",
         )
         (text, markup), should_cache = _render_callback_screen(parsed=parsed, plan_context=plan_context, items=items)
         if should_cache:

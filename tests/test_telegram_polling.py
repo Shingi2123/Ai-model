@@ -265,6 +265,54 @@ def test_callback_duplicate_post_press_no_fallback(monkeypatch):
     assert module.logger.exception.call_count == 0
 
 
+def test_select_screen_items_prefers_persisted_plan_for_detail_views():
+    module = _load_module()
+    target_date = date(2026, 3, 12)
+    cached_context = module.PlanScreenContext(
+        target_date=target_date,
+        city="Paris",
+        day_type="work_day",
+        narrative_phase="recovery_phase",
+        persona_timezone="Europe/Paris",
+        user_timezone="Asia/Pavlodar",
+    )
+
+    items, source = module._select_screen_items(
+        parsed=types.SimpleNamespace(view="prompt"),
+        target_date=target_date,
+        cached_context=cached_context,
+        cached_items=["stale-cached-item"],
+        plan_items=["canonical-plan-item"],
+    )
+
+    assert items == ["canonical-plan-item"]
+    assert source == "publishing_plan"
+
+
+def test_select_screen_items_falls_back_to_cached_context_only_when_plan_missing():
+    module = _load_module()
+    target_date = date(2026, 3, 12)
+    cached_context = module.PlanScreenContext(
+        target_date=target_date,
+        city="Paris",
+        day_type="work_day",
+        narrative_phase="recovery_phase",
+        persona_timezone="Europe/Paris",
+        user_timezone="Asia/Pavlodar",
+    )
+
+    items, source = module._select_screen_items(
+        parsed=types.SimpleNamespace(view="caption"),
+        target_date=target_date,
+        cached_context=cached_context,
+        cached_items=["cached-item"],
+        plan_items=[],
+    )
+
+    assert items == ["cached-item"]
+    assert source == "serialized_callback_context"
+
+
 
 
 def test_callback_nav_uses_safe_wrappers_runtime(monkeypatch):
