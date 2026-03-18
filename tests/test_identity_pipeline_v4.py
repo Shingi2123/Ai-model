@@ -1,5 +1,8 @@
+<<<<<<< ours
 import json
 
+=======
+>>>>>>> theirs
 from virtual_persona.pipeline.identity import CharacterIdentityManager, default_identity_manifest
 from virtual_persona.pipeline.prompt_composer import PromptComposer
 from virtual_persona.pipeline.provider_prompt_formatter import ReferenceAwarePromptFormatter
@@ -95,6 +98,7 @@ def test_default_identity_manifest_structure_contains_reference_pack():
     assert "character_dna" in payload
     assert "reference_pack" in payload
     assert "face_reference" in payload["reference_pack"]
+<<<<<<< ours
     assert "reference_manifest" in payload
     assert "anchors" in payload["reference_manifest"]
 
@@ -152,3 +156,5 @@ def test_reference_selection_uses_generation_mode_and_shot_type(tmp_path):
     assert selfie["selected"] == "references/selfies/"
     assert full_body["requested_type"] == "full_body"
     assert full_body["selected"] == "references/full_body/"
+=======
+>>>>>>> theirs

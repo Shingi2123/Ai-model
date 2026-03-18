@@ -1,12 +1,20 @@
 {
+<<<<<<< ours
   "version": 2,
   "character_dna": {
     "age": "24",
     "estimated_height": "170cm",
+=======
+  "version": 1,
+  "character_dna": {
+    "age": "22",
+    "estimated_height": "167cm",
+>>>>>>> theirs
     "body_type": "slim natural build",
     "face_type": "soft oval",
     "jawline": "softly defined",
     "nose": "straight natural",
+<<<<<<< ours
     "eyes": "light almond eyes",
     "lips": "medium natural",
     "skin_tone": "light neutral with natural skin texture",
@@ -117,3 +125,30 @@
     }
   }
 }
+=======
+    "eyes": "green almond",
+    "lips": "medium natural",
+    "skin_tone": "light neutral",
+    "freckles": "subtle",
+    "hair": "light chestnut medium length",
+    "hairstyle": "natural loose",
+    "shoulder_set": "relaxed",
+    "posture": "natural upright",
+    "wardrobe_style": "casual urban",
+    "makeup": "light natural",
+    "accessories": "minimal everyday",
+    "visual_vibe": "grounded candid lifestyle"
+  },
+  "reference_pack": {
+    "face_reference": "references/face_reference.jpg",
+    "half_body_reference": "references/half_body_reference.jpg",
+    "full_body_reference": "references/full_body_reference.jpg",
+    "expressions_pack": "references/expressions_pack/",
+    "angles_pack": "references/angles_pack/",
+    "lighting_neutral_reference": "references/lighting_neutral.jpg",
+    "style_neutral_reference": "references/style_neutral.jpg",
+    "walking_pose_reference": "references/walking_pose.jpg",
+    "seated_pose_reference": "references/seated_pose.jpg"
+  }
+}
+>>>>>>> theirs

@@ -7,7 +7,10 @@ from typing import Any, Dict, List
 
 
 IDENTITY_ROOT = Path("data/character_identity")
+<<<<<<< ours
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+=======
+>>>>>>> theirs
 
 
 @dataclass
@@ -15,7 +18,10 @@ class IdentityPack:
     root: Path
     manifest: Dict[str, Any] = field(default_factory=dict)
     references: Dict[str, str] = field(default_factory=dict)
+<<<<<<< ours
     reference_types: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+=======
+>>>>>>> theirs
     missing_required: List[str] = field(default_factory=list)
 
     @property
@@ -33,6 +39,7 @@ class CharacterIdentityManager:
         "walking_pose_reference",
         "seated_pose_reference",
     ]
+<<<<<<< ours
     DEFAULT_FOLDER_MAP = {
         "base": "references/base",
         "angles": "references/angles",
@@ -71,6 +78,8 @@ class CharacterIdentityManager:
         "uniform_mode": "uniform",
         "lifestyle_mode": "lifestyle",
     }
+=======
+>>>>>>> theirs
 
     def __init__(self, root: Path | str = IDENTITY_ROOT) -> None:
         self.root = Path(root)
@@ -84,6 +93,7 @@ class CharacterIdentityManager:
         self.ensure_structure()
         manifest_path = self.root / "character_identity_profile.json"
         manifest = self._read_json(manifest_path, fallback={})
+<<<<<<< ours
         folder_map = self._folder_map(manifest)
         reference_types = self._reference_types(manifest, folder_map)
         refs = self._legacy_reference_pack(manifest, reference_types)
@@ -95,6 +105,13 @@ class CharacterIdentityManager:
             reference_types=reference_types,
             missing_required=missing,
         )
+=======
+
+        refs = manifest.get("reference_pack") if isinstance(manifest.get("reference_pack"), dict) else {}
+        refs = {k: str(v) for k, v in refs.items()}
+        missing = [key for key in self.REQUIRED_REFERENCE_KEYS if not refs.get(key)]
+        return IdentityPack(root=self.root, manifest=manifest, references=refs, missing_required=missing)
+>>>>>>> theirs
 
     @staticmethod
     def _read_json(path: Path, fallback: Dict[str, Any]) -> Dict[str, Any]:
@@ -156,6 +173,7 @@ class CharacterIdentityManager:
             f"preferred_reference={preferred_ref}; {cue}."
         )
 
+<<<<<<< ours
     def select_reference_bundle(
         self,
         shot_archetype: str,
@@ -303,6 +321,12 @@ class CharacterIdentityManager:
 def default_identity_manifest() -> Dict[str, Any]:
     return {
         "version": 2,
+=======
+
+def default_identity_manifest() -> Dict[str, Any]:
+    return {
+        "version": 1,
+>>>>>>> theirs
         "character_dna": {
             "age": "22",
             "estimated_height": "167cm",
@@ -334,6 +358,7 @@ def default_identity_manifest() -> Dict[str, Any]:
             "walking_pose_reference": "",
             "seated_pose_reference": "",
         },
+<<<<<<< ours
         "reference_manifest": {
             "schema": "character_identity_pack_v2",
             "folder_mapping": {
@@ -356,3 +381,6 @@ def default_identity_manifest() -> Dict[str, Any]:
             },
         },
     }
+=======
+    }
+>>>>>>> theirs
