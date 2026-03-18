@@ -96,9 +96,9 @@ def _build_package(day_type: str = "work_day", phase: str = "growth", scenes=Non
             publish_windows=["09:00", "09:00", "09:00"],
             creative_notes=[],
             prompt_packages=[
-                {"photo": {"final_prompt": "photo-1", "negative_prompt": "bad anatomy", "shot_archetype": "friend_shot", "platform_intent": "instagram_feed", "identity_mode": "reference_manifest", "reference_pack_type": "full_body"}},
-                {"photo": {"final_prompt": "photo-2", "negative_prompt": "bad anatomy", "shot_archetype": "mirror_selfie", "platform_intent": "instagram_feed", "identity_mode": "reference_manifest", "reference_pack_type": "selfie"}},
-                {"photo": {"final_prompt": "photo-3", "negative_prompt": "bad anatomy", "shot_archetype": "candid_handheld", "platform_intent": "instagram_feed", "identity_mode": "reference_manifest", "reference_pack_type": "lifestyle"}},
+                {"photo": {"final_prompt": "photo-1", "negative_prompt": "bad anatomy", "shot_archetype": "friend_shot", "platform_intent": "instagram_feed", "generation_mode": "full-body_mode", "framing_mode": "friend-shot, 3/4 body", "prompt_mode": "dense", "identity_mode": "reference_manifest", "reference_pack_type": "full_body", "reference_type": "full_body", "primary_anchors": "ref/a.png, ref/b.png", "secondary_anchors": "ref/c.png", "manual_generation_step": "Attach 2-3 primary anchors, add 1 secondary anchor only if needed."}},
+                {"photo": {"final_prompt": "photo-2", "negative_prompt": "bad anatomy", "shot_archetype": "mirror_selfie", "platform_intent": "instagram_feed", "generation_mode": "mirror_selfie_mode", "framing_mode": "mirror selfie, head-and-shoulders", "prompt_mode": "compact", "identity_mode": "reference_manifest", "reference_pack_type": "selfie", "reference_type": "selfie", "primary_anchors": "ref/selfie.png", "secondary_anchors": "ref/lock.png", "manual_generation_step": "Attach the main primary anchor, then add 1-2 supporting anchors if needed."}},
+                {"photo": {"final_prompt": "photo-3", "negative_prompt": "bad anatomy", "shot_archetype": "candid_handheld", "platform_intent": "instagram_feed", "generation_mode": "lifestyle_mode", "framing_mode": "candid handheld, 3/4 body", "prompt_mode": "dense", "identity_mode": "reference_manifest", "reference_pack_type": "lifestyle", "reference_type": "lifestyle", "primary_anchors": "ref/life.png", "secondary_anchors": "", "manual_generation_step": "Attach the main primary anchor, then add 1-2 supporting anchors if needed."}},
             ],
         ),
         life_state=LifeState(
@@ -247,6 +247,11 @@ def test_publishing_plan_row_contains_timezone_and_decision_metadata():
     assert "negative_prompt" in persisted
     assert first.identity_mode == "reference_manifest"
     assert first.reference_pack_type
+    assert first.generation_mode
+    assert first.framing_mode
+    assert first.prompt_mode
+    assert first.reference_type
+    assert first.primary_anchors
 
 
 def test_publishing_plan_keeps_required_text_fields_non_empty_even_with_empty_caption():

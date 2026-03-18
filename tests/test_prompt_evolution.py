@@ -180,7 +180,7 @@ def test_face_consistency_signature_appears_in_prompt():
     package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan", "photo", ["top_1"])
 
     assert "face consistency signature" in package["face_consistency"]
-    assert "balanced eye spacing" in package["final_prompt"]
+    assert "balanced eye spacing" in package["face_consistency"]
 
 
 def test_device_identity_is_consistent_for_selfie_and_mirror_and_mirror_geometry_present():
@@ -231,6 +231,34 @@ def test_negative_prompt_changes_by_archetype_and_scene():
     assert "impossible reflection geometry" in mirror_package["negative_prompt"]
     assert "impossible reflection geometry" not in candid_package["negative_prompt"]
     assert "impossible pedestrian scale" in candid_package["negative_prompt"]
+
+
+def test_prompt_package_surfaces_manual_reference_workflow_and_framing_mode():
+    composer = PromptComposer(DummyState())
+    scene = Scene()
+    scene.scene_moment = "Mirror selfie in airport bathroom before boarding"
+    scene.location = "airport terminal"
+
+    package = composer.compose_package(BASE_CONTEXT, scene, "cream cardigan", "photo", ["top_1"])
+
+    assert package["reference_type"] == "selfie"
+    assert package["framing_mode"]
+    assert package["manual_generation_step"]
+    assert package["primary_anchors"]
+
+
+def test_final_prompt_is_generator_friendly_and_keeps_negative_separate():
+    composer = PromptComposer(DummyState())
+    scene = Scene()
+    scene.scene_moment = "Seated morning coffee before heading out"
+
+    package = composer.compose_package(BASE_CONTEXT, scene, "cream cardigan", "photo", ["top_1"])
+
+    lowered = package["final_prompt"].lower()
+    assert "same recurring woman" in lowered
+    assert "stable face geometry" in lowered
+    assert "no editorial fashion look" in lowered
+    assert "[negative_prompt]" not in package["final_prompt"]
 
 
 def test_platform_intent_changes_behavior_mode_and_polish_cues():

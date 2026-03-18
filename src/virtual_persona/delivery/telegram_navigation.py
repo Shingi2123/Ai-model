@@ -29,29 +29,27 @@ def short_text(text: str, limit: int) -> str:
     compact = " ".join((text or "").split())
     if len(compact) <= limit:
         return compact
-    return compact[: limit - 1].rstrip() + "…"
+    return compact[: limit - 1].rstrip() + "..."
 
 
 def format_plan_screen(context: PlanScreenContext, items: list[PublishingPlanItem]) -> str:
     header = (
-        f"📅 План публикаций — {context.target_date.strftime('%d %B')}\n\n"
-        f"📍 Город персонажа: {context.city}\n"
-        f"🕓 Таймзона персонажа: {context.persona_timezone}\n"
-        f"🕓 Таймзона пользователя: {context.user_timezone}\n\n"
-        f"📅 День: {context.day_type}\n"
-        f"🎭 Фаза: {context.narrative_phase}"
+        f"Plan - {context.target_date.isoformat()}\n\n"
+        f"City: {context.city}\n"
+        f"Persona timezone: {context.persona_timezone}\n"
+        f"Your timezone: {context.user_timezone}\n\n"
+        f"Day type: {context.day_type}\n"
+        f"Narrative phase: {context.narrative_phase}"
     )
 
     if not items:
-        return f"{header}\n\n⚠️ На сегодня нет публикаций."
+        return f"{header}\n\nNo planned posts for this day."
 
     rows = []
     for idx, item in enumerate(items, start=1):
         source_tz = item.post_timezone or context.persona_timezone
         user_time = _convert_time_for_user(context.target_date, item.post_time, source_tz, context.user_timezone)
-        rows.append(
-            f"POST #{idx} — {item.platform} / {item.content_type.title()} — {item.post_time} / {user_time}"
-        )
+        rows.append(f"POST #{idx} - {item.platform} / {item.content_type.title()} - {item.post_time} / {user_time}")
     return f"{header}\n\n" + "\n".join(rows)
 
 
@@ -60,87 +58,90 @@ def format_post_screen(context: PlanScreenContext, item: PublishingPlanItem, pos
     user_time = _convert_time_for_user(context.target_date, item.post_time, source_tz, context.user_timezone)
     emoji = _post_header_emoji(item.content_type)
     return (
-        f"📌 POST #{post_index + 1}\n\n"
-        f"📱 Платформа: {item.platform}\n"
-        f"{emoji} Тип: {item.content_type.title()}\n"
-        f"🕘 Персонаж: {item.post_time} ({source_tz})\n"
-        f"🕘 Вы: {user_time} ({context.user_timezone})\n\n"
-        f"🎯 Момент: {short_text(item.scene_moment, 220)}\n"
-        f"✍️ Подпись: {short_text(item.short_caption or item.caption_text, 220)}"
+        f"POST #{post_index + 1}\n\n"
+        f"Platform: {item.platform}\n"
+        f"{emoji} Type: {item.content_type.title()}\n"
+        f"Persona time: {item.post_time} ({source_tz})\n"
+        f"Your time: {user_time} ({context.user_timezone})\n\n"
+        f"Moment: {short_text(item.scene_moment, 220)}\n"
+        f"Caption: {short_text(item.short_caption or item.caption_text, 220)}"
     )
 
 
 def _format_detail_header(item: PublishingPlanItem, post_index: int) -> str:
-    return f"📌 POST #{post_index + 1} • {item.platform} / {item.content_type.title()}"
+    return f"POST #{post_index + 1} - {item.platform} / {item.content_type.title()}"
 
 
 def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
-    prompt = (item.prompt_text or "").strip() or "⚠️ Для этого поста пока нет сохранённого prompt."
-    caption = (item.caption_text or "").strip() or "⚠️ Нет сохранённой подписи."
-    short_caption = (item.short_caption or item.caption_text or "").strip() or "⚠️ Нет короткой подписи."
-    negative = (item.negative_prompt or "").strip() or "⚠️ Нет negative prompt."
-    shot_archetype = (item.shot_archetype or "").strip() or "⚠️ Не задан"
-    platform_intent = (item.platform_intent or "").strip() or "⚠️ Не задан"
+    prompt = (item.prompt_text or "").strip() or "No saved prompt for this post yet."
+    caption = (item.caption_text or "").strip() or "No saved caption."
+    short_caption = (item.short_caption or item.caption_text or "").strip() or "No short caption."
+    negative = (item.negative_prompt or "").strip() or "No negative prompt."
+    shot_archetype = (item.shot_archetype or "").strip() or "Not set"
+    platform_intent = (item.platform_intent or "").strip() or "Not set"
+    generation_mode = (item.generation_mode or "").strip() or "Not set"
+    framing_mode = (item.framing_mode or "").strip() or "Not set"
+    prompt_mode = (item.prompt_mode or "").strip() or "Not set"
+    identity_mode = (item.identity_mode or "").strip() or "Not set"
+    reference_type = (item.reference_type or item.reference_pack_type or "").strip() or "Not set"
+    primary_anchors = (item.primary_anchors or "").strip() or "No primary anchors"
+    secondary_anchors = (item.secondary_anchors or "").strip() or "No secondary anchors"
+    manual_generation_step = (item.manual_generation_step or "").strip() or "No manual generation instruction."
     return (
         f"{_format_detail_header(item, post_index)}\n\n"
-        "✍️ Caption (copy-ready):\n"
+        "Technical meta:\n"
+        f"- Shot archetype: {shot_archetype}\n"
+        f"- Generation mode: {generation_mode}\n"
+        f"- Framing mode: {framing_mode}\n"
+        f"- Prompt mode: {prompt_mode}\n"
+        f"- Identity mode: {identity_mode}\n"
+        f"- Reference type: {reference_type}\n"
+        f"- Platform intent: {platform_intent}\n\n"
+        "Reference workflow:\n"
+        f"- Primary anchors: {primary_anchors}\n"
+        f"- Secondary anchors: {secondary_anchors}\n"
+        f"- Manual generation step: {manual_generation_step}\n\n"
+        "Caption (copy-ready):\n"
         "```\n"
         f"{caption}\n"
         "```\n\n"
-        "📝 Short caption (copy-ready):\n"
+        "Short caption (copy-ready):\n"
         "```\n"
         f"{short_caption}\n"
         "```\n\n"
-        "🖼 Prompt (copy-ready):\n"
+        "Prompt (copy-ready):\n"
         "```\n"
         f"{prompt}\n"
         "```\n\n"
-        "🚫 Negative prompt (copy-ready):\n"
+        "Negative prompt (copy-ready):\n"
         "```\n"
         f"{negative}\n"
-        "```\n\n"
-        "⚙️ Technical meta:\n"
-        f"• Shot archetype: {shot_archetype}\n"
-        f"• Platform intent: {platform_intent}"
+        "```"
     )
 
 
 def format_caption_screen(item: PublishingPlanItem, post_index: int) -> str:
     caption = (item.caption_text or item.short_caption or "").strip()
-    body = caption if caption else "⚠️ Для этого поста пока нет сохранённой подписи."
-    return f"{_format_detail_header(item, post_index)}\n\n✍️ Подпись:\n{body}"
+    body = caption if caption else "No saved caption for this post yet."
+    return f"{_format_detail_header(item, post_index)}\n\nCaption:\n{body}"
 
 
 def format_moment_screen(item: PublishingPlanItem, post_index: int) -> str:
     moment = (item.scene_moment or "").strip()
-    body = moment if moment else "⚠️ Для этого поста пока нет сохранённого moment."
-    return f"{_format_detail_header(item, post_index)}\n\n🧠 Момент:\n{body}"
+    body = moment if moment else "No saved scene moment for this post yet."
+    return f"{_format_detail_header(item, post_index)}\n\nMoment:\n{body}"
 
 
 def plan_item_key(item: PublishingPlanItem) -> str:
     if item.publication_id:
         return f"publication_id:{item.publication_id}"
-    return "|".join(
-        [
-            item.date.isoformat(),
-            item.platform,
-            item.content_type,
-            item.scene_moment,
-            item.post_time,
-        ]
-    )
+    return "|".join([item.date.isoformat(), item.platform, item.content_type, item.scene_moment, item.post_time])
 
 
 def normalize_plan_items(items: list[PublishingPlanItem]) -> list[PublishingPlanItem]:
     ordered = sorted(
         items,
-        key=lambda item: (
-            item.post_time,
-            item.platform,
-            item.content_type,
-            item.publication_id or "",
-            item.scene_moment,
-        ),
+        key=lambda item: (item.post_time, item.platform, item.content_type, item.publication_id or "", item.scene_moment),
     )
     unique: list[PublishingPlanItem] = []
     seen: set[str] = set()
@@ -160,22 +161,22 @@ def build_plan_keyboard(items: list[PublishingPlanItem], target_date: date) -> l
     day = target_date.isoformat()
     for idx, item in enumerate(items):
         rows.append([(f"POST {idx + 1}", f"p:{day}:{item.publication_id}")])
-    rows.append([("🔄 Обновить", f"plan:{day}")])
+    rows.append([("Refresh", f"plan:{day}")])
     return rows
 
 
 def build_post_keyboard(target_date: date, publication_id: str) -> list[list[tuple[str, str]]]:
     day = target_date.isoformat()
     return [
-        [("🖼 Промпт", f"pv:{day}:{publication_id}:prompt"), ("✍️ Подпись", f"pv:{day}:{publication_id}:caption")],
-        [("🧠 Момент", f"pv:{day}:{publication_id}:moment")],
-        [("⬅️ К плану", f"back:plan:{day}")],
+        [("Prompt", f"pv:{day}:{publication_id}:prompt"), ("Caption", f"pv:{day}:{publication_id}:caption")],
+        [("Moment", f"pv:{day}:{publication_id}:moment")],
+        [("Back to plan", f"back:plan:{day}")],
     ]
 
 
 def build_detail_keyboard(target_date: date, publication_id: str) -> list[list[tuple[str, str]]]:
     day = target_date.isoformat()
-    return [[("⬅️ К посту", f"back:post:{day}:{publication_id}"), ("⬅️ К плану", f"back:plan:{day}")]]
+    return [[("Back to post", f"back:post:{day}:{publication_id}"), ("Back to plan", f"back:plan:{day}")]]
 
 
 def parse_callback(data: str) -> ParsedCallback:
@@ -236,6 +237,13 @@ def serialize_context(context: PlanScreenContext, items: list[PublishingPlanItem
                 "negative_prompt": item.negative_prompt,
                 "shot_archetype": item.shot_archetype,
                 "platform_intent": item.platform_intent,
+                "generation_mode": item.generation_mode,
+                "framing_mode": item.framing_mode,
+                "prompt_mode": item.prompt_mode,
+                "reference_type": item.reference_type,
+                "primary_anchors": item.primary_anchors,
+                "secondary_anchors": item.secondary_anchors,
+                "manual_generation_step": item.manual_generation_step,
                 "caption_text": item.caption_text,
                 "short_caption": item.short_caption,
                 "post_timezone": item.post_timezone,
@@ -280,6 +288,13 @@ def deserialize_context(raw: dict) -> tuple[PlanScreenContext, list[PublishingPl
                 negative_prompt=str(row.get("negative_prompt", "")),
                 shot_archetype=str(row.get("shot_archetype", "")),
                 platform_intent=str(row.get("platform_intent", "")),
+                generation_mode=str(row.get("generation_mode", "")),
+                framing_mode=str(row.get("framing_mode", "")),
+                prompt_mode=str(row.get("prompt_mode", "")),
+                reference_type=str(row.get("reference_type", "")),
+                primary_anchors=str(row.get("primary_anchors", "")),
+                secondary_anchors=str(row.get("secondary_anchors", "")),
+                manual_generation_step=str(row.get("manual_generation_step", "")),
                 caption_text=str(row.get("caption_text", "")),
                 short_caption=str(row.get("short_caption", "")),
                 post_timezone=str(row.get("post_timezone", "")),
@@ -322,6 +337,13 @@ def item_from_row(row: dict, fallback_date: date) -> PublishingPlanItem:
         negative_prompt=str(row.get("negative_prompt", "")),
         shot_archetype=str(row.get("shot_archetype", "")),
         platform_intent=str(row.get("platform_intent", "")),
+        generation_mode=str(row.get("generation_mode", "")),
+        framing_mode=str(row.get("framing_mode", "")),
+        prompt_mode=str(row.get("prompt_mode", "")),
+        reference_type=str(row.get("reference_type", "")),
+        primary_anchors=str(row.get("primary_anchors", "")),
+        secondary_anchors=str(row.get("secondary_anchors", "")),
+        manual_generation_step=str(row.get("manual_generation_step", "")),
         caption_text=str(row.get("caption_text", "")),
         short_caption=str(row.get("short_caption", "")),
         post_timezone=str(row.get("post_timezone", "")),
