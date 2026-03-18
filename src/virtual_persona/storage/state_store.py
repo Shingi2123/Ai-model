@@ -586,6 +586,9 @@ class GoogleSheetsStateStore:
                 "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "generation_mode", "framing_mode", "prompt_mode", "reference_type", "primary_anchors", "secondary_anchors", "manual_generation_step", "caption_text", "short_caption", "post_timezone", "publish_score",
 =======
                 "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "caption_text", "short_caption", "post_timezone", "publish_score",
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
                 "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score",
             ],
@@ -632,6 +635,9 @@ class GoogleSheetsStateStore:
             "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "generation_mode", "framing_mode", "prompt_mode", "reference_type", "primary_anchors", "secondary_anchors", "manual_generation_step", "caption_text", "short_caption", "post_timezone", "publish_score",
 =======
             "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "caption_text", "short_caption", "post_timezone", "publish_score",
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
             "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score",
         ]
@@ -649,6 +655,9 @@ class GoogleSheetsStateStore:
             "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "generation_mode", "framing_mode", "prompt_mode", "reference_type", "primary_anchors", "secondary_anchors", "manual_generation_step", "caption_text", "short_caption", "post_timezone", "publish_score",
 =======
             "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "caption_text", "short_caption", "post_timezone", "publish_score",
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
             "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score",
         ]

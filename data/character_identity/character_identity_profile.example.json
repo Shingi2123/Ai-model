@@ -1,19 +1,26 @@
 {
 <<<<<<< ours
+<<<<<<< ours
   "version": 2,
   "character_dna": {
     "age": "24",
     "estimated_height": "170cm",
 =======
+=======
+>>>>>>> theirs
   "version": 1,
   "character_dna": {
     "age": "22",
     "estimated_height": "167cm",
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
     "body_type": "slim natural build",
     "face_type": "soft oval",
     "jawline": "softly defined",
     "nose": "straight natural",
+<<<<<<< ours
 <<<<<<< ours
     "eyes": "light almond eyes",
     "lips": "medium natural",
@@ -126,6 +133,8 @@
   }
 }
 =======
+=======
+>>>>>>> theirs
     "eyes": "green almond",
     "lips": "medium natural",
     "skin_tone": "light neutral",
@@ -151,4 +160,7 @@
     "seated_pose_reference": "references/seated_pose.jpg"
   }
 }
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs

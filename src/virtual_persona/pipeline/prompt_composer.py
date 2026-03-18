@@ -17,6 +17,7 @@ class PromptComposer:
         if self.CAMERA_ARCHETYPES is None:
             self.CAMERA_ARCHETYPES = {
 <<<<<<< ours
+<<<<<<< ours
                 "front_selfie": {
                     "perspective": "front phone camera at arm length",
                     "framing": "front selfie, head-and-shoulders",
@@ -84,6 +85,8 @@ class PromptComposer:
                 "mirror_selfie_mode": {"shot_archetypes": ["mirror_selfie"], "negative": ["broken mirror reflection", "floating phone", "inconsistent reflection angle"]},
                 "lifestyle_mode": {"shot_archetypes": ["candid_handheld", "friend_shot"], "negative": ["over-staged pose", "editorial fashion posture"]},
 =======
+=======
+>>>>>>> theirs
                 "front_selfie": {"perspective": "front phone camera perspective", "framing": "head-and-shoulders", "device": "smartphone handheld"},
                 "mirror_selfie": {"perspective": "mirror reflection perspective", "framing": "phone visible in reflection", "device": "mirror geometry consistent"},
                 "candid_handheld": {"perspective": "observer handheld perspective", "framing": "off-center candid", "device": "consumer smartphone"},
@@ -101,6 +104,9 @@ class PromptComposer:
                 "full-body_mode": {"shot_archetypes": ["full_body", "friend_shot"], "negative": ["floating shoe", "broken ankle angle"]},
                 "selfie_mode": {"shot_archetypes": ["front_selfie"], "negative": ["rear-camera perspective"]},
                 "mirror_selfie_mode": {"shot_archetypes": ["mirror_selfie"], "negative": ["broken mirror reflection", "floating phone"]},
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
             }
 
@@ -124,20 +130,27 @@ class PromptComposer:
         generation_mode = self._resolve_generation_mode(scene, shot_archetype)
         platform_behavior = self._platform_behavior_intent(content_type, platform_intent)
 <<<<<<< ours
+<<<<<<< ours
         identity_manager = CharacterIdentityManager()
         identity_pack = identity_manager.load_pack()
         prompt_mode = self._prompt_mode(shot_archetype, content_type, getattr(scene, "scene_moment", ""))
         framing_mode = self._framing_mode(shot_archetype, generation_mode)
 =======
+=======
+>>>>>>> theirs
         profile = context.get("character_profile") or {}
         identity_manager = CharacterIdentityManager()
         identity_pack = identity_manager.load_pack()
         prompt_mode = self._prompt_mode(shot_archetype, content_type, getattr(scene, "scene_moment", ""))
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
 
         scene_loc = getattr(scene, "location", context.get("city", "city"))
         scene_desc = getattr(scene, "scene_moment", "") or getattr(scene, "description", "daily lifestyle moment")
         item_ids_text = ", ".join(outfit_item_ids or [])
+<<<<<<< ours
 <<<<<<< ours
         reference_selection = identity_manager.select_reference_bundle(shot_archetype, generation_mode, identity_pack)
 
@@ -154,6 +167,8 @@ class PromptComposer:
         primary_anchors = ", ".join(reference_selection.get("primary_anchors", []))
         secondary_anchors = ", ".join(reference_selection.get("secondary_anchors", []))
         manual_step = self._manual_generation_step(reference_selection)
+=======
+>>>>>>> theirs
 =======
 >>>>>>> theirs
 
@@ -182,6 +197,7 @@ class PromptComposer:
             "prompt_mode": prompt_mode,
             "generation_mode": generation_mode,
 <<<<<<< ours
+<<<<<<< ours
             "framing_mode": framing_mode,
             "reference_bundle": reference_bundle,
             "reference_primary_type": reference_selection.get("requested_type", ""),
@@ -194,6 +210,9 @@ class PromptComposer:
 =======
             "reference_bundle": reference_bundle,
 >>>>>>> theirs
+=======
+            "reference_bundle": reference_bundle,
+>>>>>>> theirs
             "life_continuity_context": continuity_block,
             "scene_context": scene_action,
             "wardrobe_context": wardrobe_block,
@@ -202,7 +221,11 @@ class PromptComposer:
             "camera_physics": "handheld motion with gravity-consistent body pose",
             "sensor_realism": "smartphone dynamic range with mild grain in low light",
 <<<<<<< ours
+<<<<<<< ours
             "smartphone_behavior": "natural smartphone photo, candid realism, no editorial fashion look, no overproduced campaign lighting",
+=======
+            "smartphone_behavior": "natural smartphone photo, candid realism, no studio perfection",
+>>>>>>> theirs
 =======
             "smartphone_behavior": "natural smartphone photo, candid realism, no studio perfection",
 >>>>>>> theirs
@@ -217,7 +240,11 @@ class PromptComposer:
             "continuity_cues": continuity_block,
             "anti_generic_constraints": self._anti_generic_constraints_layer(),
 <<<<<<< ours
+<<<<<<< ours
             "persona_voice_cues": self._persona_voice_cues(context),
+=======
+            "persona_voice_cues": f"voice restraint={profile.get('voice_restrain', 'medium')}",
+>>>>>>> theirs
 =======
             "persona_voice_cues": f"voice restraint={profile.get('voice_restrain', 'medium')}",
 >>>>>>> theirs
@@ -226,6 +253,7 @@ class PromptComposer:
             "video_camera_motion": "light handheld or slow tripod drift",
         }
 
+<<<<<<< ours
 <<<<<<< ours
         prefix = blocks.get("prompt_v2_prefix", "Prompt System v5")
         final_prompt = self._build_final_prompt(
@@ -297,6 +325,8 @@ class PromptComposer:
             f"primary={primary or '-'}; secondary={secondary or '-'}; pack_ready={pack_ready}"
         )
 =======
+=======
+>>>>>>> theirs
         prefix = blocks.get("prompt_v2_prefix", "Prompt System v4")
         include_negative_prompt = content_type.lower() in {"photo", "carousel", "video", "reel", "story", "stories"}
         final_prompt = (
@@ -354,6 +384,9 @@ class PromptComposer:
             preferred = "full_body_reference"
         selected = refs.get(preferred) or refs.get("face_reference") or "fallback_character_dna"
         return f"preferred={preferred}; selected={selected}; pack_ready={getattr(identity_pack, 'ready', False)}"
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
 
     @staticmethod
@@ -369,8 +402,13 @@ class PromptComposer:
     @staticmethod
     def _wardrobe_context(outfit_summary: str, shot_archetype: str, outfit_item_ids: str) -> str:
 <<<<<<< ours
+<<<<<<< ours
         visible_scope = "upper-body focus" if shot_archetype in {"front_selfie", "close_portrait", "mirror_selfie", "seated_table_shot", "waist_up"} else "full outfit coherence"
         return f"outfit: {outfit_summary}; {visible_scope}; item_ids={outfit_item_ids}."
+=======
+        visible_scope = "upper-body focus" if shot_archetype in {"front_selfie", "close_portrait", "mirror_selfie", "seated_table_shot"} else "full outfit coherence"
+        return f"wardrobe: {outfit_summary}; {visible_scope}; item_ids={outfit_item_ids}."
+>>>>>>> theirs
 =======
         visible_scope = "upper-body focus" if shot_archetype in {"front_selfie", "close_portrait", "mirror_selfie", "seated_table_shot"} else "full outfit coherence"
         return f"wardrobe: {outfit_summary}; {visible_scope}; item_ids={outfit_item_ids}."
@@ -382,7 +420,11 @@ class PromptComposer:
         return (
             f"{camera_profile['perspective']}; {camera_profile['framing']}; {camera_profile['device']}; "
 <<<<<<< ours
+<<<<<<< ours
             f"allowed wording={camera_profile.get('allowed_wording', '')}; {self._device_profile(device_profile, shot_archetype)}"
+=======
+            f"{self._device_profile(device_profile, shot_archetype)}"
+>>>>>>> theirs
 =======
             f"{self._device_profile(device_profile, shot_archetype)}"
 >>>>>>> theirs
@@ -412,8 +454,12 @@ class PromptComposer:
     def _realism_cues(shot_archetype: str, scene_loc: str) -> str:
         return (
 <<<<<<< ours
+<<<<<<< ours
             "realism: natural smartphone photo, candid realism, lived-in environment, stable face geometry, same body proportions, "
             "natural skin texture, real fabric folds, no editorial fashion look, no overproduced campaign lighting; "
+=======
+            f"realism: natural smartphone photo, candid realism, imperfect framing, real home light, lived-in environment, natural posture; "
+>>>>>>> theirs
 =======
             f"realism: natural smartphone photo, candid realism, imperfect framing, real home light, lived-in environment, natural posture; "
 >>>>>>> theirs
@@ -443,6 +489,7 @@ class PromptComposer:
             return "story_lifestyle"
         return "instagram_feed"
 
+<<<<<<< ours
 <<<<<<< ours
     def _negative_prompt(self, shot_archetype: str, scene: Any, scene_loc: str, platform_behavior: str, generation_mode: str) -> str:
         universal = [
@@ -475,6 +522,8 @@ class PromptComposer:
         platform_negative = ["overproduced ad lighting"] if platform_behavior == "story_lifestyle" else []
         return ", ".join(dict.fromkeys(universal + shot_specific.get(shot_archetype, []) + location_specific + platform_negative + mode_negative))
 =======
+=======
+>>>>>>> theirs
     def _negative_prompt(self, shot_archetype: str, scene_loc: str, platform_behavior: str, generation_mode: str) -> str:
         universal = [
             "extra fingers", "deformed hands", "duplicate person", "plastic skin", "bad anatomy", "wrong limb placement",
@@ -495,6 +544,9 @@ class PromptComposer:
         mode_negative = self.GENERATION_MODE_REGISTRY.get(generation_mode, {}).get("negative", [])
         platform_negative = ["overproduced ad lighting"] if platform_behavior == "story_lifestyle" else []
         return ", ".join(universal + shot_specific.get(shot_archetype, []) + location_specific + platform_negative + mode_negative)
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
 
     @staticmethod
@@ -502,7 +554,11 @@ class PromptComposer:
         continuity = context.get("continuity_context") or {}
         arc = continuity.get("arc_hint", "stable_routine")
 <<<<<<< ours
+<<<<<<< ours
         hint = "same recurring woman across days with believable micro-variation"
+=======
+        hint = "steady day-to-day continuity"
+>>>>>>> theirs
 =======
         hint = "steady day-to-day continuity"
 >>>>>>> theirs
@@ -531,7 +587,10 @@ class PromptComposer:
         )
 
 <<<<<<< ours
+<<<<<<< ours
 =======
+=======
+>>>>>>> theirs
 
 >>>>>>> theirs
     @staticmethod
@@ -565,7 +624,11 @@ class PromptComposer:
     def _favorite_location_memory_layer(context: Dict[str, Any], scene_loc: str, continuity: Dict[str, Any]) -> str:
         profile = context.get("character_profile") or {}
 <<<<<<< ours
+<<<<<<< ours
         favorites = [x.strip() for x in str(profile.get("favorite_locations") or "kitchen window corner, favorite cafe table").split(",") if x.strip()]
+=======
+        favorites = [x.strip() for x in str(profile.get("favorite_locations") or "kitchen window corner, favorite café table").split(",") if x.strip()]
+>>>>>>> theirs
 =======
         favorites = [x.strip() for x in str(profile.get("favorite_locations") or "kitchen window corner, favorite café table").split(",") if x.strip()]
 >>>>>>> theirs
@@ -600,7 +663,11 @@ class PromptComposer:
         if "table" in text or "coffee" in text or "seated" in text:
             return "seated_table_shot"
 <<<<<<< ours
+<<<<<<< ours
         if "full body" in text or "full-body" in text or "head-to-toe" in text:
+=======
+        if "full body" in text or "full-body" in text:
+>>>>>>> theirs
 =======
         if "full body" in text or "full-body" in text:
 >>>>>>> theirs
@@ -624,6 +691,7 @@ class PromptComposer:
             "night": "mixed city and practical interior light",
         }.get(str(time_of_day or "").lower(), "natural soft light")
 
+<<<<<<< ours
 <<<<<<< ours
     @staticmethod
     def _scene_action(scene: Any, scene_desc: str, scene_loc: str) -> str:
@@ -738,6 +806,8 @@ class PromptComposer:
 
 =======
 >>>>>>> theirs
+=======
+>>>>>>> theirs
     BANNED_SYNTHETIC_PATTERNS: tuple[str, ...] = (
         "beautiful young woman",
         "photorealistic 8k",
@@ -761,5 +831,8 @@ class PromptComposer:
         "cinematic lighting",
         "hyper-detailed beauty",
         "editorial symmetry",
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
     )

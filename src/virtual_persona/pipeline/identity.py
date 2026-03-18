@@ -8,7 +8,10 @@ from typing import Any, Dict, List
 
 IDENTITY_ROOT = Path("data/character_identity")
 <<<<<<< ours
+<<<<<<< ours
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+=======
+>>>>>>> theirs
 =======
 >>>>>>> theirs
 
@@ -19,7 +22,10 @@ class IdentityPack:
     manifest: Dict[str, Any] = field(default_factory=dict)
     references: Dict[str, str] = field(default_factory=dict)
 <<<<<<< ours
+<<<<<<< ours
     reference_types: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+=======
+>>>>>>> theirs
 =======
 >>>>>>> theirs
     missing_required: List[str] = field(default_factory=list)
@@ -39,6 +45,7 @@ class CharacterIdentityManager:
         "walking_pose_reference",
         "seated_pose_reference",
     ]
+<<<<<<< ours
 <<<<<<< ours
     DEFAULT_FOLDER_MAP = {
         "base": "references/base",
@@ -80,6 +87,8 @@ class CharacterIdentityManager:
     }
 =======
 >>>>>>> theirs
+=======
+>>>>>>> theirs
 
     def __init__(self, root: Path | str = IDENTITY_ROOT) -> None:
         self.root = Path(root)
@@ -94,6 +103,7 @@ class CharacterIdentityManager:
         manifest_path = self.root / "character_identity_profile.json"
         manifest = self._read_json(manifest_path, fallback={})
 <<<<<<< ours
+<<<<<<< ours
         folder_map = self._folder_map(manifest)
         reference_types = self._reference_types(manifest, folder_map)
         refs = self._legacy_reference_pack(manifest, reference_types)
@@ -106,11 +116,16 @@ class CharacterIdentityManager:
             missing_required=missing,
         )
 =======
+=======
+>>>>>>> theirs
 
         refs = manifest.get("reference_pack") if isinstance(manifest.get("reference_pack"), dict) else {}
         refs = {k: str(v) for k, v in refs.items()}
         missing = [key for key in self.REQUIRED_REFERENCE_KEYS if not refs.get(key)]
         return IdentityPack(root=self.root, manifest=manifest, references=refs, missing_required=missing)
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
 
     @staticmethod
@@ -173,6 +188,7 @@ class CharacterIdentityManager:
             f"preferred_reference={preferred_ref}; {cue}."
         )
 
+<<<<<<< ours
 <<<<<<< ours
     def select_reference_bundle(
         self,
@@ -322,10 +338,15 @@ def default_identity_manifest() -> Dict[str, Any]:
     return {
         "version": 2,
 =======
+=======
+>>>>>>> theirs
 
 def default_identity_manifest() -> Dict[str, Any]:
     return {
         "version": 1,
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
         "character_dna": {
             "age": "22",
@@ -359,6 +380,7 @@ def default_identity_manifest() -> Dict[str, Any]:
             "seated_pose_reference": "",
         },
 <<<<<<< ours
+<<<<<<< ours
         "reference_manifest": {
             "schema": "character_identity_pack_v2",
             "folder_mapping": {
@@ -381,6 +403,9 @@ def default_identity_manifest() -> Dict[str, Any]:
             },
         },
     }
+=======
+    }
+>>>>>>> theirs
 =======
     }
 >>>>>>> theirs
