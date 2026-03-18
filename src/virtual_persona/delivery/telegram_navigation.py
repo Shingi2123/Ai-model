@@ -253,23 +253,23 @@ def build_plan_keyboard(items: list[PublishingPlanItem], target_date: date) -> l
     rows = []
     day = target_date.isoformat()
     for idx, item in enumerate(items):
-        rows.append([(f"POST {idx + 1}", f"p:{day}:{item.publication_id}")])
-    rows.append([("Refresh", f"plan:{day}")])
+        rows.append([(f"📌 Пост {idx + 1}", f"p:{day}:{item.publication_id}")])
+    rows.append([("🔄 Обновить", f"plan:{day}")])
     return rows
 
 
 def build_post_keyboard(target_date: date, publication_id: str) -> list[list[tuple[str, str]]]:
     day = target_date.isoformat()
     return [
-        [("Prompt", f"pv:{day}:{publication_id}:prompt"), ("Caption", f"pv:{day}:{publication_id}:caption")],
-        [("Moment", f"pv:{day}:{publication_id}:moment")],
-        [("Back to plan", f"back:plan:{day}")],
+        [("🖼 Prompt", f"pv:{day}:{publication_id}:prompt"), ("✍️ Подпись", f"pv:{day}:{publication_id}:caption")],
+        [("🎯 Момент", f"pv:{day}:{publication_id}:moment")],
+        [("⬅️ К плану", f"back:plan:{day}")],
     ]
 
 
 def build_detail_keyboard(target_date: date, publication_id: str) -> list[list[tuple[str, str]]]:
     day = target_date.isoformat()
-    return [[("Back to post", f"back:post:{day}:{publication_id}"), ("Back to plan", f"back:plan:{day}")]]
+    return [[("⬅️ К посту", f"back:post:{day}:{publication_id}"), ("📅 К плану", f"back:plan:{day}")]]
 
 
 def parse_callback(data: str) -> ParsedCallback:

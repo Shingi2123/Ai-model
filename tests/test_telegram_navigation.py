@@ -58,7 +58,7 @@ def test_build_plan_keyboard_uses_publication_id_callback():
     items = [_item(1), _item(2)]
     keyboard = build_plan_keyboard(items, date(2026, 3, 12))
 
-    assert [row[0][0] for row in keyboard[:2]] == ["POST 1", "POST 2"]
+    assert [row[0][0] for row in keyboard[:2]] == ["📌 Пост 1", "📌 Пост 2"]
     assert keyboard[0][0][1] == "p:2026-03-12:pub-1"
     assert keyboard[-1][0][1] == "plan:2026-03-12"
 
@@ -161,7 +161,7 @@ def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():
     keyboard = build_plan_keyboard([], date(2026, 3, 12))
 
     assert "Пока нет запланированных постов" in plan_text
-    assert keyboard == [[("Refresh", "plan:2026-03-12")]]
+    assert keyboard == [[("🔄 Обновить", "plan:2026-03-12")]]
 
 
 def test_plan_screen_with_single_post_shows_post_card_not_empty_state():
@@ -179,7 +179,7 @@ def test_plan_screen_with_single_post_shows_post_card_not_empty_state():
 
     assert "📌 POST #1" in plan_text
     assert "Пока нет запланированных постов" not in plan_text
-    assert keyboard[0][0][0] == "POST 1"
+    assert keyboard[0][0][0] == "📌 Пост 1"
 
 
 def test_plan_screen_hides_unknown_city_and_keeps_compact_meta():
@@ -223,6 +223,12 @@ def test_post_and_detail_keyboards_keep_same_post_identity():
     post_keyboard = build_post_keyboard(date(2026, 3, 12), "pub-1")
     detail_keyboard = build_detail_keyboard(date(2026, 3, 12), "pub-1")
 
+    assert post_keyboard[0][0][0] == "🖼 Prompt"
+    assert post_keyboard[0][1][0] == "✍️ Подпись"
+    assert post_keyboard[1][0][0] == "🎯 Момент"
+    assert post_keyboard[2][0][0] == "⬅️ К плану"
+    assert detail_keyboard[0][0][0] == "⬅️ К посту"
+    assert detail_keyboard[0][1][0] == "📅 К плану"
     assert post_keyboard[0][0][1] == "pv:2026-03-12:pub-1:prompt"
     assert post_keyboard[2][0][1] == "back:plan:2026-03-12"
     assert detail_keyboard[0][0][1] == "back:post:2026-03-12:pub-1"
