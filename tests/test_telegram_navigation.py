@@ -5,12 +5,14 @@ from virtual_persona.delivery.telegram_navigation import (
     build_detail_keyboard,
     build_plan_keyboard,
     build_post_keyboard,
+    deserialize_context,
     format_caption_screen,
     format_plan_screen,
     format_post_screen,
     format_prompt_screen,
     normalize_plan_items,
     parse_callback,
+    serialize_context,
 )
 from virtual_persona.models.domain import PublishingPlanItem
 
@@ -42,6 +44,7 @@ def _item(index: int = 1, publication_id: str | None = None) -> PublishingPlanIt
         prompt_mode="compact",
         identity_mode="reference_manifest",
         reference_type="selfie",
+        reference_pack_type="identity_lock",
         primary_anchors="refs/selfies/, refs/base/",
         secondary_anchors="refs/identity_lock/",
         manual_generation_step="Attach 2-3 primary anchors, add 1 secondary anchor if the generator starts drifting.",
@@ -109,25 +112,38 @@ def test_detail_views_have_fallback_for_empty_prompt_and_caption():
     prompt_text = format_prompt_screen(empty, 0)
     caption_text = format_caption_screen(empty, 0)
 
-    assert "Нет сохранённого промта" in prompt_text
+    assert "Нет сохраненного prompt" in prompt_text
     assert "No negative prompt" in prompt_text
     assert "No saved caption" in caption_text
 
 
-def test_prompt_screen_contains_required_prompt_metadata():
+def test_prompt_screen_uses_new_workflow_order_and_aliases():
     text = format_prompt_screen(_item(), 0)
 
-    assert "Подпись" in text
-    assert "Короткая подпись" in text
-    assert "Промт" in text
-    assert "Negative prompt" in text
-    assert "Тип кадра" in text
-    assert "Режим генерации" in text
-    assert "Фрейминг" in text
-    assert "Тип референсов" in text
-    assert "Основные референсы" in text
-    assert "Как использовать" in text
-    assert "Прикрепите 2-3 основных референса" in text
+    sections = [
+        "📌 POST #1 - Instagram / Photo",
+        "🎯 Генерация",
+        "🧠 Референсы",
+        "🖼 Prompt",
+        "🚫 Negative prompt",
+        "✍️ Подпись",
+        "📝 Короткая подпись",
+        "⚙️ Дополнительно",
+    ]
+
+    positions = [text.index(section) for section in sections]
+    assert positions == sorted(positions)
+    assert "- Тип кадра: mirror_selfie" in text
+    assert "- Фрейминг: mirror selfie, head-and-shoulders" in text
+    assert "- Тип референсов: selfie" in text
+    assert "- Режим генерации: mirror_selfie_mode" in text
+    assert "- Основные: selfies, base" in text
+    assert "- Дополнительные: identity_lock" in text
+    assert "refs/selfies/" not in text
+    assert "platform=Instagram" not in text
+    assert "- Платформа: Instagram" in text
+    assert "- Prompt mode: compact" in text
+    assert "- Identity mode: reference_manifest" in text
 
 
 def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():
@@ -200,7 +216,24 @@ def test_prompt_screen_is_copy_ready_and_does_not_leak_prompt_package_json():
 
     text = format_prompt_screen(item, 0)
 
-    assert "```" in text
-    assert "скопировать" in text
+    assert text.count("```") == 8
     assert "prompt_package_json" not in text
     assert "must_not_render" not in text
+
+
+def test_serialize_context_preserves_detail_screen_metadata():
+    context = PlanScreenContext(
+        target_date=date(2026, 3, 12),
+        city="Paris",
+        day_type="work_day",
+        narrative_phase="recovery_phase",
+        persona_timezone="Europe/Paris",
+        user_timezone="Asia/Pavlodar",
+    )
+    item = _item()
+
+    raw = serialize_context(context, [item])
+    _, items = deserialize_context(raw)
+
+    assert items[0].identity_mode == "reference_manifest"
+    assert items[0].reference_pack_type == "identity_lock"

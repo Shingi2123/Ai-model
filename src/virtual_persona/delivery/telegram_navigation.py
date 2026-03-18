@@ -76,6 +76,32 @@ def _display_value(value: str | None, fallback: str) -> str:
     return (value or "").strip() or fallback
 
 
+def _format_field(label: str, value: str) -> str:
+    return f"- {label}: {value}"
+
+
+def _normalize_reference_aliases(value: str | None) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+
+    aliases: list[str] = []
+    seen: set[str] = set()
+    for chunk in raw.replace(";", ",").split(","):
+        token = chunk.strip().replace("\\", "/")
+        if not token:
+            continue
+        token = token.rstrip("/")
+        parts = [part for part in token.split("/") if part and part != "."]
+        alias = parts[-1] if parts else token
+        if alias.lower() == "refs" and len(parts) > 1:
+            alias = parts[-2]
+        if alias not in seen:
+            seen.add(alias)
+            aliases.append(alias)
+    return ", ".join(aliases)
+
+
 def _format_manual_generation_step(step: str | None) -> str:
     text = (step or "").strip()
     if not text:
@@ -101,50 +127,70 @@ def _format_manual_generation_step(step: str | None) -> str:
 
 
 def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
-    prompt = _display_value(item.prompt_text, "Нет сохранённого промта для этого поста.")
-    caption = _display_value(item.caption_text, "Нет сохранённой подписи.")
+    prompt = _display_value(item.prompt_text, "Нет сохраненного prompt для этого поста.")
+    caption = _display_value(item.caption_text, "Нет сохраненной подписи.")
     short_caption = _display_value(item.short_caption or item.caption_text, "Нет короткой подписи.")
     negative = _display_value(item.negative_prompt, "No negative prompt.")
     shot_archetype = _display_value(item.shot_archetype, "Не задано")
-    platform_intent = _display_value(item.platform_intent, "Не задано")
     generation_mode = _display_value(item.generation_mode, "Не задано")
     framing_mode = _display_value(item.framing_mode, "Не задано")
     prompt_mode = _display_value(item.prompt_mode, "Не задано")
     identity_mode = _display_value(item.identity_mode, "Не задано")
     reference_type = _display_value(item.reference_type or item.reference_pack_type, "Не задано")
-    primary_anchors = _display_value(item.primary_anchors, "Нет основных референсов")
-    secondary_anchors = _display_value(item.secondary_anchors, "Нет дополнительных референсов")
+    primary_anchors = _display_value(_normalize_reference_aliases(item.primary_anchors), "Нет основных референсов")
+    secondary_anchors = _display_value(
+        _normalize_reference_aliases(item.secondary_anchors),
+        "Нет дополнительных референсов",
+    )
     manual_generation_step = _format_manual_generation_step(item.manual_generation_step)
+
+    generation_block = "\n".join(
+        [
+            _format_field("Тип кадра", shot_archetype),
+            _format_field("Фрейминг", framing_mode),
+            _format_field("Тип референсов", reference_type),
+            _format_field("Режим генерации", generation_mode),
+        ]
+    )
+    references_block = "\n".join(
+        [
+            _format_field("Основные", primary_anchors),
+            _format_field("Дополнительные", secondary_anchors),
+            _format_field("Как использовать", manual_generation_step),
+        ]
+    )
+    extra_block = "\n".join(
+        [
+            _format_field("Платформа", item.platform),
+            _format_field("Prompt mode", prompt_mode),
+            _format_field("Identity mode", identity_mode),
+        ]
+    )
+
     return (
-        f"{_format_detail_header(item, post_index)}\n\n"
-        "Технические параметры:\n"
-        f"- Тип кадра: {shot_archetype}\n"
-        f"- Режим генерации: {generation_mode}\n"
-        f"- Фрейминг: {framing_mode}\n"
-        f"- Режим промта: {prompt_mode}\n"
-        f"- Режим identity: {identity_mode}\n"
-        f"- Тип референсов: {reference_type}\n"
-        f"- Платформенный режим: {platform_intent}\n\n"
-        "Референсы для генерации:\n"
-        f"- Основные референсы: {primary_anchors}\n"
-        f"- Дополнительные референсы: {secondary_anchors}\n"
-        f"- Как использовать: {manual_generation_step}\n\n"
-        "Подпись (скопировать):\n"
-        "```\n"
-        f"{caption}\n"
-        "```\n\n"
-        "Короткая подпись (скопировать):\n"
-        "```\n"
-        f"{short_caption}\n"
-        "```\n\n"
-        "Промт (скопировать):\n"
+        f"📌 {_format_detail_header(item, post_index)}\n\n"
+        "🎯 Генерация\n"
+        f"{generation_block}\n\n"
+        "🧠 Референсы\n"
+        f"{references_block}\n\n"
+        "🖼 Prompt\n"
         "```\n"
         f"{prompt}\n"
         "```\n\n"
-        "Negative prompt (copy-ready):\n"
+        "🚫 Negative prompt\n"
         "```\n"
         f"{negative}\n"
-        "```"
+        "```\n\n"
+        "✍️ Подпись\n"
+        "```\n"
+        f"{caption}\n"
+        "```\n\n"
+        "📝 Короткая подпись\n"
+        "```\n"
+        f"{short_caption}\n"
+        "```\n\n"
+        "⚙️ Дополнительно\n"
+        f"{extra_block}"
     )
 
 
@@ -268,7 +314,9 @@ def serialize_context(context: PlanScreenContext, items: list[PublishingPlanItem
                 "generation_mode": item.generation_mode,
                 "framing_mode": item.framing_mode,
                 "prompt_mode": item.prompt_mode,
+                "identity_mode": item.identity_mode,
                 "reference_type": item.reference_type,
+                "reference_pack_type": item.reference_pack_type,
                 "primary_anchors": item.primary_anchors,
                 "secondary_anchors": item.secondary_anchors,
                 "manual_generation_step": item.manual_generation_step,
@@ -319,7 +367,9 @@ def deserialize_context(raw: dict) -> tuple[PlanScreenContext, list[PublishingPl
                 generation_mode=str(row.get("generation_mode", "")),
                 framing_mode=str(row.get("framing_mode", "")),
                 prompt_mode=str(row.get("prompt_mode", "")),
+                identity_mode=str(row.get("identity_mode", "")),
                 reference_type=str(row.get("reference_type", "")),
+                reference_pack_type=str(row.get("reference_pack_type", "")),
                 primary_anchors=str(row.get("primary_anchors", "")),
                 secondary_anchors=str(row.get("secondary_anchors", "")),
                 manual_generation_step=str(row.get("manual_generation_step", "")),
@@ -368,7 +418,9 @@ def item_from_row(row: dict, fallback_date: date) -> PublishingPlanItem:
         generation_mode=str(row.get("generation_mode", "")),
         framing_mode=str(row.get("framing_mode", "")),
         prompt_mode=str(row.get("prompt_mode", "")),
+        identity_mode=str(row.get("identity_mode", "")),
         reference_type=str(row.get("reference_type", "")),
+        reference_pack_type=str(row.get("reference_pack_type", "")),
         primary_anchors=str(row.get("primary_anchors", "")),
         secondary_anchors=str(row.get("secondary_anchors", "")),
         manual_generation_step=str(row.get("manual_generation_step", "")),
