@@ -290,6 +290,23 @@ def test_google_store_publishing_plan_uses_actual_sheet_header_order():
     assert values[28] == "reference_manifest"
 
 
+def test_google_store_publishing_plan_populates_legacy_prompt_column():
+    store = HelperGoogleStore()
+    ws = store._ws_map["publishing_plan"]
+    ws.header = ["publication_id", "prompt", "prompt_text"]
+
+    row = {
+        "publication_id": "pub-1",
+        "prompt_text": "Canonical final prompt",
+    }
+
+    store.append_publishing_plan(row)
+
+    values = ws.rows[0]
+    assert values[1] == "Canonical final prompt"
+    assert values[2] == "Canonical final prompt"
+
+
 def test_google_store_run_log_persists_structured_trace_fields():
     store = HelperGoogleStore()
     ws = store._ws_map["run_log"]

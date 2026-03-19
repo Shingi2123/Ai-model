@@ -120,6 +120,17 @@ def test_detail_views_have_fallback_for_empty_prompt_and_caption():
     assert "пока нет сохранённой подписи" in caption_text
 
 
+def test_prompt_screen_falls_back_to_final_prompt_from_prompt_package_json():
+    item = _item()
+    item.prompt_text = ""
+    item.prompt_package_json = '{"final_prompt":"A realistic candid friend-shot walking through the terminal."}'
+
+    prompt_text = format_prompt_screen(item, 0)
+
+    assert "A realistic candid friend-shot walking through the terminal." in prompt_text
+    assert "Нет сохранённого prompt" not in prompt_text
+
+
 def test_prompt_screen_uses_new_workflow_order_and_aliases():
     text = format_prompt_screen(_item(), 0)
 

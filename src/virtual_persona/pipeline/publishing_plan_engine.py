@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
+import logging
 from datetime import date, datetime
 from typing import Any, Dict, List
 
@@ -22,6 +23,9 @@ class RankedMoment:
     scene: DayScene
     score: float
     reasons: List[str]
+
+
+logger = logging.getLogger(__name__)
 
 
 class PublishingPlanEngine:
@@ -65,7 +69,7 @@ class PublishingPlanEngine:
             scene = ranked_moment.scene
             content_type = content_types[idx]
             prompt_meta = self._pick_prompt_package(package, scene, content_type)
-            prompt_text = self._pick_prompt_text(scene, prompt_meta)
+            final_prompt = str(prompt_meta.get("final_prompt") or "").strip()
             caption = package.content.post_caption
             selection_reason = self._selection_reason(scene)
             item = PublishingPlanItem(
@@ -85,7 +89,7 @@ class PublishingPlanEngine:
                 activity_type=scene.activity or "daily_life",
                 outfit_ids=list(package.outfit.item_ids),
                 prompt_type=content_type,
-                prompt_text=self._required_text(prompt_text, scene.scene_moment or scene.description or "daily lifestyle scene"),
+                prompt_text="",
                 negative_prompt=str(prompt_meta.get("negative_prompt", "")),
                 prompt_package_json=json.dumps(prompt_meta, ensure_ascii=False),
                 shot_archetype=str(prompt_meta.get("shot_archetype", "")),
@@ -107,6 +111,11 @@ class PublishingPlanEngine:
                 identity_mode=str(prompt_meta.get("identity_mode", "")),
                 reference_pack_type=str(prompt_meta.get("reference_pack_type", "")),
             )
+            item.prompt_text = self._required_text(
+                final_prompt,
+                scene.scene_moment or scene.description or "daily lifestyle scene",
+            )
+            logger.info(f"[PROMPT_SAVE] {item.publication_id} prompt saved: {bool(item.prompt_text)}")
             items.append(item)
 
         package.publishing_plan = items

@@ -248,11 +248,18 @@ def resolve_canonical_prompt(
             _extract_value(row, "publication_id") or "<missing>",
         )
 
+    resolved_prompt = ""
+    prompt_source = "missing"
     if meta_prompt and not meta_legacy:
-        return meta_prompt, "prompt_package_json.final_prompt", row_legacy or meta_legacy, meta_version or "v5"
-    if row_prompt and not row_legacy:
-        return row_prompt, "item.prompt_text", row_legacy or meta_legacy, meta_version
-    return default, "missing", row_legacy or meta_legacy, meta_version
+        resolved_prompt = meta_prompt
+        prompt_source = "prompt_package_json.final_prompt"
+    elif row_prompt and not row_legacy:
+        resolved_prompt = row_prompt
+        prompt_source = "item.prompt_text"
+    else:
+        resolved_prompt = default
+
+    return resolved_prompt, prompt_source, row_legacy or meta_legacy, meta_version or ("v5" if resolved_prompt == meta_prompt and resolved_prompt else "")
 
 
 def _resolve_field(
@@ -349,6 +356,8 @@ def normalize_publishing_plan_payload(
         default=caption_text,
     )
 
+    resolved_prompt, _, _, _ = resolve_canonical_prompt(row)
+
     return {
         "publication_id": _extract_value(row, "publication_id"),
         "date": target_date,
@@ -366,7 +375,7 @@ def normalize_publishing_plan_payload(
         "activity_type": _extract_value(row, "activity_type"),
         "outfit_ids": outfit_ids,
         "prompt_type": _extract_value(row, "prompt_type"),
-        "prompt_text": resolve_canonical_prompt(row)[0],
+        "prompt_text": resolved_prompt,
         "negative_prompt": _resolve_field(
             row,
             prompt_meta,

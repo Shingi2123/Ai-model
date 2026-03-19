@@ -148,7 +148,9 @@ class LocalStateStore:
     def append_publishing_plan(self, row: Dict[str, Any]) -> None:
         path = self.base_dir / "publishing_plan.json"
         rows = self._read_json(path, [])
-        rows.append(row)
+        payload = dict(row)
+        payload["prompt"] = payload.get("prompt_text", "")
+        rows.append(payload)
         self._write_json(path, rows)
 
     def reset_day_records(self, target_date: str) -> None:
@@ -633,7 +635,9 @@ class GoogleSheetsStateStore:
     def append_publishing_plan(self, row: Dict[str, Any]) -> None:
         headers = list(PUBLISHING_PLAN_HEADERS)
         self._ensure_headers("publishing_plan", headers)
-        self._append_dict_row("publishing_plan", headers, row, prefer_sheet_header_order=True)
+        payload = dict(row)
+        payload["prompt"] = payload.get("prompt_text", "")
+        self._append_dict_row("publishing_plan", headers, payload, prefer_sheet_header_order=True)
 
     def load_posting_rules(self) -> List[Dict[str, Any]]:
         if not self.available():

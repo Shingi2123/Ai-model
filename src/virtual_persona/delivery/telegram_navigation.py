@@ -5,7 +5,12 @@ from dataclasses import dataclass
 from datetime import date
 
 from virtual_persona.delivery.publishing_formatter import _convert_time_for_user, _post_header_emoji
-from virtual_persona.delivery.publishing_plan_normalizer import format_reference_aliases, item_from_payload, resolve_canonical_prompt
+from virtual_persona.delivery.publishing_plan_normalizer import (
+    format_reference_aliases,
+    item_from_payload,
+    load_prompt_meta,
+    resolve_canonical_prompt,
+)
 from virtual_persona.models.domain import PublishingPlanItem
 
 
@@ -136,7 +141,13 @@ def _format_manual_generation_step(step: str | None) -> str:
 
 def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
     prompt_value, prompt_source, legacy_detected, prompt_format_version = resolve_canonical_prompt(item)
-    prompt = _display_value(prompt_value, "Нет сохранённого prompt для этого поста.")
+    prompt = (prompt_value or "").strip()
+    if not prompt:
+        prompt_meta = load_prompt_meta(item)
+        prompt = str(prompt_meta.get("final_prompt") or "").strip()
+        if prompt:
+            prompt_source = "prompt_package_json.final_prompt_fallback"
+    prompt = _display_value(prompt, "Нет сохранённого prompt для этого поста.")
     caption = _display_value(item.caption_text, "Нет сохранённой подписи.")
     short_caption = _display_value(item.short_caption or item.caption_text, "Нет короткой подписи.")
     negative = _display_value(item.negative_prompt, "No negative prompt.")
