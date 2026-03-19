@@ -140,13 +140,14 @@ def test_google_store_reuses_cached_worksheet_handle():
     assert store._worksheet_fetch_count == 1
 
 
-def test_telegram_state_view_exposes_only_needed_methods():
+def test_telegram_state_view_proxies_base_store_methods_needed_for_generation():
     base = build_state_store(SettingsStub(), mode="telegram")
     assert isinstance(base, TelegramStateView)
     assert hasattr(base, "load_publishing_plan")
     assert hasattr(base, "load_cities")
     assert hasattr(base, "load_life_state")
-    assert not hasattr(base, "load_wardrobe")
+    assert hasattr(base, "load_character_profile")
+    assert hasattr(base, "load_calendar")
 
 
 def test_google_store_reset_day_records_removes_target_date_rows():

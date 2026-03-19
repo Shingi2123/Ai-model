@@ -1046,7 +1046,8 @@ class GoogleSheetsStateStore:
 class TelegramStateView:
     """Lightweight state view for Telegram polling mode.
 
-    Exposes only the worksheets needed for displaying publication plan data.
+    Keeps Telegram polling lightweight while proxying the underlying store API
+    needed to render or regenerate today's plan.
     """
 
     def __init__(self, base_store: Any) -> None:
@@ -1069,6 +1070,9 @@ class TelegramStateView:
         if hasattr(self._base_store, "load_life_state"):
             return self._base_store.load_life_state()
         return []
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._base_store, name)
 
 
 def build_state_store(settings, mode: str = "full"):
