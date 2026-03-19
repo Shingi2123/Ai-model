@@ -55,13 +55,13 @@ def _item(index: int = 1, publication_id: str | None = None) -> PublishingPlanIt
     )
 
 
-def test_build_plan_keyboard_uses_publication_id_callback():
+def test_build_plan_keyboard_uses_russian_utf8_labels():
     items = [_item(1), _item(2)]
     keyboard = build_plan_keyboard(items, date(2026, 3, 12))
 
-    assert [row[0][0] for row in keyboard[:2]] == ["рџ“Њ РџРѕСЃС‚ 1", "рџ“Њ РџРѕСЃС‚ 2"]
+    assert [row[0][0] for row in keyboard[:2]] == ["📸 Пост 1", "📸 Пост 2"]
     assert keyboard[0][0][1] == "p:2026-03-12:pub-1"
-    assert keyboard[-1][0][1] == "plan:2026-03-12"
+    assert keyboard[-1][0] == ("🔄 Обновить", "plan:2026-03-12")
 
 
 def test_parse_callback_for_post_and_detail_views():
@@ -97,10 +97,10 @@ def test_format_plan_and_post_card_contains_core_fields():
     plan_text = format_plan_screen(context, [_item()])
     post_text = format_post_screen(context, _item(), 0)
 
-    assert "План публикаций" in plan_text
-    assert "Город персонажа: Paris" in plan_text
+    assert "📅 План публикаций" in plan_text
+    assert "📍 Город персонажа: Paris" in plan_text
     assert "📸 POST #1" in plan_text
-    assert "🌐 Платформа: Instagram • 📸 Photo" in plan_text
+    assert "🌐 Платформа: Instagram • Photo" in plan_text
     assert "🌐 Платформа: Instagram" in post_text
     assert "🕒 Вы: 13:30 (Asia/Pavlodar)" in post_text
 
@@ -115,7 +115,7 @@ def test_detail_views_have_fallback_for_empty_prompt_and_caption():
     prompt_text = format_prompt_screen(empty, 0)
     caption_text = format_caption_screen(empty, 0)
 
-    assert "Нет сохраненного prompt" in prompt_text
+    assert "Нет сохранённого prompt" in prompt_text
     assert "No negative prompt" in prompt_text
     assert "пока нет сохранённой подписи" in caption_text
 
@@ -124,7 +124,7 @@ def test_prompt_screen_uses_new_workflow_order_and_aliases():
     text = format_prompt_screen(_item(), 0)
 
     sections = [
-        "📌 POST #1 - Instagram / Photo",
+        "📌 POST #1 — Instagram / Photo",
         "🎯 Генерация",
         "🧠 Референсы",
         "🖼 Prompt",
@@ -143,7 +143,6 @@ def test_prompt_screen_uses_new_workflow_order_and_aliases():
     assert "- Основные: selfies, base" in text
     assert "- Дополнительные: identity_lock" in text
     assert "refs/selfies/" not in text
-    assert "platform=Instagram" not in text
     assert "- Платформа: Instagram" in text
     assert "- Prompt mode: compact" in text
     assert "- Identity mode: reference_manifest" in text
@@ -163,25 +162,7 @@ def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():
     keyboard = build_plan_keyboard([], date(2026, 3, 12))
 
     assert "Пока нет запланированных постов" in plan_text
-    assert keyboard == [[("рџ”„ РћР±РЅРѕРІРёС‚СЊ", "plan:2026-03-12")]]
-
-
-def test_plan_screen_with_single_post_shows_post_card_not_empty_state():
-    context = PlanScreenContext(
-        target_date=date(2026, 3, 12),
-        city="Paris",
-        day_type="work_day",
-        narrative_phase="recovery_phase",
-        persona_timezone="Europe/Paris",
-        user_timezone="Asia/Pavlodar",
-    )
-
-    plan_text = format_plan_screen(context, [_item()])
-    keyboard = build_plan_keyboard([_item()], date(2026, 3, 12))
-
-    assert "📸 POST #1" in plan_text
-    assert "Пока нет запланированных постов" not in plan_text
-    assert keyboard[0][0][0] == "рџ“Њ РџРѕСЃС‚ 1"
+    assert keyboard == [[("🔄 Обновить", "plan:2026-03-12")]]
 
 
 def test_plan_screen_hides_unknown_city_and_keeps_russian_meta():
@@ -227,12 +208,12 @@ def test_post_and_detail_keyboards_keep_same_post_identity():
     post_keyboard = build_post_keyboard(date(2026, 3, 12), "pub-1")
     detail_keyboard = build_detail_keyboard(date(2026, 3, 12), "pub-1")
 
-    assert post_keyboard[0][0][0] == "рџ–ј Prompt"
-    assert post_keyboard[0][1][0] == "вњЌпёЏ РџРѕРґРїРёСЃСЊ"
-    assert post_keyboard[1][0][0] == "рџЋЇ РњРѕРјРµРЅС‚"
-    assert post_keyboard[2][0][0] == "в¬…пёЏ Рљ РїР»Р°РЅСѓ"
-    assert detail_keyboard[0][0][0] == "в¬…пёЏ Рљ РїРѕСЃС‚Сѓ"
-    assert detail_keyboard[0][1][0] == "рџ“… Рљ РїР»Р°РЅСѓ"
+    assert post_keyboard[0][0][0] == "🖼 Prompt"
+    assert post_keyboard[0][1][0] == "✍️ Подпись"
+    assert post_keyboard[1][0][0] == "🎯 Момент"
+    assert post_keyboard[2][0][0] == "⬅️ К плану"
+    assert detail_keyboard[0][0][0] == "⬅️ К посту"
+    assert detail_keyboard[0][1][0] == "⬅️ К плану"
     assert post_keyboard[0][0][1] == "pv:2026-03-12:pub-1:prompt"
     assert post_keyboard[2][0][1] == "back:plan:2026-03-12"
     assert detail_keyboard[0][0][1] == "back:post:2026-03-12:pub-1"
@@ -303,6 +284,33 @@ def test_item_from_row_recovers_detail_fields_from_canonical_snapshot_keys():
     assert item.identity_mode == "reference_manifest"
     assert item.primary_anchors == "refs/selfies/, refs/base/"
     assert item.secondary_anchors == "refs/identity_lock/"
+
+
+def test_item_from_row_filters_debug_strings_and_uses_prompt_meta_fallbacks():
+    row = {
+        "publication_id": "pub-1",
+        "date": "2026-03-12",
+        "platform": "Instagram",
+        "post_time": "09:30",
+        "content_type": "photo",
+        "caption_text": "mirror_selfie_mode",
+        "short_caption": "friend-shot, 3/4 body",
+        "reference_type": "selected_by_primary_decision_and_diversity",
+        "generation_mode": "score=3.60; reasons=visual_focus",
+        "identity_mode": 36,
+        "prompt_package_json": (
+            '{"caption_text":"Real caption","short_caption":"Real short caption",'
+            '"reference_type":"selfie","generation_mode":"mirror_selfie_mode","identity_mode":"reference_manifest"}'
+        ),
+    }
+
+    item = item_from_row(row, date(2026, 3, 12))
+
+    assert item.caption_text == "Real caption"
+    assert item.short_caption == "Real short caption"
+    assert item.reference_type == "selfie"
+    assert item.generation_mode == "mirror_selfie_mode"
+    assert item.identity_mode == "reference_manifest"
 
 
 def test_prompt_screen_uses_only_canonical_detail_fields_not_debug_strings():

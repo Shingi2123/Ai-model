@@ -46,6 +46,7 @@ from virtual_persona.delivery.telegram_navigation import (
 from virtual_persona.pipeline.orchestrator import PipelineOrchestrator
 from virtual_persona.storage.state_store import TelegramStateView
 
+
 settings = AppSettings.from_env()
 orchestrator = PipelineOrchestrator(settings, mode="telegram")
 if not isinstance(orchestrator.state, TelegramStateView):
@@ -53,6 +54,7 @@ if not isinstance(orchestrator.state, TelegramStateView):
         "telegram_polling must run with TelegramStateView (lightweight state); "
         f"got {type(orchestrator.state).__name__}"
     )
+
 GET_PLAN_BUTTON = "📅 Получить план на сегодня"
 logger = logging.getLogger(__name__)
 
@@ -91,8 +93,7 @@ def _load_persisted_plan(target_date: date) -> tuple[PlanScreenContext, list]:
 
 def _ensure_today_plan() -> tuple[PlanScreenContext, list]:
     today = date.today()
-    plan_context, items = _load_persisted_plan(today)
-    return plan_context, items
+    return _load_persisted_plan(today)
 
 
 def _render_plan(context: PlanScreenContext, items: list):
@@ -148,8 +149,7 @@ def _load_today_package_and_plan():
     plan_context, items = _load_persisted_plan(today)
     if not items:
         package = orchestrator.generate_day(target_date=today)
-        plan = package.publishing_plan or []
-        return package, plan
+        return package, package.publishing_plan or []
     package = orchestrator._load_frozen_day(today)
     if package is None:
         package = orchestrator.generate_day(target_date=today)
@@ -279,8 +279,6 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         parsed = parse_callback(query.data or "")
         logger.debug("telegram_callback start view=%s data=%s", parsed.view, query.data)
 
-        # IMPORTANT: use only safe wrappers in callbacks to avoid BadRequest crashes
-        # from stale callback ids or unchanged message content.
         answer_ok = await safe_answer_callback(query)
         logger.debug("telegram_callback answer_callback %s view=%s", "ok" if answer_ok else "skipped", parsed.view)
 
@@ -312,6 +310,7 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             items_source,
             "caption_text,short_caption,reference_type,generation_mode,identity_mode,framing_mode",
         )
+
         (text, markup), should_cache = _render_callback_screen(parsed=parsed, plan_context=plan_context, items=items)
         if should_cache:
             context.user_data["plan_screen"] = serialize_context(plan_context, items)

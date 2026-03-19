@@ -314,8 +314,9 @@ class PromptComposer:
         tags: List[str] = []
         is_travel = any(token in lowered_scene_text for token in ["airport", "terminal", "travel", "flight", "layover", "boarding"])
         is_uniform = any(token in lowered_scene_text for token in ["uniform", "crew_member_in_uniform", "in uniform"])
+        is_between_flights = any(token in lowered_scene_text for token in ["layover", "between flights", "between-flight", "before boarding"])
         if is_travel and not is_uniform:
-            if any(token in lowered_scene_text for token in ["layover", "between flights", "between-flight"]):
+            if is_between_flights:
                 tags.append("off-duty crew member between flights in a casual travel look")
             else:
                 tags.append("off-duty crew member in a casual layover travel look")
@@ -324,7 +325,9 @@ class PromptComposer:
         ):
             tags.append("carry-on luggage stays visible in frame")
         if any(token in lowered_scene_text for token in ["terminal", "airport"]):
-            tags.append("real terminal depth with soft reflections and passing travelers")
+            tags.append("real terminal architecture, subtle reflections, rare non-dominant background travelers")
+        if is_travel and shot_archetype in {"friend_shot", "full_body", "candid_handheld"}:
+            tags.append("walking pose stays physically plausible and luggage appears only if framing allows it")
         if shot_archetype in {"front_selfie", "mirror_selfie"}:
             tags.append("phone presence is natural to the shot")
         return tags
@@ -654,15 +657,28 @@ class PromptComposer:
         dense_parts.insert(5, self._compress_device_identity(device_identity))
         dense_parts.insert(6, social_behavior)
         dense_parts.insert(7, realism_block.replace("realism: ", "").rstrip("."))
-        parts = compact_parts if prompt_mode == "compact" else dense_parts
-        return ". ".join(part.strip().rstrip(".") for part in parts if part.strip()) + "."
+        parts = compact_parts if prompt_mode == "compact" else dense_parts[:9]
+        prompt = ". ".join(part.strip().rstrip(".") for part in parts if part.strip()) + "."
+        if len(prompt) <= 880:
+            return prompt
+
+        squeezed_parts = [
+            f"{prefix}: same recurring woman, stable face geometry, same body proportions",
+            self._compact_identity_signature(identity_anchor),
+            f"{framing_mode}; {shot_archetype}",
+            self._compose_scene_line(scene_line, scene_tags),
+            wardrobe_block.replace("outfit: ", "").replace("item_ids=", "items="),
+            f"{lighting}; natural smartphone photo; grounded lifestyle realism",
+            self._compact_continuity_hint(continuity_block),
+        ]
+        return ". ".join(part.strip().rstrip(".") for part in squeezed_parts if part.strip()) + "."
 
     @staticmethod
     def _compose_scene_line(scene_line: str, scene_tags: List[str]) -> str:
         clean_tags = [tag.strip() for tag in scene_tags if tag.strip()]
         if not clean_tags:
             return scene_line
-        return ", ".join([scene_line] + clean_tags[:2])
+        return ", ".join([scene_line] + clean_tags[:4])
 
     @staticmethod
     def _compress_identity_anchor(identity_anchor: str) -> str:
@@ -688,6 +704,31 @@ class PromptComposer:
     @staticmethod
     def _compress_device_identity(device_identity: str) -> str:
         return device_identity.replace("capture chain consistent with ", "")
+
+    @staticmethod
+    def _compact_identity_signature(identity_anchor: str) -> str:
+        values = {}
+        for chunk in identity_anchor.replace("stable identity anchor: ", "").split(";"):
+            if "=" not in chunk:
+                continue
+            key, value = chunk.split("=", 1)
+            values[key.strip()] = value.strip()
+        summary = [
+            f"age={values.get('age', '22')}",
+            f"face={values.get('face', 'soft oval')}",
+            f"eyes={values.get('eyes', 'calm almond eyes')}",
+            f"hair={values.get('hair', 'light chestnut medium-length hair')}",
+            f"makeup={values.get('makeup', 'soft everyday makeup')}",
+        ]
+        return "; ".join(summary)
+
+    @staticmethod
+    def _compact_continuity_hint(continuity_block: str) -> str:
+        lowered = continuity_block.replace("continuity: ", "")
+        for token in ["arc=", "hint=", "previous_evening=", "signature="]:
+            lowered = lowered.replace(token, "")
+        parts = [part.strip() for part in lowered.split(";") if part.strip()]
+        return f"continuity: {'; '.join(parts[:2])}"
 
     BANNED_SYNTHETIC_PATTERNS: tuple[str, ...] = (
         "beautiful young woman",

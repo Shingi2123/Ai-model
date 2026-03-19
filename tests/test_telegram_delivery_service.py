@@ -56,8 +56,8 @@ def test_today_plan_is_compact_and_converts_time_between_timezones():
     package = _pkg()
     text = format_plan_message(package, [_item()], "Europe/Paris", "Asia/Pavlodar")
 
-    assert "Персонаж: 09:30 (Europe/Paris)" in text
-    assert "Вы: 13:30 (Asia/Pavlodar)" in text
+    assert "🕒 Персонаж: 09:30 (Europe/Paris)" in text
+    assert "🕒 Вы: 13:30 (Asia/Pavlodar)" in text
     assert "very long detailed prompt text" not in text
 
 

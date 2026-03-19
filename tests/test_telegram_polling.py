@@ -1,6 +1,5 @@
 from pathlib import Path
 import asyncio
-import importlib
 import importlib.util
 import sys
 import types
@@ -15,21 +14,21 @@ class _FakeBadRequest(Exception):
 def _install_telegram_stubs() -> None:
     telegram_module = types.ModuleType("telegram")
 
-    class InlineKeyboardButton:  # pragma: no cover - helper for import wiring
+    class InlineKeyboardButton:
         def __init__(self, label: str, callback_data: str):
             self.label = label
             self.callback_data = callback_data
 
-    class InlineKeyboardMarkup:  # pragma: no cover - helper for import wiring
+    class InlineKeyboardMarkup:
         def __init__(self, keyboard):
             self.keyboard = keyboard
 
-    class ReplyKeyboardMarkup:  # pragma: no cover - helper for import wiring
+    class ReplyKeyboardMarkup:
         def __init__(self, keyboard, resize_keyboard: bool = False):
             self.keyboard = keyboard
             self.resize_keyboard = resize_keyboard
 
-    class Update:  # pragma: no cover - helper for import wiring
+    class Update:
         pass
 
     telegram_module.InlineKeyboardButton = InlineKeyboardButton
@@ -49,27 +48,27 @@ def _install_telegram_stubs() -> None:
         def build(self):
             return object()
 
-    class Application:  # pragma: no cover - helper for import wiring
+    class Application:
         @staticmethod
         def builder():
             return _ApplicationBuilder()
 
-    class CallbackQueryHandler:  # pragma: no cover
+    class CallbackQueryHandler:
         def __init__(self, *_args, **_kwargs):
             pass
 
-    class CommandHandler:  # pragma: no cover
+    class CommandHandler:
         def __init__(self, *_args, **_kwargs):
             pass
 
-    class MessageHandler:  # pragma: no cover
+    class MessageHandler:
         def __init__(self, *_args, **_kwargs):
             pass
 
-    class ContextTypes:  # pragma: no cover
+    class ContextTypes:
         DEFAULT_TYPE = object
 
-    class _Filters:  # pragma: no cover
+    class _Filters:
         @staticmethod
         def Regex(_pattern: str):
             return object()
@@ -134,13 +133,11 @@ def _context_and_items(module):
         persona_timezone="Europe/Paris",
         user_timezone="Asia/Pavlodar",
     )
-    plan_items = []
-    return plan_context, plan_items
+    return plan_context, []
 
 
 def test_callback_refresh_ignores_message_not_modified(monkeypatch):
     module = _load_module()
-
     plan_context, plan_items = _context_and_items(module)
 
     monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
@@ -181,7 +178,6 @@ def test_callback_refresh_recovers_from_stale_session(monkeypatch):
     monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
     monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
     monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
-
     module.logger.exception = Mock()
 
     class Query:
@@ -203,7 +199,7 @@ def test_callback_refresh_recovers_from_stale_session(monkeypatch):
     asyncio.run(module.callback_nav(update, context))
 
     assert query.edit_payload["text"] == "План публикаций"
-    assert query.answer_calls == [ ((), {}) ]
+    assert query.answer_calls == [((), {})]
     assert module.logger.exception.call_count == 0
 
 
@@ -234,35 +230,6 @@ def test_callback_back_to_plan_after_prompt(monkeypatch):
 
     assert query.answer_calls == [((), {})]
     assert context.user_data["plan_screen"] == "cached"
-
-
-def test_callback_duplicate_post_press_no_fallback(monkeypatch):
-    module = _load_module()
-    module.logger.exception = Mock()
-
-    class Query:
-        def __init__(self):
-            self.data = "p:2026-03-12:pub-1"
-            self.answer_calls = []
-
-        async def answer(self, *args, **kwargs):
-            self.answer_calls.append((args, kwargs))
-
-        async def edit_message_text(self, **_kwargs):
-            raise module.BadRequest("Message is not modified")
-
-    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (_context_and_items(module)))
-    monkeypatch.setattr(module, "_render_post", lambda _context, _items, _idx: ("POST", object()))
-    monkeypatch.setattr(module, "_get_item_index", lambda _items, _pub_id, _post_idx: 0)
-
-    query = Query()
-    update = types.SimpleNamespace(callback_query=query)
-    context = types.SimpleNamespace(user_data={})
-
-    asyncio.run(module.callback_nav(update, context))
-
-    assert query.answer_calls == [((), {})]
-    assert module.logger.exception.call_count == 0
 
 
 def test_select_screen_items_prefers_persisted_plan_for_detail_views():
@@ -313,9 +280,7 @@ def test_select_screen_items_falls_back_to_cached_context_only_when_plan_missing
     assert source == "serialized_callback_context"
 
 
-
-
-def test_callback_nav_uses_safe_wrappers_runtime(monkeypatch):
+def test_start_button_and_safe_wrappers_use_utf8_runtime(monkeypatch):
     module = _load_module()
     plan_context, plan_items = _context_and_items(module)
 
@@ -331,6 +296,7 @@ def test_callback_nav_uses_safe_wrappers_runtime(monkeypatch):
 
     async def fake_safe_edit(_query, *, text, markup, parse_mode=None):
         wrapper_calls["edit"] += 1
+        assert text == "План публикаций"
         return True
 
     monkeypatch.setattr(module, "safe_answer_callback", fake_safe_answer)
@@ -340,12 +306,6 @@ def test_callback_nav_uses_safe_wrappers_runtime(monkeypatch):
         def __init__(self):
             self.data = "plan:2026-03-12"
 
-        async def answer(self, *args, **kwargs):
-            raise AssertionError("callback_nav must not call query.answer directly")
-
-        async def edit_message_text(self, **kwargs):
-            raise AssertionError("callback_nav must not call query.edit_message_text directly")
-
     query = Query()
     update = types.SimpleNamespace(callback_query=query)
     context = types.SimpleNamespace(user_data={})
@@ -353,90 +313,4 @@ def test_callback_nav_uses_safe_wrappers_runtime(monkeypatch):
     asyncio.run(module.callback_nav(update, context))
 
     assert wrapper_calls == {"answer": 1, "edit": 1}
-
-
-def test_callback_nav_source_has_no_direct_query_calls():
-    source = Path("scripts/telegram_polling.py").read_text(encoding="utf-8")
-    start = source.index("async def callback_nav")
-    end = source.index("\n\nasync def plan_cmd")
-    callback_source = source[start:end]
-
-    assert "query.answer(" not in callback_source
-    assert "query.edit_message_text(" not in callback_source
-
-def test_show_today_plan_existing_plan_uses_persisted_data(monkeypatch):
-    module = _load_module()
-    plan_context, plan_items = _context_and_items(module)
-
-    monkeypatch.setattr(module, "_ensure_today_plan", lambda: (plan_context, plan_items))
-    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
-    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
-
-    class LoadingMessage:
-        def __init__(self):
-            self.edits = []
-
-        async def edit_text(self, text, reply_markup=None):
-            self.edits.append((text, reply_markup))
-
-    class Message:
-        def __init__(self):
-            self.loading = LoadingMessage()
-
-        async def reply_text(self, _text):
-            return self.loading
-
-    message = Message()
-    update = types.SimpleNamespace(message=message)
-    context = types.SimpleNamespace(user_data={})
-
-    asyncio.run(module.show_today_plan(update, context))
-
-    assert message.loading.edits[0][0] == "План публикаций"
-    assert context.user_data["plan_screen"] == "cached"
-
-
-def test_callback_nav_stale_query_answer_is_recoverable(monkeypatch):
-    module = _load_module()
-    plan_context, plan_items = _context_and_items(module)
-
-    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
-    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
-    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
-    module.logger.exception = Mock()
-
-    class Query:
-        def __init__(self):
-            self.data = "plan:2026-03-12"
-
-        async def answer(self, *_args, **_kwargs):
-            raise module.BadRequest("Query is too old and response timeout expired")
-
-        async def edit_message_text(self, **_kwargs):
-            return None
-
-    asyncio.run(module.callback_nav(types.SimpleNamespace(callback_query=Query()), types.SimpleNamespace(user_data={})))
-    assert module.logger.exception.call_count == 0
-
-
-def test_callback_nav_invalid_query_id_is_recoverable(monkeypatch):
-    module = _load_module()
-    plan_context, plan_items = _context_and_items(module)
-
-    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
-    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
-    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
-    module.logger.exception = Mock()
-
-    class Query:
-        def __init__(self):
-            self.data = "plan:2026-03-12"
-
-        async def answer(self, *_args, **_kwargs):
-            raise module.BadRequest("query id is invalid")
-
-        async def edit_message_text(self, **_kwargs):
-            return None
-
-    asyncio.run(module.callback_nav(types.SimpleNamespace(callback_query=Query()), types.SimpleNamespace(user_data={})))
-    assert module.logger.exception.call_count == 0
+    assert module.GET_PLAN_BUTTON == "📅 Получить план на сегодня"

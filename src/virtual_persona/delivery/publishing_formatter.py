@@ -10,14 +10,14 @@ from virtual_persona.models.domain import DailyPackage, PublishingPlanItem
 CONTENT_EMOJI = {
     "photo": "📸",
     "carousel": "📸",
-    "video": "📹",
-    "reel": "📹",
+    "video": "🎥",
+    "reel": "🎥",
     "stories": "📱",
     "story": "📱",
     "text": "✍️",
 }
 
-SECTION_DIVIDER = "━━━━━━━━━━━━━━━━━━"
+SECTION_DIVIDER = "────────────────"
 TELEGRAM_MAX_LEN = 4096
 
 TIMEZONE_ALIASES = {
@@ -28,7 +28,6 @@ TIMEZONE_ALIASES = {
 def _normalize_timezone(tz_name: str) -> str:
     key = (tz_name or "").strip()
     return TIMEZONE_ALIASES.get(key.lower(), key)
-
 
 
 def _convert_time_for_user(target_date, hhmm: str, from_tz: str, to_tz: str) -> str:
@@ -96,17 +95,16 @@ def format_plan_items(items: Iterable[PublishingPlanItem], package: DailyPackage
     rows: List[str] = []
     for i, item in enumerate(items, start=1):
         source_timezone = _resolve_item_timezone(item, persona_timezone)
-        local_time = item.post_time
         user_time = _convert_time_for_user(package.date, item.post_time, source_timezone, user_timezone)
         emoji = _post_header_emoji(item.content_type)
         rows.append(
             f"{SECTION_DIVIDER}\n\n"
             f"{emoji} POST #{i}\n"
-            f"🕘 Персонаж: {local_time} ({source_timezone})\n"
-            f"🕘 Вы: {user_time} ({user_timezone})\n"
-            f"🌐 Платформа: {item.platform} • 🎬 {item.content_type.title()}\n"
-            f"🎯 Moment: {_short_text(item.scene_moment, 120)}\n"
-            f"📝 Подпись: {_short_text(item.short_caption or item.caption_text, 140)}"
+            f"🕒 Персонаж: {item.post_time} ({source_timezone})\n"
+            f"🕒 Вы: {user_time} ({user_timezone})\n"
+            f"🌐 Платформа: {item.platform} • {item.content_type.title()}\n"
+            f"🎯 Момент: {_short_text(item.scene_moment, 120)}\n"
+            f"✍️ Подпись: {_short_text(item.short_caption or item.caption_text, 140)}"
         )
     return "\n\n".join(rows) if rows else "Нет публикаций на сегодня."
 
@@ -157,6 +155,7 @@ def _format_detailed_prompt(items: list[PublishingPlanItem], content_filter: set
 
     return "\n\n".join(_render(item, idx) for idx, item in enumerate(filtered, start=1))
 
+
 def format_command_message(package: DailyPackage, items: list[PublishingPlanItem], command: str, persona_timezone: str, user_timezone: str) -> str:
     cmd = command.strip().lower()
     if cmd in {"/today", "/plan"}:
@@ -168,7 +167,7 @@ def format_command_message(package: DailyPackage, items: list[PublishingPlanItem
     if cmd == "/captions":
         return "\n\n".join(
             f"📝 #{idx}\n{item.short_caption or item.caption_text}" for idx, item in enumerate(items, start=1)
-        ) or "Нет caption'ов."
+        ) or "Нет подписей."
     if cmd == "/moments":
         return "\n\n".join(f"🎯 #{idx}\n{item.scene_moment}" for idx, item in enumerate(items, start=1)) or "Нет scene moments."
     if cmd == "/debug":

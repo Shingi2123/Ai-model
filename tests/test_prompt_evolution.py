@@ -285,6 +285,24 @@ def test_airport_travel_scene_aligns_shot_reference_and_framing_without_phone_cl
     assert "waist-up framing keeps stable torso length" not in lowered
 
 
+def test_between_flights_casual_airport_scene_is_marked_off_duty_and_physically_plausible():
+    composer = PromptComposer(DummyState())
+    scene = Scene()
+    scene.scene_moment = "Slow walk through the terminal before boarding during a layover"
+    scene.description = "Between flights walk with a carry-on and shoulder bag"
+    scene.location = "airport terminal"
+    scene.activity = "walking"
+    scene.visual_focus = "carry-on"
+
+    package = composer.compose_package(BASE_CONTEXT, scene, "cream trench + denim", "photo", ["coat_1", "denim_1"])
+    lowered = package["final_prompt"].lower()
+
+    assert "off-duty crew member between flights in a casual travel look" in lowered
+    assert "real terminal architecture" in lowered
+    assert "walking pose stays physically plausible" in lowered
+    assert len(package["final_prompt"]) < 900
+
+
 def test_final_prompt_excludes_negative_style_phrases():
     composer = PromptComposer(DummyState())
     package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan", "photo", ["top_1"])

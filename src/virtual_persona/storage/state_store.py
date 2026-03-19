@@ -16,6 +16,7 @@ except Exception:  # optional dependency for local mode
     gspread = None
 
 from virtual_persona.models.domain import DailyPackage
+from virtual_persona.delivery.publishing_plan_normalizer import PUBLISHING_PLAN_HEADERS
 
 
 DEFAULT_POSTING_RULES = [
@@ -512,16 +513,21 @@ class GoogleSheetsStateStore:
         }
         return [normalized_row.get(self._normalize_header(header), "") for header in headers]
 
+    def _sheet_headers(self, title: str, fallback_headers: List[str]) -> List[str]:
+        ws = self._get_ws(title)
+        existing = self._with_retry(lambda: ws.row_values(1), operation_name=f"read header {title}") or []
+        if not existing:
+            return list(fallback_headers)
+        return [str(header) for header in existing if str(header).strip()]
+
     def _append_dict_row(self, title: str, headers: List[str], row: Dict[str, Any], *, prefer_sheet_header_order: bool = False) -> None:
         if not self.available():
             return
         try:
-            ws = self._get_ws(title)
             row_headers = headers
             if prefer_sheet_header_order:
-                sheet_headers = self._with_retry(lambda: ws.row_values(1), operation_name=f"read header {title}") or []
-                if sheet_headers:
-                    row_headers = sheet_headers
+                row_headers = self._sheet_headers(title, headers)
+            ws = self._get_ws(title)
             self._with_retry(
                 lambda: ws.append_row(self._row_values_for_headers(row, row_headers)),
                 operation_name=f"append row {title}",
@@ -536,7 +542,8 @@ class GoogleSheetsStateStore:
             return
         try:
             ws = self._get_ws(title)
-            values = [headers] + [[row.get(h, "") for h in headers] for row in rows]
+            actual_headers = self._sheet_headers(title, headers)
+            values = [actual_headers] + [self._row_values_for_headers(row, actual_headers) for row in rows]
             self._with_retry(ws.clear, operation_name=f"clear sheet {title}")
             self._with_retry(lambda: ws.update(values), operation_name=f"update sheet {title}")
             self._invalidate_sheet_cache(title)
@@ -579,12 +586,7 @@ class GoogleSheetsStateStore:
 
     def reset_day_records(self, target_date: str) -> None:
         sheets_with_headers = {
-            "publishing_plan": [
-                "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
-                "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
-                "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "generation_mode", "framing_mode", "prompt_mode", "reference_type", "primary_anchors", "secondary_anchors", "manual_generation_step", "caption_text", "short_caption", "post_timezone", "publish_score",
-                "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score",
-            ],
+            "publishing_plan": list(PUBLISHING_PLAN_HEADERS),
             "life_state": [
                 "date", "current_city", "day_type", "season", "fatigue_level", "mood_base", "reason", "continuity_note",
                 "narrative_phase", "energy_state", "rhythm_state", "novelty_pressure", "recovery_need",
@@ -621,12 +623,7 @@ class GoogleSheetsStateStore:
     def load_publishing_plan(self, target_date: str | None = None) -> List[Dict[str, Any]]:
         if not self.available():
             return []
-        headers = [
-            "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
-            "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
-            "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "generation_mode", "framing_mode", "prompt_mode", "reference_type", "primary_anchors", "secondary_anchors", "manual_generation_step", "caption_text", "short_caption", "post_timezone", "publish_score",
-            "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score",
-        ]
+        headers = list(PUBLISHING_PLAN_HEADERS)
         self._ensure_headers("publishing_plan", headers)
         rows = self._safe_records("publishing_plan")
         if target_date:
@@ -634,12 +631,7 @@ class GoogleSheetsStateStore:
         return rows
 
     def append_publishing_plan(self, row: Dict[str, Any]) -> None:
-        headers = [
-            "publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase",
-            "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type",
-            "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "generation_mode", "framing_mode", "prompt_mode", "reference_type", "primary_anchors", "secondary_anchors", "manual_generation_step", "caption_text", "short_caption", "post_timezone", "publish_score",
-            "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score",
-        ]
+        headers = list(PUBLISHING_PLAN_HEADERS)
         self._ensure_headers("publishing_plan", headers)
         self._append_dict_row("publishing_plan", headers, row, prefer_sheet_header_order=True)
 
