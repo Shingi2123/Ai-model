@@ -102,11 +102,14 @@ class PromptComposer:
         recent = context.get("recent_moment_memory") or []
         shot_archetype = self._resolve_shot_archetype(scene, context, recent)
         generation_mode = self._resolve_generation_mode(scene, shot_archetype)
+        scene_alignment = self._align_scene_geometry(scene, shot_archetype, generation_mode)
+        shot_archetype = str(scene_alignment["shot_archetype"])
+        generation_mode = str(scene_alignment["generation_mode"])
         platform_behavior = self._platform_behavior_intent(content_type, platform_intent)
         identity_manager = CharacterIdentityManager()
         identity_pack = identity_manager.load_pack()
         prompt_mode = self._prompt_mode(shot_archetype, content_type, getattr(scene, "scene_moment", ""))
-        framing_mode = self._framing_mode(shot_archetype, generation_mode)
+        framing_mode = str(scene_alignment["framing_mode"])
 
         scene_loc = getattr(scene, "location", context.get("city", "city"))
         scene_desc = getattr(scene, "scene_moment", "") or getattr(scene, "description", "daily lifestyle moment")
@@ -114,7 +117,8 @@ class PromptComposer:
         reference_selection = identity_manager.select_reference_bundle(shot_archetype, generation_mode, identity_pack)
 
         identity_anchor = identity_manager.identity_anchor(context, identity_pack)
-        body_anchor = identity_manager.body_anchor(shot_archetype, context, identity_pack)
+        body_anchor_shot = "full_body" if generation_mode == "full-body_mode" and shot_archetype == "friend_shot" else shot_archetype
+        body_anchor = identity_manager.body_anchor(body_anchor_shot, context, identity_pack)
         scene_action = self._scene_action(scene, scene_desc, scene_loc)
         wardrobe_block = self._wardrobe_context(outfit_summary, shot_archetype, item_ids_text)
         camera_block = self._camera_context(shot_archetype, context)
@@ -156,7 +160,7 @@ class PromptComposer:
             "framing_style": "imperfect framing, real handheld balance",
             "camera_physics": "handheld motion with gravity-consistent body pose",
             "sensor_realism": "smartphone dynamic range with mild grain in low light",
-            "smartphone_behavior": "natural smartphone photo, candid realism, no editorial fashion look, no overproduced campaign lighting",
+            "smartphone_behavior": "natural smartphone photo, candid realism, grounded lifestyle styling, believable available light",
             "social_behavior": self._social_behavior(platform_behavior),
             "micro_imperfections": self._micro_imperfections(scene_loc, platform_behavior),
             "camera_behavior_memory": self._camera_behavior_memory(shot_archetype, context, context.get("continuity_context") or {}, recent),
@@ -189,6 +193,7 @@ class PromptComposer:
             continuity_block=continuity_block,
             device_identity=ordered_blocks["device_identity"],
             social_behavior=ordered_blocks["social_behavior"],
+            scene_tags=scene_alignment.get("scene_tags", []),
         )
         ordered_blocks["final_prompt"] = self._clean_generic_prompt_terms(final_prompt)
         ordered_blocks["shot_archetype"] = shot_archetype
@@ -229,6 +234,100 @@ class PromptComposer:
         if generation_mode == "mirror_selfie_mode":
             return "mirror selfie, head-and-shoulders"
         return framing
+
+    def _align_scene_geometry(self, scene: Any, shot_archetype: str, generation_mode: str) -> Dict[str, Any]:
+        lowered = self._scene_text(scene).lower()
+        lowered_core = " ".join(
+            [
+                str(getattr(scene, "scene_moment", "") or ""),
+                str(getattr(scene, "description", "") or ""),
+                str(getattr(scene, "location", "") or ""),
+                str(getattr(scene, "activity", "") or ""),
+                str(getattr(scene, "visual_focus", "") or ""),
+            ]
+        ).lower()
+        lowered_moment_type = str(getattr(scene, "scene_moment_type", "") or "").lower()
+        is_travel = any(token in lowered for token in ["airport", "terminal", "travel", "flight", "layover", "boarding"])
+        has_luggage = any(token in lowered for token in ["luggage", "suitcase", "carry-on", "carry on", "roller bag", "shoulder bag"])
+        is_walking = any(token in lowered for token in ["walking", "walk", "stroll", "moving through", "crossing"])
+        is_seated = any(token in lowered for token in ["seated", "sitting", "table", "coffee", "window seat", "waiting"])
+        is_selfie = (
+            "selfie" in lowered_core
+            or "mirror" in lowered_core
+            or (lowered_moment_type in {"selfie", "diary_mirror"} and not (is_travel and is_walking and has_luggage))
+        )
+
+        aligned_shot = shot_archetype
+        if is_selfie:
+            aligned_shot = "mirror_selfie" if "mirror" in lowered else "front_selfie"
+        elif is_travel and is_walking and has_luggage:
+            aligned_shot = "friend_shot"
+        elif is_seated and shot_archetype in {"friend_shot", "full_body", "waist_up"}:
+            aligned_shot = "seated_table_shot"
+
+        aligned_generation = self._resolve_generation_mode(scene, aligned_shot)
+        if aligned_shot == "friend_shot" and is_travel and is_walking and has_luggage:
+            aligned_generation = "full-body_mode"
+
+        return {
+            "shot_archetype": aligned_shot,
+            "generation_mode": aligned_generation,
+            "framing_mode": self._coherent_framing_mode(aligned_shot, aligned_generation, lowered),
+            "scene_tags": self._scene_tags(lowered, aligned_shot),
+        }
+
+    def _coherent_framing_mode(self, shot_archetype: str, generation_mode: str, lowered_scene_text: str) -> str:
+        is_travel_walk = (
+            any(token in lowered_scene_text for token in ["airport", "terminal", "travel", "layover"])
+            and any(token in lowered_scene_text for token in ["walking", "walk", "stroll"])
+            and any(token in lowered_scene_text for token in ["luggage", "suitcase", "carry-on", "carry on", "bag"])
+        )
+        if shot_archetype == "mirror_selfie":
+            return "mirror selfie, waist-up" if "waist" in lowered_scene_text or "outfit" in lowered_scene_text else "mirror selfie, head-and-shoulders"
+        if shot_archetype == "front_selfie":
+            return "front selfie, head-and-shoulders"
+        if shot_archetype == "seated_table_shot":
+            return "waist-up seated candid"
+        if shot_archetype == "full_body":
+            return "full body, head-to-toe"
+        if shot_archetype == "friend_shot" and is_travel_walk:
+            return "friend-shot, 3/4 body walking candid with luggage visible"
+        if generation_mode == "full-body_mode" and shot_archetype in {"friend_shot", "candid_handheld"}:
+            return "3/4 body candid with full stance readable"
+        return self._framing_mode(shot_archetype, generation_mode)
+
+    @staticmethod
+    def _scene_text(scene: Any) -> str:
+        return " ".join(
+            [
+                str(getattr(scene, "scene_moment", "") or ""),
+                str(getattr(scene, "description", "") or ""),
+                str(getattr(scene, "location", "") or ""),
+                str(getattr(scene, "activity", "") or ""),
+                str(getattr(scene, "visual_focus", "") or ""),
+                str(getattr(scene, "scene_moment_type", "") or ""),
+            ]
+        )
+
+    @staticmethod
+    def _scene_tags(lowered_scene_text: str, shot_archetype: str) -> List[str]:
+        tags: List[str] = []
+        is_travel = any(token in lowered_scene_text for token in ["airport", "terminal", "travel", "flight", "layover", "boarding"])
+        is_uniform = any(token in lowered_scene_text for token in ["uniform", "crew_member_in_uniform", "in uniform"])
+        if is_travel and not is_uniform:
+            if any(token in lowered_scene_text for token in ["layover", "between flights", "between-flight"]):
+                tags.append("off-duty crew member between flights in a casual travel look")
+            else:
+                tags.append("off-duty crew member in a casual layover travel look")
+        if shot_archetype in {"friend_shot", "full_body", "candid_handheld"} and any(
+            token in lowered_scene_text for token in ["luggage", "suitcase", "carry-on", "carry on"]
+        ):
+            tags.append("carry-on luggage stays visible in frame")
+        if any(token in lowered_scene_text for token in ["terminal", "airport"]):
+            tags.append("real terminal depth with soft reflections and passing travelers")
+        if shot_archetype in {"front_selfie", "mirror_selfie"}:
+            tags.append("phone presence is natural to the shot")
+        return tags
 
     @staticmethod
     def _reference_bundle(reference_selection: Dict[str, Any]) -> str:
@@ -290,7 +389,7 @@ class PromptComposer:
     def _realism_cues(shot_archetype: str, scene_loc: str) -> str:
         return (
             "realism: natural smartphone photo, candid realism, lived-in environment, stable face geometry, same body proportions, "
-            "natural skin texture, real fabric folds, no editorial fashion look, no overproduced campaign lighting; "
+            "natural skin texture, real fabric folds, grounded styling, believable available light; "
             f"shot={shot_archetype}; location={scene_loc}."
         )
 
@@ -526,6 +625,7 @@ class PromptComposer:
         continuity_block: str,
         device_identity: str,
         social_behavior: str,
+        scene_tags: List[str],
     ) -> str:
         lighting = self._lighting_hint(getattr(scene, "time_of_day", "day"))
         visual_focus = str(getattr(scene, "visual_focus", "") or "").strip()
@@ -544,10 +644,10 @@ class PromptComposer:
             self._compress_identity_anchor(identity_anchor),
             self._compress_body_anchor(body_anchor, shot_archetype),
             f"{framing_mode}; {shot_archetype}",
-            scene_line,
+            self._compose_scene_line(scene_line, scene_tags),
             wardrobe_block.replace("outfit: ", "").replace("item_ids=", "items="),
             f"lived-in environment, {lighting}",
-            "natural smartphone photo, candid realism, natural skin texture, real fabric folds, no editorial fashion look, no overproduced campaign lighting",
+            "natural smartphone photo, candid realism, natural skin texture, real fabric folds, grounded lifestyle styling",
             self._compress_continuity(continuity_block),
         ]
         dense_parts = compact_parts[:]
@@ -556,6 +656,13 @@ class PromptComposer:
         dense_parts.insert(7, realism_block.replace("realism: ", "").rstrip("."))
         parts = compact_parts if prompt_mode == "compact" else dense_parts
         return ". ".join(part.strip().rstrip(".") for part in parts if part.strip()) + "."
+
+    @staticmethod
+    def _compose_scene_line(scene_line: str, scene_tags: List[str]) -> str:
+        clean_tags = [tag.strip() for tag in scene_tags if tag.strip()]
+        if not clean_tags:
+            return scene_line
+        return ", ".join([scene_line] + clean_tags[:2])
 
     @staticmethod
     def _compress_identity_anchor(identity_anchor: str) -> str:

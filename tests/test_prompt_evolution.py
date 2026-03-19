@@ -257,8 +257,51 @@ def test_final_prompt_is_generator_friendly_and_keeps_negative_separate():
     lowered = package["final_prompt"].lower()
     assert "same recurring woman" in lowered
     assert "stable face geometry" in lowered
-    assert "no editorial fashion look" in lowered
+    assert "grounded lifestyle styling" in lowered
     assert "[negative_prompt]" not in package["final_prompt"]
+
+
+def test_airport_travel_scene_aligns_shot_reference_and_framing_without_phone_clutter():
+    composer = PromptComposer(DummyState())
+    scene = Scene()
+    scene.scene_moment = "Slow walk through a nearly empty terminal with carry-on"
+    scene.description = "Walking through the airport terminal before boarding"
+    scene.location = "airport terminal"
+    scene.activity = "walking"
+    scene.visual_focus = "carry-on and shoulder bag"
+
+    package = composer.compose_package(BASE_CONTEXT, scene, "cream trench + denim", "photo", ["coat_1", "denim_1"])
+    lowered = package["final_prompt"].lower()
+
+    assert package["shot_archetype"] == "friend_shot"
+    assert package["generation_mode"] == "full-body_mode"
+    assert package["reference_type"] == "full_body"
+    assert package["framing_mode"] == "friend-shot, 3/4 body walking candid with luggage visible"
+    assert "off-duty crew member" in lowered
+    assert "carry-on luggage stays visible in frame" in lowered
+    assert "phone presence is natural to the shot" not in lowered
+    assert "smartphone visible" not in lowered
+    assert "phone in hand" not in lowered
+    assert "waist-up framing keeps stable torso length" not in lowered
+
+
+def test_final_prompt_excludes_negative_style_phrases():
+    composer = PromptComposer(DummyState())
+    package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan", "photo", ["top_1"])
+
+    lowered = package["final_prompt"].lower()
+    banned_phrases = [
+        "no plastic skin",
+        "no identity drift",
+        "no duplicate people",
+        "no distorted proportions",
+        "no fashion catalog symmetry",
+        "no editorial fashion look",
+        "no overproduced campaign lighting",
+    ]
+
+    for phrase in banned_phrases:
+        assert phrase not in lowered
 
 
 def test_platform_intent_changes_behavior_mode_and_polish_cues():

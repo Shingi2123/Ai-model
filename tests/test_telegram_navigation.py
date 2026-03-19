@@ -5,12 +5,12 @@ from virtual_persona.delivery.telegram_navigation import (
     build_detail_keyboard,
     build_plan_keyboard,
     build_post_keyboard,
-    item_from_row,
     deserialize_context,
     format_caption_screen,
     format_plan_screen,
     format_post_screen,
     format_prompt_screen,
+    item_from_row,
     normalize_plan_items,
     parse_callback,
     serialize_context,
@@ -59,7 +59,7 @@ def test_build_plan_keyboard_uses_publication_id_callback():
     items = [_item(1), _item(2)]
     keyboard = build_plan_keyboard(items, date(2026, 3, 12))
 
-    assert [row[0][0] for row in keyboard[:2]] == ["📌 Пост 1", "📌 Пост 2"]
+    assert [row[0][0] for row in keyboard[:2]] == ["рџ“Њ РџРѕСЃС‚ 1", "рџ“Њ РџРѕСЃС‚ 2"]
     assert keyboard[0][0][1] == "p:2026-03-12:pub-1"
     assert keyboard[-1][0][1] == "plan:2026-03-12"
 
@@ -97,11 +97,12 @@ def test_format_plan_and_post_card_contains_core_fields():
     plan_text = format_plan_screen(context, [_item()])
     post_text = format_post_screen(context, _item(), 0)
 
-    assert "📅 Plan -" in plan_text
-    assert "📌 POST #1" in plan_text
-    assert "- Instagram / Photo" in plan_text
-    assert "Platform: Instagram" in post_text
-    assert "Your time: 13:30 (Asia/Pavlodar)" in post_text
+    assert "План публикаций" in plan_text
+    assert "Город персонажа: Paris" in plan_text
+    assert "📸 POST #1" in plan_text
+    assert "🌐 Платформа: Instagram • 📸 Photo" in plan_text
+    assert "🌐 Платформа: Instagram" in post_text
+    assert "🕒 Вы: 13:30 (Asia/Pavlodar)" in post_text
 
 
 def test_detail_views_have_fallback_for_empty_prompt_and_caption():
@@ -116,7 +117,7 @@ def test_detail_views_have_fallback_for_empty_prompt_and_caption():
 
     assert "Нет сохраненного prompt" in prompt_text
     assert "No negative prompt" in prompt_text
-    assert "No saved caption" in caption_text
+    assert "пока нет сохранённой подписи" in caption_text
 
 
 def test_prompt_screen_uses_new_workflow_order_and_aliases():
@@ -162,7 +163,7 @@ def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():
     keyboard = build_plan_keyboard([], date(2026, 3, 12))
 
     assert "Пока нет запланированных постов" in plan_text
-    assert keyboard == [[("🔄 Обновить", "plan:2026-03-12")]]
+    assert keyboard == [[("рџ”„ РћР±РЅРѕРІРёС‚СЊ", "plan:2026-03-12")]]
 
 
 def test_plan_screen_with_single_post_shows_post_card_not_empty_state():
@@ -178,12 +179,12 @@ def test_plan_screen_with_single_post_shows_post_card_not_empty_state():
     plan_text = format_plan_screen(context, [_item()])
     keyboard = build_plan_keyboard([_item()], date(2026, 3, 12))
 
-    assert "📌 POST #1" in plan_text
+    assert "📸 POST #1" in plan_text
     assert "Пока нет запланированных постов" not in plan_text
-    assert keyboard[0][0][0] == "📌 Пост 1"
+    assert keyboard[0][0][0] == "рџ“Њ РџРѕСЃС‚ 1"
 
 
-def test_plan_screen_hides_unknown_city_and_keeps_compact_meta():
+def test_plan_screen_hides_unknown_city_and_keeps_russian_meta():
     context = PlanScreenContext(
         target_date=date(2026, 3, 19),
         city="Unknown",
@@ -196,8 +197,10 @@ def test_plan_screen_hides_unknown_city_and_keeps_compact_meta():
     text = format_plan_screen(context, [])
 
     assert "Unknown" not in text
-    assert "🕒 Europe/Prague -> Asia/Pavlodar" in text
-    assert "🧭 work_day • routine_stability" in text
+    assert "Таймзона персонажа: Europe/Prague" in text
+    assert "Таймзона пользователя: Asia/Pavlodar" in text
+    assert "День: work_day" in text
+    assert "Фаза: routine_stability" in text
 
 
 def test_normalize_plan_items_deduplicates_same_publication_id():
@@ -224,12 +227,12 @@ def test_post_and_detail_keyboards_keep_same_post_identity():
     post_keyboard = build_post_keyboard(date(2026, 3, 12), "pub-1")
     detail_keyboard = build_detail_keyboard(date(2026, 3, 12), "pub-1")
 
-    assert post_keyboard[0][0][0] == "🖼 Prompt"
-    assert post_keyboard[0][1][0] == "✍️ Подпись"
-    assert post_keyboard[1][0][0] == "🎯 Момент"
-    assert post_keyboard[2][0][0] == "⬅️ К плану"
-    assert detail_keyboard[0][0][0] == "⬅️ К посту"
-    assert detail_keyboard[0][1][0] == "📅 К плану"
+    assert post_keyboard[0][0][0] == "рџ–ј Prompt"
+    assert post_keyboard[0][1][0] == "вњЌпёЏ РџРѕРґРїРёСЃСЊ"
+    assert post_keyboard[1][0][0] == "рџЋЇ РњРѕРјРµРЅС‚"
+    assert post_keyboard[2][0][0] == "в¬…пёЏ Рљ РїР»Р°РЅСѓ"
+    assert detail_keyboard[0][0][0] == "в¬…пёЏ Рљ РїРѕСЃС‚Сѓ"
+    assert detail_keyboard[0][1][0] == "рџ“… Рљ РїР»Р°РЅСѓ"
     assert post_keyboard[0][0][1] == "pv:2026-03-12:pub-1:prompt"
     assert post_keyboard[2][0][1] == "back:plan:2026-03-12"
     assert detail_keyboard[0][0][1] == "back:post:2026-03-12:pub-1"

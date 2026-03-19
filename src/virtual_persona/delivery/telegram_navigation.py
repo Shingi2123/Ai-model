@@ -8,6 +8,9 @@ from virtual_persona.delivery.publishing_formatter import _convert_time_for_user
 from virtual_persona.models.domain import PublishingPlanItem
 
 
+SUMMARY_DIVIDER = "--------------------"
+
+
 @dataclass
 class PlanScreenContext:
     target_date: date
@@ -41,14 +44,17 @@ def _is_missing_value(value: str | None) -> bool:
 def _format_compact_meta(context: PlanScreenContext) -> list[str]:
     lines: list[str] = []
     if not _is_missing_value(context.city):
-        lines.append(f"📍 {context.city}")
-    lines.append(f"🕒 {context.persona_timezone} -> {context.user_timezone}")
-    lines.append(f"🧭 {context.day_type} • {context.narrative_phase}")
+        lines.append(f"📍 Город персонажа: {context.city}")
+    lines.append(f"🕒 Таймзона персонажа: {context.persona_timezone}")
+    lines.append(f"🕒 Таймзона пользователя: {context.user_timezone}")
+    lines.append("")
+    lines.append(f"🧭 День: {context.day_type}")
+    lines.append(f"🎭 Фаза: {context.narrative_phase}")
     return lines
 
 
 def format_plan_screen(context: PlanScreenContext, items: list[PublishingPlanItem]) -> str:
-    header_lines = [f"📅 Plan - {context.target_date.isoformat()}"]
+    header_lines = [f"📅 План публикаций — {context.target_date.strftime('%d %B')}"]
     header_lines.extend(_format_compact_meta(context))
     header = "\n".join(header_lines)
 
@@ -62,15 +68,18 @@ def format_plan_screen(context: PlanScreenContext, items: list[PublishingPlanIte
         rows.append(
             "\n".join(
                 [
-                    f"📌 POST #{idx}",
-                    f"- {item.platform} / {item.content_type.title()}",
-                    f"- Persona: {item.post_time} ({source_tz})",
-                    f"- You: {user_time} ({context.user_timezone})",
-                    f"- Moment: {short_text(item.scene_moment, 90)}",
+                    SUMMARY_DIVIDER,
+                    "",
+                    f"{_post_header_emoji(item.content_type)} POST #{idx}",
+                    f"🕒 Персонаж: {item.post_time} ({source_tz})",
+                    f"🕒 Вы: {user_time} ({context.user_timezone})",
+                    f"🌐 Платформа: {item.platform} • {_post_header_emoji(item.content_type)} {item.content_type.title()}",
+                    f"🎯 Момент: {short_text(item.scene_moment, 110)}",
+                    f"✍️ Подпись: {short_text(item.short_caption or item.caption_text, 140)}",
                 ]
             )
         )
-    return f"{header}\n\n" + "\n".join(rows)
+    return f"{header}\n\n" + "\n\n".join(rows)
 
 
 def format_post_screen(context: PlanScreenContext, item: PublishingPlanItem, post_index: int) -> str:
@@ -78,13 +87,13 @@ def format_post_screen(context: PlanScreenContext, item: PublishingPlanItem, pos
     user_time = _convert_time_for_user(context.target_date, item.post_time, source_tz, context.user_timezone)
     emoji = _post_header_emoji(item.content_type)
     return (
-        f"POST #{post_index + 1}\n\n"
-        f"Platform: {item.platform}\n"
-        f"{emoji} Type: {item.content_type.title()}\n"
-        f"Persona time: {item.post_time} ({source_tz})\n"
-        f"Your time: {user_time} ({context.user_timezone})\n\n"
-        f"Moment: {short_text(item.scene_moment, 220)}\n"
-        f"Caption: {short_text(item.short_caption or item.caption_text, 220)}"
+        f"{emoji} POST #{post_index + 1}\n\n"
+        f"🌐 Платформа: {item.platform}\n"
+        f"{emoji} Формат: {item.content_type.title()}\n"
+        f"🕒 Персонаж: {item.post_time} ({source_tz})\n"
+        f"🕒 Вы: {user_time} ({context.user_timezone})\n\n"
+        f"🎯 Момент: {short_text(item.scene_moment, 220)}\n"
+        f"✍️ Подпись: {short_text(item.short_caption or item.caption_text, 220)}"
     )
 
 
@@ -130,12 +139,10 @@ def _format_manual_generation_step(step: str | None) -> str:
     lowered = " ".join(text.lower().split())
     known_translations = {
         "attach 2-3 primary anchors, add 1 secondary anchor if the generator starts drifting.": (
-            "Прикрепите 2-3 основных референса. "
-            "Если генерация начинает уходить, добавьте 1 дополнительный."
+            "Прикрепите 2-3 основных референса. Если генерация начинает уходить, добавьте 1 дополнительный."
         ),
         "use the primary anchors first. add secondary anchors only if you need to reinforce angle, emotion, or body consistency.": (
-            "Сначала используйте основные референсы. "
-            "Дополнительные подключайте только если нужно усилить ракурс, эмоцию или тело."
+            "Сначала используйте основные референсы. Дополнительные подключайте только если нужно усилить ракурс, эмоцию или тело."
         ),
         "attach the primary anchors listed below for generation.": (
             "Для генерации приложите основные референсы из списка ниже."
@@ -308,14 +315,14 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
 
 def format_caption_screen(item: PublishingPlanItem, post_index: int) -> str:
     caption = (item.caption_text or item.short_caption or "").strip()
-    body = caption if caption else "No saved caption for this post yet."
-    return f"{_format_detail_header(item, post_index)}\n\nCaption:\n{body}"
+    body = caption if caption else "Для этого поста пока нет сохранённой подписи."
+    return f"{_format_detail_header(item, post_index)}\n\nПодпись:\n{body}"
 
 
 def format_moment_screen(item: PublishingPlanItem, post_index: int) -> str:
     moment = (item.scene_moment or "").strip()
-    body = moment if moment else "No saved scene moment for this post yet."
-    return f"{_format_detail_header(item, post_index)}\n\nMoment:\n{body}"
+    body = moment if moment else "Для этого поста пока нет сохранённого момента."
+    return f"{_format_detail_header(item, post_index)}\n\nМомент:\n{body}"
 
 
 def plan_item_key(item: PublishingPlanItem) -> str:
@@ -346,23 +353,23 @@ def build_plan_keyboard(items: list[PublishingPlanItem], target_date: date) -> l
     rows = []
     day = target_date.isoformat()
     for idx, item in enumerate(items):
-        rows.append([(f"📌 Пост {idx + 1}", f"p:{day}:{item.publication_id}")])
-    rows.append([("🔄 Обновить", f"plan:{day}")])
+        rows.append([(f"рџ“Њ РџРѕСЃС‚ {idx + 1}", f"p:{day}:{item.publication_id}")])
+    rows.append([("рџ”„ РћР±РЅРѕРІРёС‚СЊ", f"plan:{day}")])
     return rows
 
 
 def build_post_keyboard(target_date: date, publication_id: str) -> list[list[tuple[str, str]]]:
     day = target_date.isoformat()
     return [
-        [("🖼 Prompt", f"pv:{day}:{publication_id}:prompt"), ("✍️ Подпись", f"pv:{day}:{publication_id}:caption")],
-        [("🎯 Момент", f"pv:{day}:{publication_id}:moment")],
-        [("⬅️ К плану", f"back:plan:{day}")],
+        [("рџ–ј Prompt", f"pv:{day}:{publication_id}:prompt"), ("вњЌпёЏ РџРѕРґРїРёСЃСЊ", f"pv:{day}:{publication_id}:caption")],
+        [("рџЋЇ РњРѕРјРµРЅС‚", f"pv:{day}:{publication_id}:moment")],
+        [("в¬…пёЏ Рљ РїР»Р°РЅСѓ", f"back:plan:{day}")],
     ]
 
 
 def build_detail_keyboard(target_date: date, publication_id: str) -> list[list[tuple[str, str]]]:
     day = target_date.isoformat()
-    return [[("⬅️ К посту", f"back:post:{day}:{publication_id}"), ("📅 К плану", f"back:plan:{day}")]]
+    return [[("в¬…пёЏ Рљ РїРѕСЃС‚Сѓ", f"back:post:{day}:{publication_id}"), ("рџ“… Рљ РїР»Р°РЅСѓ", f"back:plan:{day}")]]
 
 
 def parse_callback(data: str) -> ParsedCallback:
