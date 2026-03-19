@@ -91,9 +91,27 @@ def _load_persisted_plan(target_date: date) -> tuple[PlanScreenContext, list]:
     return context, items
 
 
+def _is_today(target_date: date) -> bool:
+    return target_date == date.today()
+
+
+def _load_plan_or_generate(target_date: date, *, auto_generate_if_missing: bool = False) -> tuple[PlanScreenContext, list]:
+    context, items = _load_persisted_plan(target_date)
+    if items or not auto_generate_if_missing:
+        return context, items
+
+    package = orchestrator.generate_day(target_date=target_date)
+    regenerated_context, regenerated_items = _load_persisted_plan(target_date)
+    if regenerated_items:
+        return regenerated_context, regenerated_items
+
+    generated_items = normalize_plan_items(package.publishing_plan or [])
+    return _build_context(target_date, [], generated_items), generated_items
+
+
 def _ensure_today_plan() -> tuple[PlanScreenContext, list]:
     today = date.today()
-    return _load_persisted_plan(today)
+    return _load_plan_or_generate(today, auto_generate_if_missing=True)
 
 
 def _render_plan(context: PlanScreenContext, items: list):
@@ -286,7 +304,10 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         target_date = _resolve_target_date(parsed, cached_context)
         session_restored = bool(cached_context)
 
-        plan_context, plan_items = _load_persisted_plan(target_date)
+        plan_context, plan_items = _load_plan_or_generate(
+            target_date,
+            auto_generate_if_missing=parsed.view == "plan" and _is_today(target_date),
+        )
         raw_rows = orchestrator.state.load_publishing_plan(target_date.isoformat()) if hasattr(orchestrator.state, "load_publishing_plan") else []
         _log_plan_view(parsed.view, target_date, len(raw_rows), len(plan_items), session_restored=session_restored)
         logger.info(

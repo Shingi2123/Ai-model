@@ -232,6 +232,66 @@ def test_callback_back_to_plan_after_prompt(monkeypatch):
     assert context.user_data["plan_screen"] == "cached"
 
 
+def test_load_plan_or_generate_builds_today_plan_when_store_is_empty(monkeypatch):
+    module = _load_module()
+    target_date = date(2026, 3, 20)
+    empty_context = module.PlanScreenContext(
+        target_date=target_date,
+        city="",
+        day_type="work_day",
+        narrative_phase="routine_stability",
+        persona_timezone="Europe/Prague",
+        user_timezone="Asia/Pavlodar",
+    )
+    generated_item = types.SimpleNamespace(
+        publication_id="pub-1",
+        date=target_date,
+        platform="Instagram",
+        post_time="09:30",
+        content_type="photo",
+        city="Prague",
+        day_type="work_day",
+        narrative_phase="routine_stability",
+        scene_moment="Airport coffee before boarding",
+    )
+    generated_package = types.SimpleNamespace(city="Prague", publishing_plan=[generated_item])
+
+    load_calls = {"count": 0}
+
+    def fake_load(_target_date):
+        load_calls["count"] += 1
+        if load_calls["count"] == 1:
+            return empty_context, []
+        return (
+            module.PlanScreenContext(
+                target_date=target_date,
+                city="Prague",
+                day_type="work_day",
+                narrative_phase="routine_stability",
+                persona_timezone="Europe/Prague",
+                user_timezone="Asia/Pavlodar",
+            ),
+            [generated_item],
+        )
+
+    orchestrator_calls = []
+
+    monkeypatch.setattr(module, "_load_persisted_plan", fake_load)
+    monkeypatch.setattr(
+        module.orchestrator,
+        "generate_day",
+        lambda target_date: orchestrator_calls.append(target_date) or generated_package,
+        raising=False,
+    )
+
+    context, items = module._load_plan_or_generate(target_date, auto_generate_if_missing=True)
+
+    assert orchestrator_calls == [target_date]
+    assert context.city == "Prague"
+    assert len(items) == 1
+    assert items[0].publication_id == "pub-1"
+
+
 def test_select_screen_items_prefers_persisted_plan_for_detail_views():
     module = _load_module()
     target_date = date(2026, 3, 12)
