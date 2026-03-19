@@ -32,7 +32,7 @@ def test_identity_anchor_and_body_anchor_present_with_fallback(tmp_path):
 
     assert "stable identity anchor" in anchor
     assert "preferred_reference=half_body_reference" in body
-    assert "fallback" in body
+    assert "waist-up framing keeps stable torso length" in body
 
 
 def test_prompt_v4_uses_compact_mode_for_simple_selfie():

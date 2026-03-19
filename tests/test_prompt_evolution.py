@@ -171,7 +171,6 @@ def test_outfit_binding_and_continuity_cues_influence_final_prompt():
     final_prompt = package["final_prompt"]
 
     assert "cream cardigan + vintage denim" in final_prompt
-    assert "arrival_and_adaptation" in final_prompt
     assert "not fully unpacked luggage" in final_prompt
 
 
@@ -255,9 +254,10 @@ def test_final_prompt_is_generator_friendly_and_keeps_negative_separate():
     package = composer.compose_package(BASE_CONTEXT, scene, "cream cardigan", "photo", ["top_1"])
 
     lowered = package["final_prompt"].lower()
-    assert "same recurring woman" in lowered
-    assert "stable face geometry" in lowered
-    assert "grounded lifestyle styling" in lowered
+    assert "consistent face geometry" in lowered
+    assert "outfit:" in lowered
+    assert "environment:" in lowered
+    assert "mood:" in lowered
     assert "[negative_prompt]" not in package["final_prompt"]
 
 
@@ -276,13 +276,14 @@ def test_airport_travel_scene_aligns_shot_reference_and_framing_without_phone_cl
     assert package["shot_archetype"] == "friend_shot"
     assert package["generation_mode"] == "full-body_mode"
     assert package["reference_type"] == "full_body"
-    assert package["framing_mode"] == "friend-shot, 3/4 body walking candid with luggage visible"
-    assert "off-duty crew member" in lowered
-    assert "carry-on luggage stays visible in frame" in lowered
+    assert package["framing_mode"] == "3/4 body walking shot"
+    assert "3/4 body walking shot" in lowered
+    assert "off-duty flight attendant" in lowered
     assert "phone presence is natural to the shot" not in lowered
     assert "smartphone visible" not in lowered
     assert "phone in hand" not in lowered
-    assert "waist-up framing keeps stable torso length" not in lowered
+    assert "waist-up" not in lowered
+    assert "full body" not in lowered
 
 
 def test_between_flights_casual_airport_scene_is_marked_off_duty_and_physically_plausible():
@@ -297,10 +298,10 @@ def test_between_flights_casual_airport_scene_is_marked_off_duty_and_physically_
     package = composer.compose_package(BASE_CONTEXT, scene, "cream trench + denim", "photo", ["coat_1", "denim_1"])
     lowered = package["final_prompt"].lower()
 
-    assert "off-duty crew member between flights in a casual travel look" in lowered
-    assert "real terminal architecture" in lowered
-    assert "walking pose stays physically plausible" in lowered
-    assert len(package["final_prompt"]) < 900
+    assert "off-duty flight attendant between flights" in lowered
+    assert "realistic terminal architecture" in lowered
+    assert "movement stays physically plausible" in lowered
+    assert len(package["final_prompt"]) < 980
 
 
 def test_final_prompt_excludes_negative_style_phrases():
@@ -320,6 +321,30 @@ def test_final_prompt_excludes_negative_style_phrases():
 
     for phrase in banned_phrases:
         assert phrase not in lowered
+
+
+def test_prompt_v2_uses_structured_blocks_and_keeps_negative_terms_outside_positive():
+    composer = PromptComposer(DummyState())
+    scene = Scene()
+    scene.scene_moment = "Slow walk through a nearly empty terminal with carry-on"
+    scene.description = "Walking through the airport terminal before boarding"
+    scene.location = "airport terminal"
+    scene.activity = "walking"
+    scene.visual_focus = "carry-on and shoulder bag"
+
+    package = composer.compose_package(BASE_CONTEXT, scene, "black midi dress, white sneakers, beige trench coat", "photo", ["dress_1"])
+    blocks = [block.strip() for block in package["final_prompt"].split("\n\n") if block.strip()]
+    lowered = package["final_prompt"].lower()
+
+    assert len(blocks) >= 6
+    assert blocks[1].lower() == "3/4 body walking shot."
+    assert blocks[2].lower().startswith("off-duty flight attendant")
+    assert "no plastic skin" not in lowered
+    assert "no identity drift" not in lowered
+    assert "no duplicate people" not in lowered
+    assert "no distorted limbs" not in lowered
+    assert "no symmetry" not in lowered
+    assert "smartphone" not in lowered
 
 
 def test_platform_intent_changes_behavior_mode_and_polish_cues():

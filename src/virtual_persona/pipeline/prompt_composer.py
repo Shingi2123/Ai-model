@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Dict, List
 
 from virtual_persona.pipeline.identity import CharacterIdentityManager
@@ -291,9 +292,9 @@ class PromptComposer:
         if shot_archetype == "full_body":
             return "full body, head-to-toe"
         if shot_archetype == "friend_shot" and is_travel_walk:
-            return "friend-shot, 3/4 body walking candid with luggage visible"
+            return "3/4 body walking shot"
         if generation_mode == "full-body_mode" and shot_archetype in {"friend_shot", "candid_handheld"}:
-            return "3/4 body candid with full stance readable"
+            return "3/4 body shot"
         return self._framing_mode(shot_archetype, generation_mode)
 
     @staticmethod
@@ -537,7 +538,10 @@ class PromptComposer:
             cleaned = cleaned.replace(token, "")
             cleaned = cleaned.replace(token.title(), "")
             cleaned = cleaned.replace(token.upper(), "")
-        return " ".join(cleaned.split())
+        cleaned = re.sub(r"[ \t]+", " ", cleaned)
+        cleaned = re.sub(r" *\n *", "\n", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
 
     def _resolve_shot_archetype(self, scene: Any, context: Dict[str, Any], recent_moment_memory: List[Dict[str, Any]]) -> str:
         explicit = getattr(scene, "camera_archetype", "") or getattr(scene, "shot_archetype", "")
@@ -630,48 +634,181 @@ class PromptComposer:
         social_behavior: str,
         scene_tags: List[str],
     ) -> str:
-        lighting = self._lighting_hint(getattr(scene, "time_of_day", "day"))
-        visual_focus = str(getattr(scene, "visual_focus", "") or "").strip()
-        mood = str(getattr(scene, "mood", "") or "").strip()
-        action = str(getattr(scene, "activity", "") or "").strip()
-        scene_line = f"{scene_desc} in {scene_loc}"
-        if action:
-            scene_line += f", {action}"
-        if visual_focus:
-            scene_line += f", {visual_focus}"
-        if mood:
-            scene_line += f", facial mood {mood}"
+        del prefix, prompt_mode, body_anchor, device_identity, social_behavior
 
-        compact_parts = [
-            f"{prefix}: same recurring woman, stable face geometry, same body proportions",
-            self._compress_identity_anchor(identity_anchor),
-            self._compress_body_anchor(body_anchor, shot_archetype),
-            f"{framing_mode}; {shot_archetype}",
-            self._compose_scene_line(scene_line, scene_tags),
-            wardrobe_block.replace("outfit: ", "").replace("item_ids=", "items="),
-            f"lived-in environment, {lighting}",
-            "natural smartphone photo, candid realism, natural skin texture, real fabric folds, grounded lifestyle styling",
-            self._compress_continuity(continuity_block),
+        identity_block = self._identity_block(context=None, identity_anchor=identity_anchor)
+        framing_block = self._framing_block(framing_mode, shot_archetype, scene)
+        scene_block = self._scene_block(scene, scene_desc, scene_loc, scene_tags)
+        outfit_block = self._outfit_block(wardrobe_block)
+        environment_block = self._environment_block(scene, scene_loc, scene_tags, continuity_block)
+        mood_block = self._mood_block(scene, continuity_block)
+
+        blocks = [
+            identity_block,
+            framing_block,
+            scene_block,
+            outfit_block,
+            environment_block,
+            mood_block,
         ]
-        dense_parts = compact_parts[:]
-        dense_parts.insert(5, self._compress_device_identity(device_identity))
-        dense_parts.insert(6, social_behavior)
-        dense_parts.insert(7, realism_block.replace("realism: ", "").rstrip("."))
-        parts = compact_parts if prompt_mode == "compact" else dense_parts[:9]
-        prompt = ". ".join(part.strip().rstrip(".") for part in parts if part.strip()) + "."
-        if len(prompt) <= 880:
-            return prompt
+        prompt = "\n\n".join(block.strip().rstrip(".") + "." for block in blocks if block.strip())
+        cleaned = self._clean_generic_prompt_terms(prompt)
+        if len(cleaned) <= 980:
+            return cleaned
 
-        squeezed_parts = [
-            f"{prefix}: same recurring woman, stable face geometry, same body proportions",
+        fallback_blocks = [
             self._compact_identity_signature(identity_anchor),
-            f"{framing_mode}; {shot_archetype}",
-            self._compose_scene_line(scene_line, scene_tags),
-            wardrobe_block.replace("outfit: ", "").replace("item_ids=", "items="),
-            f"{lighting}; natural smartphone photo; grounded lifestyle realism",
-            self._compact_continuity_hint(continuity_block),
+            framing_block,
+            scene_block,
+            outfit_block,
+            environment_block,
+            mood_block,
         ]
-        return ". ".join(part.strip().rstrip(".") for part in squeezed_parts if part.strip()) + "."
+        return self._clean_generic_prompt_terms(
+            "\n\n".join(block.strip().rstrip(".") + "." for block in fallback_blocks if block.strip())
+        )
+
+    @staticmethod
+    def _identity_block(context: Dict[str, Any] | None, identity_anchor: str) -> str:
+        del context
+        values = {}
+        for chunk in identity_anchor.replace("stable identity anchor: ", "").split(";"):
+            if "=" not in chunk:
+                continue
+            key, value = chunk.split("=", 1)
+            values[key.strip()] = value.strip()
+        age = values.get("age", "22-year-old")
+        if age.isdigit():
+            age = f"{age}-year-old"
+        ethnicity = values.get("ethnicity", "European")
+        gender = values.get("gender_presentation", "female")
+        role = values.get("role", "flight attendant")
+        face = values.get("face", "soft oval face")
+        jaw = values.get("jawline", "soft jawline")
+        eyes = values.get("eyes", "green eyes")
+        lips = values.get("lips", "natural lips")
+        hair = values.get("hair", "light chestnut hair")
+        makeup = values.get("makeup", "minimal makeup")
+        return (
+            f"A realistic candid friend-shot of a {age} {ethnicity} {gender} {role}, with consistent face geometry and natural proportions. "
+            f"{face.capitalize()}, {jaw}, {eyes}, {lips}, {hair}, {makeup}"
+        )
+
+    def _framing_block(self, framing_mode: str, shot_archetype: str, scene: Any) -> str:
+        if "3/4 body" in framing_mode:
+            return "3/4 body walking shot"
+        if shot_archetype == "full_body":
+            return "Full body shot"
+        if shot_archetype == "seated_table_shot":
+            return "Waist-up seated candid shot"
+        if shot_archetype == "mirror_selfie":
+            return "Mirror selfie waist-up shot" if "waist-up" in framing_mode else "Mirror selfie head-and-shoulders shot"
+        if shot_archetype == "front_selfie":
+            return "Front selfie head-and-shoulders shot"
+        if shot_archetype == "close_portrait":
+            return "Close portrait shot"
+        return "Waist-up candid shot" if "waist-up" in framing_mode else "Candid shot"
+
+    def _scene_block(self, scene: Any, scene_desc: str, scene_loc: str, scene_tags: List[str]) -> str:
+        lowered = self._scene_text(scene).lower()
+        visual_focus = str(getattr(scene, "visual_focus", "") or "").strip()
+        time_phrase = self._lighting_hint(getattr(scene, "time_of_day", "day")).replace("daylight", "light")
+        tag_prefix = self._scene_tag_prefix(scene_tags)
+        if self._is_travel_walk(lowered):
+            sentence = f"Inside a nearly empty {scene_loc} during {self._time_scene_phrase(scene)}"
+            luggage_phrase = self._travel_luggage_phrase(lowered, visual_focus)
+            opening = f"{tag_prefix}. {sentence}" if tag_prefix else sentence
+            return f"{opening}. She walks slowly with relaxed posture{luggage_phrase}"
+
+        parts = [f"{scene_desc} in {scene_loc}"]
+        if tag_prefix:
+            parts.insert(0, tag_prefix)
+        activity = str(getattr(scene, "activity", "") or "").strip()
+        if activity:
+            parts.append(activity.replace("_", " "))
+        if visual_focus:
+            parts.append(visual_focus)
+        if time_phrase:
+            parts.append(time_phrase)
+        return ", ".join(parts)
+
+    def _outfit_block(self, wardrobe_block: str) -> str:
+        cleaned = wardrobe_block.replace("outfit: ", "").strip()
+        cleaned = cleaned.split(";")[0].strip().rstrip(".")
+        return f"Outfit: {cleaned}, natural fabric folds"
+
+    def _environment_block(self, scene: Any, scene_loc: str, scene_tags: List[str], continuity_block: str) -> str:
+        del continuity_block
+        lighting = self._lighting_hint(getattr(scene, "time_of_day", "day"))
+        parts: List[str] = []
+        lowered_loc = str(scene_loc or "").lower()
+        if any(token in lowered_loc for token in ["airport", "terminal"]):
+            parts.append("Environment: realistic terminal architecture, soft reflections, minimal background people, natural depth")
+        else:
+            parts.append(f"Environment: realistic {scene_loc}, natural depth, lived-in details")
+        if any("walking pose stays physically plausible" in tag for tag in scene_tags):
+            parts.append("Movement stays physically plausible")
+        parts.append(f"Lighting: {lighting}")
+        return ". ".join(parts)
+
+    def _mood_block(self, scene: Any, continuity_block: str) -> str:
+        mood = str(getattr(scene, "mood", "") or "").strip() or "natural"
+        continuity = self._extract_continuity_hint(continuity_block)
+        bits = [mood]
+        if continuity:
+            bits.append(continuity)
+        return f"Mood: {', '.join(bits)}"
+
+    @staticmethod
+    def _extract_continuity_hint(continuity_block: str) -> str:
+        for part in continuity_block.replace("continuity: ", "").split(";"):
+            cleaned = part.strip()
+            if cleaned.startswith("hint="):
+                return cleaned.replace("hint=", "").strip()
+        return ""
+
+    @staticmethod
+    def _travel_luggage_phrase(lowered_scene_text: str, visual_focus: str) -> str:
+        if "suitcase" in lowered_scene_text or "carry-on" in lowered_scene_text or "carry on" in lowered_scene_text:
+            return ", pulling a wheeled carry-on suitcase"
+        if "luggage" in lowered_scene_text:
+            return ", pulling her luggage"
+        if "shoulder bag" in lowered_scene_text or "bag" in visual_focus.lower():
+            return ", carrying a shoulder bag"
+        return ""
+
+    @staticmethod
+    def _time_scene_phrase(scene: Any) -> str:
+        time_of_day = str(getattr(scene, "time_of_day", "") or "").strip().lower()
+        mapping = {
+            "early_morning": "a calm early morning",
+            "morning": "a calm morning",
+            "late_morning": "a calm late morning",
+            "noon": "midday",
+            "afternoon": "a calm afternoon",
+            "golden_hour": "golden hour",
+            "evening": "a quiet evening",
+            "night": "a quiet night",
+        }
+        return mapping.get(time_of_day, "a calm day")
+
+    @staticmethod
+    def _is_travel_walk(lowered_scene_text: str) -> bool:
+        return (
+            any(token in lowered_scene_text for token in ["airport", "terminal", "travel", "flight", "layover", "boarding"])
+            and any(token in lowered_scene_text for token in ["walking", "walk", "stroll", "moving through", "crossing"])
+            and any(token in lowered_scene_text for token in ["luggage", "suitcase", "carry-on", "carry on", "roller bag", "shoulder bag"])
+        )
+
+    @staticmethod
+    def _scene_tag_prefix(scene_tags: List[str]) -> str:
+        for tag in scene_tags:
+            lowered = tag.lower()
+            if "off-duty crew member between flights" in lowered:
+                return "Off-duty flight attendant between flights"
+            if "off-duty crew member" in lowered:
+                return "Off-duty flight attendant"
+        return ""
 
     @staticmethod
     def _compose_scene_line(scene_line: str, scene_tags: List[str]) -> str:
