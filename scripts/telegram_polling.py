@@ -18,6 +18,7 @@ import logging
 import sys
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -57,6 +58,16 @@ if not isinstance(orchestrator.state, TelegramStateView):
 
 GET_PLAN_BUTTON = "📅 Получить план на сегодня"
 logger = logging.getLogger(__name__)
+MISSING_PLAN_MESSAGE = (
+    "📭 План на сегодня ещё не подготовлен.\n\n"
+    "Сначала выполните генерацию дня отдельно, затем снова откройте план.\n\n"
+    "Что делать:\n"
+    "1. Запустить generate-day\n"
+    "2. При необходимости отправить план через send-telegram\n"
+    "3. Вернуться в бота и нажать «Получить план на сегодня»\n\n"
+    "Рекомендуемая команда:\n"
+    "python main.py generate-day"
+)
 
 
 def _inline_markup(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
@@ -111,7 +122,7 @@ def _load_plan_or_generate(target_date: date, *, auto_generate_if_missing: bool 
 
 def _ensure_today_plan() -> tuple[PlanScreenContext, list]:
     today = date.today()
-    return _load_plan_or_generate(today, auto_generate_if_missing=True)
+    return _load_persisted_plan(today)
 
 
 def _render_plan(context: PlanScreenContext, items: list):
@@ -162,16 +173,44 @@ def _log_plan_view(action: str, target_date: date, raw_rows: int, deduped_rows: 
     )
 
 
-def _load_today_package_and_plan():
-    today = date.today()
-    plan_context, items = _load_persisted_plan(today)
-    if not items:
-        package = orchestrator.generate_day(target_date=today)
-        return package, package.publishing_plan or []
-    package = orchestrator._load_frozen_day(today)
-    if package is None:
-        package = orchestrator.generate_day(target_date=today)
-    return package, items
+def _log_plan_lookup(target_date: date, items: list) -> None:
+    if items:
+        logger.info("telegram_polling plan lookup: found existing plan for %s", target_date.isoformat())
+        return
+    logger.info("telegram_polling autogenerate disabled in UI flow")
+    logger.info(
+        "telegram_polling plan lookup: no plan found for %s, returning missing-plan message",
+        target_date.isoformat(),
+    )
+
+
+def _render_missing_plan(context: PlanScreenContext):
+    return MISSING_PLAN_MESSAGE, _inline_markup(build_plan_keyboard([], context.target_date))
+
+
+def _build_command_package(plan_context: PlanScreenContext):
+    return SimpleNamespace(
+        date=plan_context.target_date,
+        city=plan_context.city or "Unknown",
+        day_type=plan_context.day_type,
+        life_state=SimpleNamespace(
+            narrative_phase=plan_context.narrative_phase,
+            energy_state="medium",
+            rhythm_state="stable",
+        ),
+    )
+
+
+def _load_plan_for_ui(target_date: date, *, action: str, session_restored: bool) -> tuple[PlanScreenContext, list, bool]:
+    context, items = _load_persisted_plan(target_date)
+    raw_rows = (
+        orchestrator.state.load_publishing_plan(target_date.isoformat())
+        if hasattr(orchestrator.state, "load_publishing_plan")
+        else []
+    )
+    _log_plan_view(action, target_date, len(raw_rows), len(items), session_restored=session_restored)
+    _log_plan_lookup(target_date, items)
+    return context, items, bool(items)
 
 
 async def safe_edit_message(
@@ -280,11 +319,12 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def show_today_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     loading = await update.message.reply_text("⏳ Формирую план на сегодня...")
     try:
-        plan_context, items = _ensure_today_plan()
-        raw_rows = orchestrator.state.load_publishing_plan(plan_context.target_date.isoformat()) if hasattr(orchestrator.state, "load_publishing_plan") else []
-        _log_plan_view("show_today", plan_context.target_date, len(raw_rows), len(items), session_restored=False)
-        text, markup = _render_plan(plan_context, items)
-        context.user_data["plan_screen"] = serialize_context(plan_context, items)
+        plan_context, items, has_plan = _load_plan_for_ui(date.today(), action="show_today", session_restored=False)
+        if has_plan:
+            text, markup = _render_plan(plan_context, items)
+            context.user_data["plan_screen"] = serialize_context(plan_context, items)
+        else:
+            text, markup = _render_missing_plan(plan_context)
         await loading.edit_text(text=text, reply_markup=markup)
     except Exception as exc:
         logger.exception("telegram_plan_view failed action=show_today error=%s", exc)
@@ -304,16 +344,15 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         target_date = _resolve_target_date(parsed, cached_context)
         session_restored = bool(cached_context)
 
-        plan_context, plan_items = _load_plan_or_generate(
+        plan_context, plan_items, has_plan = _load_plan_for_ui(
             target_date,
-            auto_generate_if_missing=parsed.view == "plan" and _is_today(target_date),
+            action=parsed.view,
+            session_restored=session_restored,
         )
-        raw_rows = orchestrator.state.load_publishing_plan(target_date.isoformat()) if hasattr(orchestrator.state, "load_publishing_plan") else []
-        _log_plan_view(parsed.view, target_date, len(raw_rows), len(plan_items), session_restored=session_restored)
         logger.info(
             "telegram_callback plan_loaded date=%s rows=%s deduped_rows=%s",
             target_date.isoformat(),
-            len(raw_rows),
+            len(plan_items),
             len(plan_items),
         )
 
@@ -332,7 +371,10 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "caption_text,short_caption,reference_type,generation_mode,identity_mode,framing_mode",
         )
 
-        (text, markup), should_cache = _render_callback_screen(parsed=parsed, plan_context=plan_context, items=items)
+        if not has_plan and not items:
+            (text, markup), should_cache = (_render_missing_plan(plan_context), False)
+        else:
+            (text, markup), should_cache = _render_callback_screen(parsed=parsed, plan_context=plan_context, items=items)
         if should_cache:
             context.user_data["plan_screen"] = serialize_context(plan_context, items)
 
@@ -352,10 +394,13 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def plan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     command = f"/{update.message.text.split()[0].lstrip('/').lower()}"
-    package, items = _load_today_package_and_plan()
+    plan_context, items, has_plan = _load_plan_for_ui(date.today(), action=command, session_restored=False)
+    if not has_plan:
+        await update.message.reply_text(MISSING_PLAN_MESSAGE)
+        return
+    package = _build_command_package(plan_context)
     filtered = filter_plan_items(items, command)
-    persona_timezone = orchestrator.telegram_delivery_service._resolve_persona_timezone(package.city)
-    text = format_command_message(package, filtered, command, persona_timezone, settings.user_timezone)
+    text = format_command_message(package, filtered, command, plan_context.persona_timezone, settings.user_timezone)
     for part in split_for_telegram(text):
         await update.message.reply_text(part)
 
