@@ -133,7 +133,18 @@ def _context_and_items(module):
         persona_timezone="Europe/Paris",
         user_timezone="Asia/Pavlodar",
     )
-    return plan_context, []
+    item = types.SimpleNamespace(
+        publication_id="pub-1",
+        date=date(2026, 3, 12),
+        platform="Instagram",
+        post_time="09:30",
+        content_type="photo",
+        city="Paris",
+        day_type="work_day",
+        narrative_phase="recovery_phase",
+        scene_moment="Morning coffee before leaving home",
+    )
+    return plan_context, [item]
 
 
 def test_callback_refresh_ignores_message_not_modified(monkeypatch):
