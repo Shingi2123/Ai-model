@@ -64,8 +64,8 @@ class PublishingPlanEngine:
         for idx, ranked_moment in enumerate(selected):
             scene = ranked_moment.scene
             content_type = content_types[idx]
-            prompt_text = self._pick_prompt_text(package, scene, content_type)
             prompt_meta = self._pick_prompt_package(package, scene, content_type)
+            prompt_text = self._pick_prompt_text(scene, prompt_meta)
             caption = package.content.post_caption
             selection_reason = self._selection_reason(scene)
             item = PublishingPlanItem(
@@ -517,14 +517,10 @@ class PublishingPlanEngine:
         return text or fallback
 
     @staticmethod
-    def _pick_prompt_text(package: DailyPackage, scene: DayScene, content_type: str) -> str:
-        index = next((i for i, s in enumerate(package.scenes) if s == scene), 0)
-        if content_type in {"video", "reel"} and package.content.video_prompts:
-            return package.content.video_prompts[min(index, len(package.content.video_prompts) - 1)]
-        if content_type in {"story", "stories", "text_note", "text"} and package.content.story_lines:
-            return package.content.story_lines[min(index, len(package.content.story_lines) - 1)]
-        if package.content.photo_prompts:
-            return package.content.photo_prompts[min(index, len(package.content.photo_prompts) - 1)]
+    def _pick_prompt_text(scene: DayScene, prompt_meta: Dict[str, Any]) -> str:
+        final_prompt = str(prompt_meta.get("final_prompt") or "").strip()
+        if final_prompt:
+            return final_prompt
         return scene.scene_moment or scene.description
 
 

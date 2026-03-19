@@ -1,4 +1,5 @@
 from datetime import date, datetime
+import json
 
 from virtual_persona.models.domain import (
     DailyPackage,
@@ -259,7 +260,7 @@ def test_publishing_plan_keeps_required_text_fields_non_empty_even_with_empty_ca
     engine = PublishingPlanEngine(state)
     package = _build_package(day_type="travel_day", phase="transition_phase")
     package.content.post_caption = ""
-    package.content.photo_prompts = [""] * len(package.scenes)
+    package.content.photo_prompts = ["legacy-photo-prompt"] * len(package.scenes)
 
     rows = engine.generate(package)
 
@@ -267,6 +268,23 @@ def test_publishing_plan_keeps_required_text_fields_non_empty_even_with_empty_ca
     assert all(row.prompt_text.strip() for row in rows)
     assert all(row.caption_text.strip() for row in rows)
     assert all(row.short_caption.strip() for row in rows)
+    assert all(row.prompt_text == json.loads(row.prompt_package_json)["final_prompt"] for row in rows)
+
+
+def test_publishing_plan_uses_prompt_package_final_prompt_as_canonical_source():
+    state = DummyState()
+    engine = PublishingPlanEngine(state)
+    package = _build_package(day_type="travel_day", phase="transition_phase")
+    package.content.photo_prompts = [
+        "legacy formatted prompt with half-body and 3/4 body framing from waist-up",
+        "legacy second prompt",
+        "legacy third prompt",
+    ]
+
+    rows = engine.generate(package)
+
+    assert all(row.prompt_text == json.loads(row.prompt_package_json)["final_prompt"] for row in rows)
+    assert all("half-body and 3/4 body framing from waist-up" not in row.prompt_text.lower() for row in rows)
 
 
 def test_publishing_plan_uses_default_rules_when_store_has_none():

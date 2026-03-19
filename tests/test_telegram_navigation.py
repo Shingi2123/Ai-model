@@ -335,3 +335,42 @@ def test_prompt_screen_uses_only_canonical_detail_fields_not_debug_strings():
     assert "mirror selfie, head-and-shoulders" in text
     assert "debug-string" not in text
     assert "score=9.5" not in text
+
+
+def test_item_from_row_replaces_legacy_prompt_with_canonical_final_prompt():
+    row = {
+        "publication_id": "pub-legacy",
+        "date": "2026-03-12",
+        "platform": "Instagram",
+        "post_time": "09:30",
+        "content_type": "photo",
+        "scene_moment": "Walking through the airport terminal before boarding",
+        "prompt_text": "Half-body and 3/4 body framing from waist-up, no plastic skin, rounded personal smartphone in hand",
+        "prompt_package_json": (
+            '{"final_prompt":"A realistic candid airport walk.\\n\\n3/4 body walking shot.\\n\\n'
+            'Off-duty crew member between flights in a casual travel look.",'
+            '"prompt_format_version":"v5"}'
+        ),
+    }
+
+    item = item_from_row(row, date(2026, 3, 12))
+
+    assert "Half-body" not in item.prompt_text
+    assert "3/4 body walking shot" in item.prompt_text
+
+
+def test_prompt_screen_does_not_render_legacy_prompt_when_canonical_prompt_exists():
+    item = _item()
+    item.scene_moment = "Walking through the airport terminal before boarding"
+    item.prompt_text = "Half-body and 3/4 body framing from waist-up, no plastic skin"
+    item.prompt_package_json = (
+        '{"final_prompt":"A realistic candid airport walk.\\n\\n3/4 body walking shot.\\n\\n'
+        'Off-duty crew member between flights in a casual travel look.",'
+        '"prompt_format_version":"v5"}'
+    )
+
+    text = format_prompt_screen(item, 0)
+
+    assert "Half-body and 3/4 body framing from waist-up" not in text
+    assert "no plastic skin" not in text
+    assert "3/4 body walking shot" in text

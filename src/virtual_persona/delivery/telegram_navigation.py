@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from virtual_persona.delivery.publishing_formatter import _convert_time_for_user, _post_header_emoji
-from virtual_persona.delivery.publishing_plan_normalizer import format_reference_aliases, item_from_payload
+from virtual_persona.delivery.publishing_plan_normalizer import format_reference_aliases, item_from_payload, resolve_canonical_prompt
 from virtual_persona.models.domain import PublishingPlanItem
 
 
@@ -135,7 +135,8 @@ def _format_manual_generation_step(step: str | None) -> str:
 
 
 def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
-    prompt = _display_value(item.prompt_text, "Нет сохранённого prompt для этого поста.")
+    prompt_value, prompt_source, legacy_detected, prompt_format_version = resolve_canonical_prompt(item)
+    prompt = _display_value(prompt_value, "Нет сохранённого prompt для этого поста.")
     caption = _display_value(item.caption_text, "Нет сохранённой подписи.")
     short_caption = _display_value(item.short_caption or item.caption_text, "Нет короткой подписи.")
     negative = _display_value(item.negative_prompt, "No negative prompt.")
@@ -150,8 +151,11 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
     manual_generation_step = _format_manual_generation_step(item.manual_generation_step)
 
     logger.info(
-        "telegram_detail_render publication_id=%s caption=%r short_caption=%r reference_type=%r generation_mode=%r identity_mode=%r framing_mode=%r",
+        "telegram_detail_render publication_id=%s prompt_source=%s prompt_format_version=%s legacy_prompt_detected=%s caption=%r short_caption=%r reference_type=%r generation_mode=%r identity_mode=%r framing_mode=%r",
         item.publication_id,
+        prompt_source,
+        prompt_format_version or "unknown",
+        "yes" if legacy_detected else "no",
         item.caption_text,
         item.short_caption,
         item.reference_type or item.reference_pack_type,

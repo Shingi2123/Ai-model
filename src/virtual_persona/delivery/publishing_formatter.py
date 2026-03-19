@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Iterable, List
 from zoneinfo import ZoneInfo
 
+from virtual_persona.delivery.publishing_plan_normalizer import resolve_canonical_prompt
 from virtual_persona.models.domain import DailyPackage, PublishingPlanItem
 
 
@@ -131,12 +132,13 @@ def _format_detailed_prompt(items: list[PublishingPlanItem], content_filter: set
         return "Нет подходящих публикаций."
 
     def _render(item: PublishingPlanItem, idx: int) -> str:
+        prompt_text, _, _, _ = resolve_canonical_prompt(item)
         base = (
             f"🧠 #{idx} {item.platform} / {item.content_type.title()}\n"
             f"🎯 {item.scene_moment}\n\n"
             f"✍️ Caption:\n{item.caption_text}\n\n"
             f"📝 Short caption:\n{item.short_caption or item.caption_text}\n\n"
-            f"🖼 Prompt:\n{item.prompt_text}"
+            f"🖼 Prompt:\n{prompt_text}"
         )
         details = [base]
         if getattr(item, "negative_prompt", ""):

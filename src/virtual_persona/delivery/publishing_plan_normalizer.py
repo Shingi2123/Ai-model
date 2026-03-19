@@ -102,6 +102,22 @@ FRAMING_PATTERNS = (
 )
 MODE_TOKEN_RE = re.compile(r"(?:^|[\s,;/])[\w-]+_mode(?:$|[\s,;/])", re.IGNORECASE)
 NUMBER_RE = re.compile(r"^\d+(?:\.\d+)?$")
+LEGACY_PROMPT_PATTERNS = (
+    "half-body and 3/4 body framing from waist-up",
+    "half-body",
+    "from waist-up",
+    "no plastic skin",
+    "no identity drift",
+    "no duplicate people",
+    "no distorted limbs",
+    "no fashion catalog symmetry",
+    "no symmetry",
+    "no overproduced lighting",
+    "no overproduced campaign lighting",
+)
+TRAVEL_TOKENS = ("airport", "terminal", "travel", "flight", "layover", "boarding")
+TRAVEL_WALK_TOKENS = ("walk", "walking", "stroll", "moving through")
+SMARTPHONE_TOKENS = ("rounded personal smartphone", "personal smartphone", "smartphone in hand", "phone in hand")
 
 
 def _to_mapping(source: Mapping[str, Any] | PublishingPlanItem | Any) -> dict[str, Any]:
@@ -185,6 +201,58 @@ def load_prompt_meta(source: Mapping[str, Any] | PublishingPlanItem | Any) -> di
     except (TypeError, ValueError, json.JSONDecodeError):
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def is_legacy_prompt(text: str, *, row: Mapping[str, Any] | None = None, prompt_meta: Mapping[str, Any] | None = None) -> bool:
+    lowered = " ".join(str(text or "").lower().split())
+    if not lowered:
+        return False
+    if any(token in lowered for token in LEGACY_PROMPT_PATTERNS):
+        return True
+
+    scene_text = " ".join(
+        [
+            _extract_value(row or {}, "scene_moment", "moment"),
+            _extract_value(row or {}, "scene_source"),
+            _extract_value(prompt_meta or {}, "scene_context"),
+        ]
+    ).lower()
+    is_travel_walk = any(token in scene_text for token in TRAVEL_TOKENS) and any(token in scene_text for token in TRAVEL_WALK_TOKENS)
+    if is_travel_walk and any(token in lowered for token in SMARTPHONE_TOKENS):
+        return True
+    return False
+
+
+def resolve_canonical_prompt(
+    source: Mapping[str, Any] | PublishingPlanItem | Any,
+    *,
+    default: str = "",
+) -> tuple[str, str, bool, str]:
+    row = _to_mapping(source)
+    prompt_meta = load_prompt_meta(row)
+    row_prompt = _extract_value(row, "prompt_text", "prompt")
+    meta_prompt = _extract_value(prompt_meta, "final_prompt")
+    meta_version = _extract_value(prompt_meta, "prompt_format_version") or ("v5" if meta_prompt else "")
+
+    row_legacy = is_legacy_prompt(row_prompt, row=row, prompt_meta=prompt_meta)
+    meta_legacy = is_legacy_prompt(meta_prompt, row=row, prompt_meta=prompt_meta)
+
+    if row_legacy:
+        logger.warning(
+            "publishing_plan_normalizer legacy_prompt_detected publication_id=%s source=row.prompt_text",
+            _extract_value(row, "publication_id") or "<missing>",
+        )
+    if meta_prompt and meta_legacy:
+        logger.warning(
+            "publishing_plan_normalizer legacy_prompt_detected publication_id=%s source=prompt_package_json.final_prompt",
+            _extract_value(row, "publication_id") or "<missing>",
+        )
+
+    if meta_prompt and not meta_legacy:
+        return meta_prompt, "prompt_package_json.final_prompt", row_legacy or meta_legacy, meta_version or "v5"
+    if row_prompt and not row_legacy:
+        return row_prompt, "item.prompt_text", row_legacy or meta_legacy, meta_version
+    return default, "missing", row_legacy or meta_legacy, meta_version
 
 
 def _resolve_field(
@@ -298,13 +366,7 @@ def normalize_publishing_plan_payload(
         "activity_type": _extract_value(row, "activity_type"),
         "outfit_ids": outfit_ids,
         "prompt_type": _extract_value(row, "prompt_type"),
-        "prompt_text": _resolve_field(
-            row,
-            prompt_meta,
-            field_name="prompt_text",
-            row_keys=("prompt_text", "prompt"),
-            meta_keys=("final_prompt", "prompt_text", "prompt"),
-        ),
+        "prompt_text": resolve_canonical_prompt(row)[0],
         "negative_prompt": _resolve_field(
             row,
             prompt_meta,

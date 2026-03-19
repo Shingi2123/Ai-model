@@ -282,6 +282,7 @@ def test_airport_travel_scene_aligns_shot_reference_and_framing_without_phone_cl
     assert "phone presence is natural to the shot" not in lowered
     assert "smartphone visible" not in lowered
     assert "phone in hand" not in lowered
+    assert "half-body" not in lowered
     assert "waist-up" not in lowered
     assert "full body" not in lowered
 
@@ -344,6 +345,7 @@ def test_prompt_v2_uses_structured_blocks_and_keeps_negative_terms_outside_posit
     assert "no duplicate people" not in lowered
     assert "no distorted limbs" not in lowered
     assert "no symmetry" not in lowered
+    assert "half-body" not in lowered
     assert "smartphone" not in lowered
 
 

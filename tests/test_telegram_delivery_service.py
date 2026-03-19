@@ -77,6 +77,24 @@ def test_command_views_for_captions_moments_photo_video():
     assert "Photo" not in video_text
 
 
+def test_command_views_use_canonical_prompt_instead_of_legacy_item_prompt():
+    package = _pkg()
+    item = _item(content_type="photo")
+    item.scene_moment = "Walking through the airport terminal before boarding"
+    item.prompt_text = "Half-body and 3/4 body framing from waist-up, no identity drift"
+    item.prompt_package_json = (
+        '{"final_prompt":"A realistic candid airport walk.\\n\\n3/4 body walking shot.\\n\\n'
+        'Off-duty crew member in a casual layover travel look.",'
+        '"prompt_format_version":"v5"}'
+    )
+
+    photo_text = format_command_message(package, [item], "/photo", "Europe/Paris", "Asia/Pavlodar")
+
+    assert "Half-body and 3/4 body framing from waist-up" not in photo_text
+    assert "no identity drift" not in photo_text
+    assert "3/4 body walking shot" in photo_text
+
+
 def test_timezone_resolution_uses_cities_sheet_before_default():
     from virtual_persona.config.settings import AppSettings
     from virtual_persona.delivery.telegram_delivery_service import TelegramDeliveryService

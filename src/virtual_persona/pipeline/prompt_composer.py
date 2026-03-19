@@ -197,6 +197,7 @@ class PromptComposer:
             scene_tags=scene_alignment.get("scene_tags", []),
         )
         ordered_blocks["final_prompt"] = self._clean_generic_prompt_terms(final_prompt)
+        ordered_blocks["prompt_format_version"] = "v5"
         ordered_blocks["shot_archetype"] = shot_archetype
         ordered_blocks["platform_behavior"] = platform_behavior
         ordered_blocks["generation_mode"] = generation_mode
