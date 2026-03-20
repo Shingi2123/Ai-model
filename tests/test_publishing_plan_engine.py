@@ -287,6 +287,24 @@ def test_publishing_plan_uses_prompt_package_final_prompt_as_canonical_source():
     assert all("half-body and 3/4 body framing from waist-up" not in row.prompt_text.lower() for row in rows)
 
 
+def test_publishing_plan_normalizer_prefers_only_prompt_package_final_prompt():
+    from virtual_persona.delivery.publishing_plan_normalizer import resolve_canonical_prompt
+
+    item = engine_item = _build_package(day_type="travel_day", phase="transition_phase").content.prompt_packages[0]["photo"]
+    resolved, source, legacy, version = resolve_canonical_prompt(
+        {
+            "publication_id": "pub-1",
+            "prompt_text": "legacy row prompt",
+            "prompt_package_json": json.dumps(engine_item, ensure_ascii=False),
+        }
+    )
+
+    assert resolved == engine_item["final_prompt"]
+    assert source == "prompt_package_json.final_prompt"
+    assert legacy is False
+    assert version
+
+
 def test_publishing_plan_uses_default_rules_when_store_has_none():
     state = DummyState(rules=[])
     engine = PublishingPlanEngine(state)

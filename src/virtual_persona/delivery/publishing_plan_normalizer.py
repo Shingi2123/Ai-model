@@ -230,18 +230,9 @@ def resolve_canonical_prompt(
 ) -> tuple[str, str, bool, str]:
     row = _to_mapping(source)
     prompt_meta = load_prompt_meta(row)
-    row_prompt = _extract_value(row, "prompt_text", "prompt")
     meta_prompt = _extract_value(prompt_meta, "final_prompt")
-    meta_version = _extract_value(prompt_meta, "prompt_format_version") or ("v5" if meta_prompt else "")
-
-    row_legacy = is_legacy_prompt(row_prompt, row=row, prompt_meta=prompt_meta)
+    meta_version = _extract_value(prompt_meta, "prompt_format_version") or ("v6" if meta_prompt else "")
     meta_legacy = is_legacy_prompt(meta_prompt, row=row, prompt_meta=prompt_meta)
-
-    if row_legacy:
-        logger.warning(
-            "publishing_plan_normalizer legacy_prompt_detected publication_id=%s source=row.prompt_text",
-            _extract_value(row, "publication_id") or "<missing>",
-        )
     if meta_prompt and meta_legacy:
         logger.warning(
             "publishing_plan_normalizer legacy_prompt_detected publication_id=%s source=prompt_package_json.final_prompt",
@@ -253,13 +244,10 @@ def resolve_canonical_prompt(
     if meta_prompt and not meta_legacy:
         resolved_prompt = meta_prompt
         prompt_source = "prompt_package_json.final_prompt"
-    elif row_prompt and not row_legacy:
-        resolved_prompt = row_prompt
-        prompt_source = "item.prompt_text"
     else:
         resolved_prompt = default
 
-    return resolved_prompt, prompt_source, row_legacy or meta_legacy, meta_version or ("v5" if resolved_prompt == meta_prompt and resolved_prompt else "")
+    return resolved_prompt, prompt_source, meta_legacy, meta_version or ("v6" if resolved_prompt == meta_prompt and resolved_prompt else "")
 
 
 def _resolve_field(

@@ -145,12 +145,12 @@ class ContentGenerator:
             video_package = self.prompt_composer.compose_package(context, scene, outfit_summary, 'video', outfit_item_ids)
             story_package = self.prompt_composer.compose_package(context, scene, outfit_summary, 'story', outfit_item_ids)
 
-            photo_prompt_text = f"{self.prompt_formatter.format_for_provider(photo_package, 'flux')} {self._safe_format(photo_template, mapping)}"
-            video_prompt_text = f"{self.prompt_formatter.format_for_provider(video_package, 'image_to_video')} {self._safe_format(video_template, mapping)}"
+            photo_prompt_text = photo_package["final_prompt"]
+            video_prompt_text = video_package["final_prompt"]
             story_text = f"{story_package['final_prompt']} {self._safe_format(story_template, mapping)}"
 
-            photo_prompts.append(self.provider.generate(photo_prompt_text))
-            video_prompts.append(self.provider.generate(video_prompt_text))
+            photo_prompts.append(photo_prompt_text)
+            video_prompts.append(video_prompt_text)
             story_lines.append(self.provider.generate(story_text))
             prompt_packages.append({
                 "scene_index": len(prompt_packages),

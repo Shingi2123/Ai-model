@@ -10,6 +10,19 @@ from virtual_persona.pipeline.identity import CharacterIdentityManager
 @dataclass
 class PromptComposer:
     state_store: Any
+    CANONICAL_PROMPT_VERSION = "v6"
+    CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
+    FORBIDDEN_POSITIVE_PHRASES: tuple[str, ...] = (
+        "no plastic skin",
+        "no identity drift",
+        "no duplicate people",
+        "no distorted limbs",
+        "no distorted proportions",
+        "no fashion catalog symmetry",
+        "no editorial fashion look",
+        "no overproduced campaign lighting",
+        "half-body and 3/4 body framing from waist-up",
+    )
 
     CAMERA_ARCHETYPES: Dict[str, Dict[str, str]] = None  # type: ignore[assignment]
     GENERATION_MODE_REGISTRY: Dict[str, Dict[str, Any]] = None  # type: ignore[assignment]
@@ -178,9 +191,7 @@ class PromptComposer:
             "video_camera_motion": "light handheld or slow tripod drift",
         }
 
-        prefix = blocks.get("prompt_v2_prefix", "Prompt System v5")
         final_prompt = self._build_final_prompt(
-            prefix=prefix,
             prompt_mode=prompt_mode,
             identity_anchor=identity_anchor,
             body_anchor=body_anchor,
@@ -196,8 +207,8 @@ class PromptComposer:
             social_behavior=ordered_blocks["social_behavior"],
             scene_tags=scene_alignment.get("scene_tags", []),
         )
-        ordered_blocks["final_prompt"] = self._clean_generic_prompt_terms(final_prompt)
-        ordered_blocks["prompt_format_version"] = "v5"
+        ordered_blocks["final_prompt"] = final_prompt
+        ordered_blocks["prompt_format_version"] = self.CANONICAL_PROMPT_VERSION
         ordered_blocks["shot_archetype"] = shot_archetype
         ordered_blocks["platform_behavior"] = platform_behavior
         ordered_blocks["generation_mode"] = generation_mode
@@ -619,7 +630,6 @@ class PromptComposer:
     def _build_final_prompt(
         self,
         *,
-        prefix: str,
         prompt_mode: str,
         identity_anchor: str,
         body_anchor: str,
@@ -635,9 +645,9 @@ class PromptComposer:
         social_behavior: str,
         scene_tags: List[str],
     ) -> str:
-        del prefix, prompt_mode, body_anchor, device_identity, social_behavior
+        del prompt_mode, device_identity, social_behavior
 
-        identity_block = self._identity_block(context=None, identity_anchor=identity_anchor)
+        identity_block = self._identity_block(identity_anchor=identity_anchor, body_anchor=body_anchor)
         framing_block = self._framing_block(framing_mode, shot_archetype, scene)
         scene_block = self._scene_block(scene, scene_desc, scene_loc, scene_tags)
         outfit_block = self._outfit_block(wardrobe_block)
@@ -652,113 +662,210 @@ class PromptComposer:
             environment_block,
             mood_block,
         ]
-        prompt = "\n\n".join(block.strip().rstrip(".") + "." for block in blocks if block.strip())
-        cleaned = self._clean_generic_prompt_terms(prompt)
-        if len(cleaned) <= 980:
-            return cleaned
-
-        fallback_blocks = [
-            self._compact_identity_signature(identity_anchor),
-            framing_block,
-            scene_block,
-            outfit_block,
-            environment_block,
-            mood_block,
-        ]
-        return self._clean_generic_prompt_terms(
-            "\n\n".join(block.strip().rstrip(".") + "." for block in fallback_blocks if block.strip())
-        )
+        prompt = "\n\n".join(block.strip() for block in blocks if block.strip())
+        self._validate_canonical_prompt(prompt, scene)
+        return prompt
 
     @staticmethod
-    def _identity_block(context: Dict[str, Any] | None, identity_anchor: str) -> str:
-        del context
-        values = {}
-        for chunk in identity_anchor.replace("stable identity anchor: ", "").split(";"):
+    def _parse_anchor_values(anchor: str, prefix: str) -> Dict[str, str]:
+        values: Dict[str, str] = {}
+        for chunk in anchor.replace(prefix, "").split(";"):
             if "=" not in chunk:
                 continue
             key, value = chunk.split("=", 1)
-            values[key.strip()] = value.strip()
-        age = values.get("age", "22-year-old")
+            cleaned_key = key.strip()
+            cleaned_value = value.strip()
+            if cleaned_key and cleaned_value:
+                values[cleaned_key] = cleaned_value
+        return values
+
+    def _identity_block(self, identity_anchor: str, body_anchor: str) -> str:
+        identity_values = self._parse_anchor_values(identity_anchor, "stable identity anchor: ")
+        body_values = self._parse_anchor_values(body_anchor, "body consistency anchor: ")
+        age = identity_values.get("age", "22")
         if age.isdigit():
             age = f"{age}-year-old"
-        ethnicity = values.get("ethnicity", "European")
-        gender = values.get("gender_presentation", "female")
-        role = values.get("role", "flight attendant")
-        face = values.get("face", "soft oval face")
-        jaw = values.get("jawline", "soft jawline")
-        eyes = values.get("eyes", "green eyes")
-        lips = values.get("lips", "natural lips")
-        hair = values.get("hair", "light chestnut hair")
-        makeup = values.get("makeup", "minimal makeup")
-        return (
-            f"A realistic candid friend-shot of a {age} {ethnicity} {gender} {role}, with consistent face geometry and natural proportions. "
-            f"{face.capitalize()}, {jaw}, {eyes}, {lips}, {hair}, {makeup}"
-        )
+        phrases = [
+            age,
+            "woman",
+            identity_values.get("face", "soft oval face"),
+            identity_values.get("jawline", "gentle defined jawline"),
+            identity_values.get("nose", "straight natural nose"),
+            identity_values.get("eyes", "green almond eyes"),
+            identity_values.get("lips", "natural medium lips"),
+            identity_values.get("skin", "natural skin texture"),
+            identity_values.get("freckles", "subtle freckles"),
+            identity_values.get("hair", "light chestnut medium-length hair"),
+            identity_values.get("makeup", "soft everyday makeup"),
+            body_values.get("body_type", "slim natural build"),
+            body_values.get("estimated_height", "average height"),
+            body_values.get("shoulder_set", "relaxed shoulders"),
+            body_values.get("posture", "natural upright posture"),
+        ]
+        return f"Identity: {'; '.join(self._dedupe_phrases(phrases))}."
 
     def _framing_block(self, framing_mode: str, shot_archetype: str, scene: Any) -> str:
-        if "3/4 body" in framing_mode:
+        lowered = self._scene_text(scene).lower()
+        if self._is_travel_walk(lowered):
             return "3/4 body walking shot"
-        if shot_archetype == "full_body":
-            return "Full body shot"
-        if shot_archetype == "seated_table_shot":
-            return "Waist-up seated candid shot"
-        if shot_archetype == "mirror_selfie":
-            return "Mirror selfie waist-up shot" if "waist-up" in framing_mode else "Mirror selfie head-and-shoulders shot"
-        if shot_archetype == "front_selfie":
-            return "Front selfie head-and-shoulders shot"
-        if shot_archetype == "close_portrait":
-            return "Close portrait shot"
-        return "Waist-up candid shot" if "waist-up" in framing_mode else "Candid shot"
+        canonical = {
+            "full_body": "full body shot",
+            "seated_table_shot": "waist-up seated candid shot",
+            "mirror_selfie": "mirror selfie head-and-shoulders shot",
+            "front_selfie": "front selfie head-and-shoulders shot",
+            "close_portrait": "close portrait shot",
+            "waist_up": "waist-up candid shot",
+            "candid_handheld": "candid 3/4 body shot",
+            "friend_shot": "candid 3/4 body shot",
+        }
+        if shot_archetype == "mirror_selfie" and "waist-up" in framing_mode:
+            return "mirror selfie waist-up shot"
+        return canonical.get(shot_archetype, "candid 3/4 body shot")
 
     def _scene_block(self, scene: Any, scene_desc: str, scene_loc: str, scene_tags: List[str]) -> str:
         lowered = self._scene_text(scene).lower()
-        visual_focus = str(getattr(scene, "visual_focus", "") or "").strip()
-        time_phrase = self._lighting_hint(getattr(scene, "time_of_day", "day")).replace("daylight", "light")
+        visual_focus = self._strip_scene_noise(str(getattr(scene, "visual_focus", "") or "").strip())
         tag_prefix = self._scene_tag_prefix(scene_tags)
         if self._is_travel_walk(lowered):
-            sentence = f"Inside a nearly empty {scene_loc} during {self._time_scene_phrase(scene)}"
-            luggage_phrase = self._travel_luggage_phrase(lowered, visual_focus)
-            opening = f"{tag_prefix}. {sentence}" if tag_prefix else sentence
-            return f"{opening}. She walks slowly with relaxed posture{luggage_phrase}"
+            pieces = [f"{tag_prefix} walking through the airport terminal before boarding" if tag_prefix else "Walking through the airport terminal before boarding"]
+            luggage_phrase = self._travel_luggage_phrase(lowered, visual_focus).lstrip(", ").strip()
+            if luggage_phrase:
+                pieces.append(f"with {luggage_phrase.replace('pulling ', '').replace('carrying ', '')}")
+            return f"Scene: {', '.join(self._dedupe_phrases(pieces))}."
 
-        parts = [f"{scene_desc} in {scene_loc}"]
-        if tag_prefix:
-            parts.insert(0, tag_prefix)
-        activity = str(getattr(scene, "activity", "") or "").strip()
-        if activity:
-            parts.append(activity.replace("_", " "))
-        if visual_focus:
-            parts.append(visual_focus)
-        if time_phrase:
-            parts.append(time_phrase)
-        return ", ".join(parts)
+        activity = str(getattr(scene, "activity", "") or "").strip().replace("_", " ")
+        base_scene = self._strip_scene_noise(scene_desc)
+        location = self._clean_fragment(scene_loc)
+        pieces: List[str] = []
+        if base_scene:
+            pieces.append(base_scene)
+        elif activity and location:
+            pieces.append(f"{activity} at {location}")
+        elif location:
+            pieces.append(f"At {location}")
+        if location and location.lower() not in (base_scene or "").lower():
+            pieces.append(f"at {location}")
+        if activity and activity.lower() not in " ".join(pieces).lower():
+            pieces.append(activity)
+        if visual_focus and visual_focus.lower() not in " ".join(pieces).lower():
+            pieces.append(f"with {visual_focus}")
+        return f"Scene: {', '.join(self._dedupe_phrases(pieces))}."
 
     def _outfit_block(self, wardrobe_block: str) -> str:
         cleaned = wardrobe_block.replace("outfit: ", "").strip()
         cleaned = cleaned.split(";")[0].strip().rstrip(".")
-        return f"Outfit: {cleaned}, natural fabric folds"
+        items = re.split(r"\s*(?:,|\+|/|;)\s*", cleaned)
+        normalized = [self._clean_fragment(item) for item in items if self._clean_fragment(item)]
+        return f"Outfit: {', '.join(self._dedupe_phrases(normalized))}."
 
     def _environment_block(self, scene: Any, scene_loc: str, scene_tags: List[str], continuity_block: str) -> str:
-        del continuity_block
+        del continuity_block, scene_tags
         lighting = self._lighting_hint(getattr(scene, "time_of_day", "day"))
-        parts: List[str] = []
         lowered_loc = str(scene_loc or "").lower()
+        location_phrase = "airport terminal" if any(token in lowered_loc for token in ["airport", "terminal"]) else self._clean_fragment(scene_loc)
+        parts: List[str] = [
+            f"Environment: photorealistic {location_phrase}",
+            "physically plausible spatial depth",
+            "accurate perspective and scale",
+            f"{lighting} behaving as natural available light",
+        ]
         if any(token in lowered_loc for token in ["airport", "terminal"]):
-            parts.append("Environment: realistic terminal architecture, soft reflections, minimal background people, natural depth")
+            parts.insert(1, "real terminal architecture")
         else:
-            parts.append(f"Environment: realistic {scene_loc}, natural depth, lived-in details")
-        if any("walking pose stays physically plausible" in tag for tag in scene_tags):
-            parts.append("Movement stays physically plausible")
-        parts.append(f"Lighting: {lighting}")
-        return ". ".join(parts)
+            parts.insert(1, "lived-in environmental detail")
+        return f"{'; '.join(self._dedupe_phrases(parts))}."
 
     def _mood_block(self, scene: Any, continuity_block: str) -> str:
-        mood = str(getattr(scene, "mood", "") or "").strip() or "natural"
-        continuity = self._extract_continuity_hint(continuity_block)
-        bits = [mood]
-        if continuity:
-            bits.append(continuity)
-        return f"Mood: {', '.join(bits)}"
+        del continuity_block
+        mood = str(getattr(scene, "mood", "") or "").strip().lower()
+        canonical = {
+            "curious": "quiet curiosity",
+            "focused": "composed focus",
+            "calm": "calm ease",
+            "active": "light forward momentum",
+            "natural": "natural ease",
+            "tired": "gentle low energy",
+            "soft": "soft calm",
+            "happy": "light warmth",
+        }
+        return f"Mood: {canonical.get(mood, 'quiet confidence')}."
+
+    @staticmethod
+    def _clean_fragment(text: str) -> str:
+        cleaned = " ".join(str(text or "").replace("_", " ").split())
+        return cleaned.strip(" ,;:.")
+
+    def _strip_scene_noise(self, text: str) -> str:
+        cleaned = self._clean_fragment(text)
+        banned = [
+            "golden hour",
+            "morning light",
+            "evening light",
+            "daylight",
+            "lighting",
+            "outfit",
+            "mood",
+            "curious",
+            "focused",
+            "calm",
+            "happy",
+            "sad",
+            "soft light",
+        ]
+        lowered = cleaned.lower()
+        for token in banned:
+            lowered = lowered.replace(token, " ")
+        return self._clean_fragment(lowered)
+
+    @staticmethod
+    def _normalize_phrase_key(text: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+    def _dedupe_phrases(self, phrases: List[str]) -> List[str]:
+        result: List[str] = []
+        seen: set[str] = set()
+        for phrase in phrases:
+            cleaned = self._clean_fragment(phrase)
+            if not cleaned:
+                continue
+            key = self._normalize_phrase_key(cleaned)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            result.append(cleaned)
+        return result
+
+    def _validate_canonical_prompt(self, prompt: str, scene: Any) -> None:
+        blocks = [block.strip() for block in prompt.split("\n\n") if block.strip()]
+        if len(blocks) != 6:
+            raise ValueError("Canonical prompt must contain exactly six blocks.")
+        if not blocks[0].startswith("Identity: "):
+            raise ValueError("Canonical prompt must start with the identity block.")
+        if not blocks[2].startswith("Scene: "):
+            raise ValueError("Canonical prompt must contain a scene block in third position.")
+        if not blocks[3].startswith("Outfit: "):
+            raise ValueError("Canonical prompt must contain an outfit block in fourth position.")
+        if not blocks[4].startswith("Environment: "):
+            raise ValueError("Canonical prompt must contain an environment block in fifth position.")
+        if not blocks[5].startswith("Mood: "):
+            raise ValueError("Canonical prompt must contain a mood block in sixth position.")
+        if self.CYRILLIC_RE.search(prompt):
+            raise ValueError("Canonical prompt must contain English text only.")
+
+        lowered = prompt.lower()
+        for phrase in self.BANNED_SYNTHETIC_PATTERNS + self.FORBIDDEN_POSITIVE_PHRASES:
+            if phrase in lowered:
+                raise ValueError(f"Forbidden phrase in positive prompt: {phrase}")
+
+        if self._is_travel_walk(self._scene_text(scene).lower()):
+            if blocks[1] != "3/4 body walking shot":
+                raise ValueError("Travel walk framing must be exactly '3/4 body walking shot'.")
+            for token in ("waist-up", "half-body", "full body"):
+                if token in lowered:
+                    raise ValueError(f"Forbidden framing alternative detected: {token}")
+
+        if re.search(r"\b([a-z]+)(?:\s+\1\b)+", lowered):
+            raise ValueError("Duplicate word sequence detected in canonical prompt.")
 
     @staticmethod
     def _extract_continuity_hint(continuity_block: str) -> str:

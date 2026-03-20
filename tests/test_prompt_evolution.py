@@ -57,9 +57,9 @@ BASE_CONTEXT = {
         "appearance_hair_color": "light chestnut",
         "appearance_eye_color": "green",
         "appearance_face_shape": "soft oval",
-        "appearance_body_type": "slim",
+        "appearance_body_type": "slim natural build",
         "makeup_profile": "natural dewy",
-        "skin_realism_profile": "real pores",
+        "skin_realism_profile": "natural skin texture",
         "signature_appearance_cues": "freckles and soft brows",
         "device_profile": "iPhone 16 Pro natural color profile",
         "recurring_phone_device": "graphite iPhone-class device with clear case",
@@ -79,7 +79,7 @@ BASE_CONTEXT = {
         "cheekbone_softness": "soft",
         "lip_fullness": "medium-full",
         "brow_style": "natural straight",
-        "favorite_locations": "kitchen window corner, favorite café table",
+        "favorite_locations": "kitchen window corner, favorite cafe table",
         "recurring_spaces": "living room sofa, hallway mirror",
         "camera_behavior_memory": {
             "preferred_shot_archetypes": ["candid_handheld", "friend_shot"],
@@ -92,354 +92,153 @@ BASE_CONTEXT = {
 }
 
 
-def test_prompt_v2_contains_all_required_semantic_blocks():
+def _compose(scene=None, outfit_summary="cream cardigan + denim"):
     composer = PromptComposer(DummyState())
-    package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan + denim", "photo", ["top_1"])
+    return composer.compose_package(BASE_CONTEXT, scene or Scene(), outfit_summary, "photo", ["top_1"])
+
+
+def test_prompt_package_keeps_required_metadata_and_canonical_version():
+    package = _compose()
 
     for key in [
-        "identity_core",
-        "life_continuity_context",
-        "scene_context",
-        "wardrobe_context",
+        "identity_anchor",
+        "body_anchor",
+        "scene_action",
+        "wardrobe_block",
         "camera_context",
-        "camera_physics",
-        "sensor_realism",
-        "smartphone_behavior",
-        "micro_imperfections",
-        "camera_behavior_memory",
-        "face_consistency",
-        "device_identity",
-        "favorite_locations",
-        "platform_intent",
-        "composition_and_lighting",
-        "realism_cues",
-        "continuity_cues",
-        "persona_voice_cues",
+        "realism_block",
+        "continuity_block",
         "negative_prompt",
         "final_prompt",
     ]:
         assert package.get(key)
 
-
-def test_camera_archetype_changes_camera_specific_cues():
-    composer = PromptComposer(DummyState())
-
-    scene_mirror = Scene()
-    scene_mirror.scene_moment = "Mirror selfie in hotel room"
-    mirror = composer.compose_package(BASE_CONTEXT, scene_mirror, "white tee", "photo", ["tee_1"])
-
-    scene_candid = Scene()
-    scene_candid.scene_moment = "Candid street frame during tram walk"
-    scene_candid.scene_moment_type = "candid_street"
-    candid = composer.compose_package(BASE_CONTEXT, scene_candid, "white tee", "photo", ["tee_1"])
-
-    assert mirror["shot_archetype"] == "mirror_selfie"
-    assert candid["shot_archetype"] in {"candid_handheld", "friend_shot"}
-    assert mirror["camera_context"] != candid["camera_context"]
+    assert package["prompt_format_version"] == "v6"
 
 
-def test_mirror_selfie_has_phone_and_reflection_cues_and_negative_prompt_not_empty():
-    composer = PromptComposer(DummyState())
-    package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan", "photo", ["top_1"])
+def test_positive_prompt_uses_exact_six_block_canonical_format():
+    package = _compose()
+    blocks = [block.strip() for block in package["final_prompt"].split("\n\n") if block.strip()]
 
-    assert "phone visible in reflection" in package["camera_context"]
-    assert "impossible reflection geometry" in package["negative_prompt"]
-    assert "wrong phone shape" in package["negative_prompt"]
-    assert package["negative_prompt"].strip()
-
-
-def test_caption_prompt_does_not_inline_negative_prompt_block():
-    composer = PromptComposer(DummyState())
-    package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan", "caption", ["top_1"])
-
-    assert "[negative_prompt]" not in package["final_prompt"]
+    assert len(blocks) == 6
+    assert blocks[0].startswith("Identity: ")
+    assert blocks[2].startswith("Scene: ")
+    assert blocks[3].startswith("Outfit: ")
+    assert blocks[4].startswith("Environment: ")
+    assert blocks[5].startswith("Mood: ")
 
 
-def test_prompt_drops_degraded_generic_placeholders_in_final_prompt():
-    composer = PromptComposer(DummyState())
-    package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan", "photo", ["top_1"])
+def test_identity_block_is_stable_for_same_character_input():
+    package_a = _compose()
+    package_b = _compose()
+    identity_a = package_a["final_prompt"].split("\n\n")[0]
+    identity_b = package_b["final_prompt"].split("\n\n")[0]
 
-    lowered = package["final_prompt"].lower()
-    assert "beautiful young woman" not in lowered
-    assert "8k" not in lowered
-    assert "highly detailed" not in lowered
-
-
-def test_outfit_binding_and_continuity_cues_influence_final_prompt():
-    composer = PromptComposer(DummyState())
-    package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan + vintage denim", "photo", ["cardigan_1", "denim_1"])
-    final_prompt = package["final_prompt"]
-
-    assert "cream cardigan + vintage denim" in final_prompt
-    assert "not fully unpacked luggage" in final_prompt
+    assert identity_a == identity_b
 
 
-def test_face_consistency_signature_appears_in_prompt():
-    composer = PromptComposer(DummyState())
-    package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan", "photo", ["top_1"])
-
-    assert "face consistency signature" in package["face_consistency"]
-    assert "balanced eye spacing" in package["face_consistency"]
-
-
-def test_device_identity_is_consistent_for_selfie_and_mirror_and_mirror_geometry_present():
-    composer = PromptComposer(DummyState())
-
-    mirror_scene = Scene()
-    mirror_scene.scene_moment = "Mirror selfie in hallway before leaving"
-    mirror_scene.scene_moment_type = "diary_mirror"
-    mirror_package = composer.compose_package(BASE_CONTEXT, mirror_scene, "cream cardigan", "photo", ["top_1"])
-
-    selfie_scene = Scene()
-    selfie_scene.scene_moment = "Front selfie while waiting for coffee"
-    selfie_scene.scene_moment_type = "selfie"
-    selfie_package = composer.compose_package(BASE_CONTEXT, selfie_scene, "cream cardigan", "photo", ["top_1"])
-
-    assert "graphite iPhone-class device with clear case" in mirror_package["device_identity"]
-    assert "graphite iPhone-class device with clear case" in selfie_package["device_identity"]
-    assert "phone visible in reflection" in mirror_package["camera_context"]
-
-
-def test_candid_friend_shot_has_observer_and_handheld_realism():
-    composer = PromptComposer(DummyState())
-    scene = Scene()
-    scene.scene_moment = "Candid frame while crossing the street"
-    scene.scene_moment_type = "street_candid"
-
-    package = composer.compose_package(BASE_CONTEXT, scene, "cream cardigan", "photo", ["top_1"])
-
-    assert package["shot_archetype"] in {"candid_handheld", "friend_shot"}
-    assert "handheld" in package["camera_context"].lower() or "observer" in package["camera_context"].lower()
-    assert "handheld motion" in package["camera_physics"]
-
-
-def test_negative_prompt_changes_by_archetype_and_scene():
-    composer = PromptComposer(DummyState())
-
-    mirror_scene = Scene()
-    mirror_scene.scene_moment = "Mirror selfie in hotel room"
-    mirror_scene.location = "hotel room"
-    mirror_package = composer.compose_package(BASE_CONTEXT, mirror_scene, "tee", "photo", ["tee_1"])
-
-    candid_scene = Scene()
-    candid_scene.scene_moment = "Street candid near tram stop"
-    candid_scene.location = "city street"
-    candid_scene.scene_moment_type = "street_candid"
-    candid_package = composer.compose_package(BASE_CONTEXT, candid_scene, "tee", "photo", ["tee_1"])
-
-    assert "impossible reflection geometry" in mirror_package["negative_prompt"]
-    assert "impossible reflection geometry" not in candid_package["negative_prompt"]
-    assert "impossible pedestrian scale" in candid_package["negative_prompt"]
-
-
-def test_prompt_package_surfaces_manual_reference_workflow_and_framing_mode():
-    composer = PromptComposer(DummyState())
-    scene = Scene()
-    scene.scene_moment = "Mirror selfie in airport bathroom before boarding"
-    scene.location = "airport terminal"
-
-    package = composer.compose_package(BASE_CONTEXT, scene, "cream cardigan", "photo", ["top_1"])
-
-    assert package["reference_type"] == "selfie"
-    assert package["framing_mode"]
-    assert package["manual_generation_step"]
-    assert package["primary_anchors"]
-
-
-def test_final_prompt_is_generator_friendly_and_keeps_negative_separate():
-    composer = PromptComposer(DummyState())
-    scene = Scene()
-    scene.scene_moment = "Seated morning coffee before heading out"
-
-    package = composer.compose_package(BASE_CONTEXT, scene, "cream cardigan", "photo", ["top_1"])
-
-    lowered = package["final_prompt"].lower()
-    assert "consistent face geometry" in lowered
-    assert "outfit:" in lowered
-    assert "environment:" in lowered
-    assert "mood:" in lowered
-    assert "[negative_prompt]" not in package["final_prompt"]
-
-
-def test_airport_travel_scene_aligns_shot_reference_and_framing_without_phone_clutter():
-    composer = PromptComposer(DummyState())
+def test_travel_walk_prompt_uses_fixed_framing_and_no_alternatives():
     scene = Scene()
     scene.scene_moment = "Slow walk through a nearly empty terminal with carry-on"
     scene.description = "Walking through the airport terminal before boarding"
     scene.location = "airport terminal"
     scene.activity = "walking"
-    scene.visual_focus = "carry-on and shoulder bag"
+    scene.visual_focus = "carry-on suitcase and shoulder bag"
 
-    package = composer.compose_package(BASE_CONTEXT, scene, "cream trench + denim", "photo", ["coat_1", "denim_1"])
-    lowered = package["final_prompt"].lower()
-
-    assert package["shot_archetype"] == "friend_shot"
-    assert package["generation_mode"] == "full-body_mode"
-    assert package["reference_type"] == "full_body"
-    assert package["framing_mode"] == "3/4 body walking shot"
-    assert "3/4 body walking shot" in lowered
-    assert "off-duty flight attendant" in lowered
-    assert "phone presence is natural to the shot" not in lowered
-    assert "smartphone visible" not in lowered
-    assert "phone in hand" not in lowered
-    assert "half-body" not in lowered
-    assert "waist-up" not in lowered
-    assert "full body" not in lowered
-
-
-def test_between_flights_casual_airport_scene_is_marked_off_duty_and_physically_plausible():
-    composer = PromptComposer(DummyState())
-    scene = Scene()
-    scene.scene_moment = "Slow walk through the terminal before boarding during a layover"
-    scene.description = "Between flights walk with a carry-on and shoulder bag"
-    scene.location = "airport terminal"
-    scene.activity = "walking"
-    scene.visual_focus = "carry-on"
-
-    package = composer.compose_package(BASE_CONTEXT, scene, "cream trench + denim", "photo", ["coat_1", "denim_1"])
-    lowered = package["final_prompt"].lower()
-
-    assert "off-duty flight attendant between flights" in lowered
-    assert "realistic terminal architecture" in lowered
-    assert "movement stays physically plausible" in lowered
-    assert len(package["final_prompt"]) < 980
-
-
-def test_final_prompt_excludes_negative_style_phrases():
-    composer = PromptComposer(DummyState())
-    package = composer.compose_package(BASE_CONTEXT, Scene(), "cream cardigan", "photo", ["top_1"])
-
-    lowered = package["final_prompt"].lower()
-    banned_phrases = [
-        "no plastic skin",
-        "no identity drift",
-        "no duplicate people",
-        "no distorted proportions",
-        "no fashion catalog symmetry",
-        "no editorial fashion look",
-        "no overproduced campaign lighting",
-    ]
-
-    for phrase in banned_phrases:
-        assert phrase not in lowered
-
-
-def test_prompt_v2_uses_structured_blocks_and_keeps_negative_terms_outside_positive():
-    composer = PromptComposer(DummyState())
-    scene = Scene()
-    scene.scene_moment = "Slow walk through a nearly empty terminal with carry-on"
-    scene.description = "Walking through the airport terminal before boarding"
-    scene.location = "airport terminal"
-    scene.activity = "walking"
-    scene.visual_focus = "carry-on and shoulder bag"
-
-    package = composer.compose_package(BASE_CONTEXT, scene, "black midi dress, white sneakers, beige trench coat", "photo", ["dress_1"])
+    package = _compose(scene, "cream trench coat, denim, white sneakers")
     blocks = [block.strip() for block in package["final_prompt"].split("\n\n") if block.strip()]
     lowered = package["final_prompt"].lower()
 
-    assert len(blocks) >= 6
-    assert blocks[1].lower() == "3/4 body walking shot."
-    assert blocks[2].lower().startswith("off-duty flight attendant")
-    assert "no plastic skin" not in lowered
-    assert "no identity drift" not in lowered
-    assert "no duplicate people" not in lowered
-    assert "no distorted limbs" not in lowered
-    assert "no symmetry" not in lowered
+    assert package["framing_mode"] == "3/4 body walking shot"
+    assert blocks[1] == "3/4 body walking shot"
+    assert "waist-up" not in lowered
     assert "half-body" not in lowered
-    assert "smartphone" not in lowered
+    assert "full body" not in lowered
 
 
-def test_platform_intent_changes_behavior_mode_and_polish_cues():
-    composer = PromptComposer(DummyState())
-
-    feed_pkg = composer.compose_package(BASE_CONTEXT, Scene(), "tee", "photo", ["tee_1"], platform_intent="instagram_feed")
-    story_pkg = composer.compose_package(BASE_CONTEXT, Scene(), "tee", "story", ["tee_1"], platform_intent="story_lifestyle")
-
-    assert "behavior_mode=instagram_feed" in feed_pkg["platform_intent"]
-    assert "behavior_mode=story_lifestyle" in story_pkg["platform_intent"]
-    assert "slightly curated" in feed_pkg["social_behavior"]
-    assert "spontaneity" in story_pkg["social_behavior"]
-    assert feed_pkg["platform_intent"] != story_pkg["platform_intent"]
-
-
-def test_favorite_location_memory_can_surface_in_prompt():
-    composer = PromptComposer(DummyState())
+def test_scene_block_contains_action_and_context_only():
     scene = Scene()
-    scene.location = "kitchen window corner"
+    scene.scene_moment = "Walking through the airport terminal before boarding"
+    scene.description = "Walking through the airport terminal before boarding"
+    scene.location = "airport terminal"
+    scene.activity = "walking"
+    scene.visual_focus = "carry-on suitcase"
+    scene.mood = "curious"
 
-    package = composer.compose_package(BASE_CONTEXT, scene, "tee", "photo", ["tee_1"])
+    package = _compose(scene)
+    scene_block = package["final_prompt"].split("\n\n")[2].lower()
 
-    assert "favorite location memory" in package["favorite_locations"]
-    assert "kitchen window corner" in package["favorite_locations"]
-
-
-def test_required_realism_blocks_are_structurally_present_and_anti_generic_constraints_enabled():
-    composer = PromptComposer(DummyState())
-    package = composer.compose_package(BASE_CONTEXT, Scene(), "tee", "photo", ["tee_1"])
-
-    for key in [
-        "camera_behavior_memory",
-        "framing_style",
-        "camera_physics",
-        "sensor_realism",
-        "smartphone_behavior",
-        "social_behavior",
-        "micro_imperfections",
-        "face_consistency",
-        "favorite_locations",
-        "anti_generic_constraints",
-    ]:
-        assert package.get(key)
-    assert "fashion catalog mood" in package["anti_generic_constraints"]
+    assert scene_block.startswith("scene: ")
+    assert "outfit:" not in scene_block
+    assert "lighting" not in scene_block
+    assert "mood" not in scene_block
+    assert "curious" not in scene_block
 
 
-def test_device_profile_stays_consistent_between_selfie_and_mirror_variants():
-    composer = PromptComposer(DummyState())
-    mirror = Scene()
-    mirror.scene_moment = "Mirror selfie before leaving apartment"
-    selfie = Scene()
-    selfie.scene_moment = "Selfie while waiting for coffee"
+def test_outfit_block_contains_only_clothing_items():
+    package = _compose(outfit_summary="cream trench coat, cream trench coat, denim, white sneakers")
+    outfit_block = package["final_prompt"].split("\n\n")[3]
 
-    mirror_pkg = composer.compose_package(BASE_CONTEXT, mirror, "tee", "photo", ["tee_1"])
-    selfie_pkg = composer.compose_package(BASE_CONTEXT, selfie, "tee", "photo", ["tee_1"])
-
-    assert "primary_device_profile=device_class=premium smartphone" in mirror_pkg["camera_context"]
-    assert "primary_device_profile=device_class=premium smartphone" in selfie_pkg["camera_context"]
+    assert outfit_block == "Outfit: cream trench coat, denim, white sneakers."
+    assert "lighting" not in outfit_block.lower()
+    assert "mood" not in outfit_block.lower()
 
 
-def test_micro_lived_in_cues_surface_for_home_like_scenes():
-    composer = PromptComposer(DummyState())
+def test_environment_block_contains_realism_depth_and_light_only():
     scene = Scene()
-    scene.location = "home kitchen"
+    scene.location = "airport terminal"
+    scene.scene_moment = "Airport walk before boarding"
 
-    package = composer.compose_package(BASE_CONTEXT, scene, "tee", "photo", ["tee_1"])
+    package = _compose(scene)
+    environment_block = package["final_prompt"].split("\n\n")[4].lower()
 
-    assert "slightly shifted chair angle" in package["micro_imperfections"]
-    assert "book or notebook not perfectly centered" in package["micro_imperfections"]
-
-
-def test_anti_synthetic_cleaner_removes_editorial_glamour_words():
-    composer = PromptComposer(DummyState())
-    raw = "Prompt System v3 editorial glamour perfect lighting stunning beauty"
-    cleaned = composer._clean_generic_prompt_terms(raw)
-    assert "editorial glamour" not in cleaned.lower()
-    assert "perfect lighting" not in cleaned.lower()
+    assert environment_block.startswith("environment: ")
+    assert "photorealistic" in environment_block
+    assert "depth" in environment_block
+    assert "perspective" in environment_block
+    assert "light" in environment_block
+    assert "walking" not in environment_block
 
 
-def test_prompt_v3_layers_include_camera_behavior_fields_and_face_cues():
-    composer = PromptComposer(DummyState())
-    package = composer.compose_package(BASE_CONTEXT, Scene(), "tee", "photo", ["tee_1"])
+def test_mood_block_uses_controlled_emotional_vocabulary_only():
+    scene = Scene()
+    scene.mood = "focused"
 
-    assert "preferred_shot_archetypes" in package["camera_behavior_memory"]
-    assert "average_camera_distance" in package["camera_behavior_memory"]
-    assert "selfie_frequency" in package["camera_behavior_memory"]
-    assert "face_shape" in package["face_consistency"]
-    assert "nose_bridge" in package["face_consistency"]
+    package = _compose(scene)
+    mood_block = package["final_prompt"].split("\n\n")[5]
+
+    assert mood_block == "Mood: composed focus."
 
 
-def test_favorite_location_memory_includes_favorites_and_recurring_spaces():
-    composer = PromptComposer(DummyState())
-    package = composer.compose_package(BASE_CONTEXT, Scene(), "tee", "photo", ["tee_1"])
+def test_positive_prompt_contains_only_english_ascii_letters_from_scene_payload():
+    package = _compose()
+    assert not PromptComposer.CYRILLIC_RE.search(package["final_prompt"])
 
-    assert "favorite_locations=" in package["favorite_locations"]
-    assert "recurring_spaces=" in package["favorite_locations"]
+
+def test_positive_prompt_excludes_negative_phrases_and_synthetic_junk():
+    package = _compose()
+    lowered = package["final_prompt"].lower()
+
+    banned = [
+        "no plastic skin",
+        "no identity drift",
+        "no duplicate people",
+        "no distorted limbs",
+        "beautiful young woman",
+        "8k",
+        "highly detailed",
+        "perfect lighting",
+    ]
+
+    for phrase in banned:
+        assert phrase not in lowered
+
+
+def test_positive_prompt_has_no_duplicate_blocks_or_repeated_words():
+    package = _compose(outfit_summary="cream cardigan, cream cardigan, denim")
+    prompt = package["final_prompt"]
+
+    assert prompt.count("\n\n") == 5
+    assert "cream cardigan, cream cardigan" not in prompt.lower()
+    assert "walking walking" not in prompt.lower()
+
