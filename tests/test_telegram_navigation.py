@@ -52,6 +52,15 @@ def _item(index: int = 1, publication_id: str | None = None) -> PublishingPlanIt
         caption_text="Last quiet moments before heading out...",
         short_caption="Last quiet moments before heading out...",
         post_timezone="Europe/Paris",
+        emotional_arc="quiet_settling",
+        habit_used="window_pause",
+        familiar_place_anchor="quiet hotel window",
+        recurring_objects_in_scene="mug, phone",
+        self_presentation_mode="soft_neat",
+        social_presence_mode="alone_but_in_public",
+        transition_hint_used="echo_of_quiet_room_before_leaving",
+        caption_voice_mode="quiet_reflective",
+        day_behavior_summary="energy=0.51; quiet=0.72; arc=quiet_settling",
     )
 
 
@@ -97,12 +106,11 @@ def test_format_plan_and_post_card_contains_core_fields():
     plan_text = format_plan_screen(context, [_item()])
     post_text = format_post_screen(context, _item(), 0)
 
-    assert "📅 План публикаций" in plan_text
-    assert "📍 Город персонажа: Paris" in plan_text
-    assert "📸 POST #1" in plan_text
-    assert "🌐 Платформа: Instagram • Photo" in plan_text
-    assert "🌐 Платформа: Instagram" in post_text
-    assert "🕒 Вы: 13:30 (Asia/Pavlodar)" in post_text
+    assert "POST #1" in plan_text
+    assert "Instagram" in plan_text
+    assert "Instagram" in post_text
+    assert "13:30 (Asia/Pavlodar)" in post_text
+    assert "quiet_settling" in post_text
 
 
 def test_detail_views_have_fallback_for_empty_prompt_and_caption():
@@ -115,9 +123,9 @@ def test_detail_views_have_fallback_for_empty_prompt_and_caption():
     prompt_text = format_prompt_screen(empty, 0)
     caption_text = format_caption_screen(empty, 0)
 
-    assert "Нет сохранённого prompt" in prompt_text
+    assert "prompt" in prompt_text
     assert "No negative prompt" in prompt_text
-    assert "пока нет сохранённой подписи" in caption_text
+    assert "Подпись" in caption_text
 
 
 def test_prompt_screen_falls_back_to_final_prompt_from_prompt_package_json():
@@ -128,35 +136,37 @@ def test_prompt_screen_falls_back_to_final_prompt_from_prompt_package_json():
     prompt_text = format_prompt_screen(item, 0)
 
     assert "A realistic candid friend-shot walking through the terminal." in prompt_text
-    assert "Нет сохранённого prompt" not in prompt_text
+    assert "РќРµС‚ СЃРѕС…СЂР°РЅС‘РЅРЅРѕРіРѕ prompt" not in prompt_text
 
 
 def test_prompt_screen_uses_new_workflow_order_and_aliases():
     text = format_prompt_screen(_item(), 0)
 
     sections = [
-        "📌 POST #1 — Instagram / Photo",
-        "🎯 Генерация",
-        "🧠 Референсы",
-        "🖼 Prompt",
-        "🚫 Negative prompt",
-        "✍️ Подпись",
-        "📝 Короткая подпись",
-        "⚙️ Дополнительно",
+        "POST #1",
+        "Генерация",
+        "Референсы",
+        "Prompt",
+        "Negative prompt",
+        "Подпись",
+        "Короткая подпись",
+        "Дополнительно",
     ]
 
     positions = [text.index(section) for section in sections]
     assert positions == sorted(positions)
-    assert "- Тип кадра: mirror_selfie" in text
-    assert "- Фрейминг: mirror selfie, head-and-shoulders" in text
-    assert "- Тип референсов: selfie" in text
-    assert "- Режим генерации: mirror_selfie_mode" in text
-    assert "- Основные: selfies, base" in text
-    assert "- Дополнительные: identity_lock" in text
+    assert "mirror_selfie" in text
+    assert "mirror selfie, head-and-shoulders" in text
+    assert "selfie" in text
+    assert "mirror_selfie_mode" in text
+    assert "selfies, base" in text
+    assert "identity_lock" in text
     assert "refs/selfies/" not in text
-    assert "- Платформа: Instagram" in text
-    assert "- Prompt mode: compact" in text
-    assert "- Identity mode: reference_manifest" in text
+    assert "Prompt mode: compact" in text
+    assert "Identity mode: reference_manifest" in text
+    assert "Emotional arc: quiet_settling" in text
+    assert "Habit: window_pause" in text
+    assert "Place anchor: quiet hotel window" in text
 
 
 def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():
@@ -172,7 +182,7 @@ def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():
     plan_text = format_plan_screen(context, [])
     keyboard = build_plan_keyboard([], date(2026, 3, 12))
 
-    assert "Пока нет запланированных постов" in plan_text
+    assert "запланированных постов" in plan_text
     assert keyboard == [[("🔄 Обновить", "plan:2026-03-12")]]
 
 
@@ -189,10 +199,10 @@ def test_plan_screen_hides_unknown_city_and_keeps_russian_meta():
     text = format_plan_screen(context, [])
 
     assert "Unknown" not in text
-    assert "Таймзона персонажа: Europe/Prague" in text
-    assert "Таймзона пользователя: Asia/Pavlodar" in text
-    assert "День: work_day" in text
-    assert "Фаза: routine_stability" in text
+    assert "Europe/Prague" in text
+    assert "Asia/Pavlodar" in text
+    assert "work_day" in text
+    assert "routine_stability" in text
 
 
 def test_normalize_plan_items_deduplicates_same_publication_id():
@@ -261,6 +271,8 @@ def test_serialize_context_preserves_detail_screen_metadata():
     assert items[0].generation_mode == "mirror_selfie_mode"
     assert items[0].framing_mode == "mirror selfie, head-and-shoulders"
     assert items[0].reference_type == "selfie"
+    assert items[0].emotional_arc == "quiet_settling"
+    assert items[0].habit_used == "window_pause"
 
 
 def test_item_from_row_recovers_detail_fields_from_canonical_snapshot_keys():

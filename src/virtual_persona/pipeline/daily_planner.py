@@ -135,6 +135,8 @@ class DailyPlanner:
         narrative = context.get("narrative_context")
         narrative_phase = getattr(narrative, "narrative_phase", "") if narrative else ""
         energy_state = getattr(narrative, "energy_state", "") if narrative else ""
+        behavior = context.get("behavioral_context")
+        daily_behavior = getattr(behavior, "daily_state", None)
 
         day_type = context["day_type"]
         if narrative_phase in {"recovery_phase", "quiet_reset_phase"}:
@@ -168,6 +170,52 @@ class DailyPlanner:
             DayScene(block=b, location=l, description=d, mood=m, time_of_day=b, activity="", source="template")
             for b, l, d, m in template
         ]
+        scenes = self._apply_behavioral_bias(scenes, context, daily_behavior)
         if energy_state == "low":
             return scenes[:2]
         return scenes
+
+    def _apply_behavioral_bias(self, scenes: List[DayScene], context: Dict[str, Any], daily_behavior: Any) -> List[DayScene]:
+        behavior = context.get("behavioral_context")
+        if not behavior or not daily_behavior:
+            return scenes
+
+        preferred_families = set(getattr(behavior, "allowed_scene_families", []) or [])
+        habit = str(getattr(behavior, "selected_habit", "") or "")
+        place_anchor = str(getattr(behavior, "familiar_place_anchor", "") or "")
+        objects = list(getattr(behavior, "recurring_objects", []) or [])
+
+        adjusted: List[DayScene] = []
+        for idx, scene in enumerate(scenes):
+            location = scene.location.lower()
+            desc = scene.description
+            mood = scene.mood
+            activity = scene.activity
+
+            if "private" in preferred_families and idx == 0 and "hotel" in location:
+                desc = f"{desc} with a familiar {place_anchor}"
+            if "transit" in preferred_families and "airport" in location:
+                desc = f"{desc} while keeping {', '.join(objects[:2])}".strip()
+                activity = activity or "transit_routine"
+            if "gentle_reset" in preferred_families and idx == 0:
+                mood = "soft"
+            if "city_walk" in preferred_families and idx == 1 and "city" in location:
+                activity = activity or "slow_walk"
+                desc = f"{desc} with an unhurried route"
+            if habit == "outfit_tidy" and idx == 0:
+                activity = activity or "outfit_tidy"
+            if getattr(daily_behavior, "self_presentation_mode", "") == "uniform_composed" and idx == 0:
+                mood = "focused"
+
+            adjusted.append(
+                DayScene(
+                    block=scene.block,
+                    location=scene.location,
+                    description=desc,
+                    mood=mood,
+                    time_of_day=scene.time_of_day,
+                    activity=activity,
+                    source=scene.source,
+                )
+            )
+        return adjusted

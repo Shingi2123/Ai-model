@@ -55,6 +55,8 @@ class ContentGenerator:
         city = context["city"]
         day_type = context["day_type"]
         narrative = context.get("narrative_context")
+        behavior = context.get("behavioral_context")
+        daily_behavior = getattr(behavior, "daily_state", None)
 
         photo_prompts: List[str] = []
         video_prompts: List[str] = []
@@ -108,6 +110,11 @@ class ContentGenerator:
                 "story_line": self._safe(scene_description),
                 "narrative_phase": self._safe(getattr(narrative, "narrative_phase", "routine_stability") if narrative else "routine_stability"),
                 "energy_state": self._safe(getattr(narrative, "energy_state", "medium") if narrative else "medium"),
+                "emotional_arc": self._safe(getattr(behavior, "emotional_arc", "")),
+                "behavior_habit": self._safe(getattr(behavior, "selected_habit", "")),
+                "familiar_place_anchor": self._safe(getattr(behavior, "familiar_place_anchor", "")),
+                "recurring_objects": self._safe(", ".join(getattr(behavior, "recurring_objects", []) or [])),
+                "self_presentation_mode": self._safe(getattr(daily_behavior, "self_presentation_mode", "") if daily_behavior else ""),
             }
 
             # фото-промпт
@@ -179,12 +186,17 @@ class ContentGenerator:
             "time_block": self._safe(scenes[-1].time_of_day if scenes else "day"),
             "time_of_day": self._safe(scenes[-1].time_of_day if scenes else "day"),
             "location": self._safe(scenes[-1].location if scenes else city),
+            "emotional_arc": self._safe(getattr(behavior, "emotional_arc", "")),
+            "behavior_habit": self._safe(getattr(behavior, "selected_habit", "")),
+            "familiar_place_anchor": self._safe(getattr(behavior, "familiar_place_anchor", "")),
         }
 
         tone_profile = self._select_caption_tone(context, scenes)
         caption_prompt = (
             f"{self.prompt_composer.compose(context, scenes[-1] if scenes else None, outfit_summary, 'caption', outfit_item_ids)} "
-            f"Tone profile: {tone_profile}. Visual focus={post_mapping.get('visual_focus', '')}. Avoid generic AI phrasing, keep natural social media voice, no literal prompt retelling. "
+            f"Tone profile: {tone_profile}. Emotional arc={post_mapping.get('emotional_arc', '')}. Habit hint={post_mapping.get('behavior_habit', '')}. "
+            f"Familiar place anchor={post_mapping.get('familiar_place_anchor', '')}. Visual focus={post_mapping.get('visual_focus', '')}. "
+            "Avoid generic AI phrasing, keep natural social media voice, no literal prompt retelling. Keep the voice restrained, lightly reflective, and recognizably the same person across days. "
             f"{self._safe_format(post_template, post_mapping)}"
         )
         post_caption = self.provider.generate(caption_prompt)
@@ -199,6 +211,8 @@ class ContentGenerator:
                 "Keep visual continuity of face and hair unchanged.",
                 "Character lifestyle must remain realistic and coherent.",
                 f"caption_tone={tone_profile}",
+                f"emotional_arc={getattr(behavior, 'emotional_arc', '')}",
+                f"habit={getattr(behavior, 'selected_habit', '')}",
             ],
             prompt_packages=prompt_packages,
         )
@@ -207,6 +221,8 @@ class ContentGenerator:
     def _select_caption_tone(context: Dict[str, Any], scenes: List[DayScene]) -> str:
         day_type = str(context.get("day_type") or "")
         voice = context.get("persona_voice") or {}
+        behavior = context.get("behavioral_context")
+        daily_behavior = getattr(behavior, "daily_state", None)
         reflection = float(voice.get("reflection", 0.65))
         self_irony = float(voice.get("self_irony", 0.3))
         if day_type in {"travel_day", "airport_transfer"}:
@@ -221,6 +237,8 @@ class ContentGenerator:
             base += "+reflective"
         if self_irony > 0.45:
             base += "+light_irony"
+        if daily_behavior and getattr(daily_behavior, "caption_voice_mode", ""):
+            base += f"+{daily_behavior.caption_voice_mode}"
         return base
 
     @staticmethod

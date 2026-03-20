@@ -93,6 +93,9 @@ def format_post_screen(context: PlanScreenContext, item: PublishingPlanItem, pos
     source_tz = item.post_timezone or context.persona_timezone
     user_time = _convert_time_for_user(context.target_date, item.post_time, source_tz, context.user_timezone)
     emoji = _post_header_emoji(item.content_type)
+    behavior_line = ""
+    if item.day_behavior_summary or item.emotional_arc:
+        behavior_line = f"\n\n🧠 Поведение: {short_text(item.day_behavior_summary or item.emotional_arc, 160)}"
     return (
         f"{emoji} POST #{post_index + 1}\n\n"
         f"🌐 Платформа: {item.platform}\n"
@@ -101,6 +104,7 @@ def format_post_screen(context: PlanScreenContext, item: PublishingPlanItem, pos
         f"🕒 Вы: {user_time} ({context.user_timezone})\n\n"
         f"🎯 Момент: {short_text(item.scene_moment, 220)}\n"
         f"✍️ Подпись: {short_text(item.short_caption or item.caption_text, 220)}"
+        f"{behavior_line}"
     )
 
 
@@ -195,6 +199,12 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
             _format_field("Платформа", item.platform),
             _format_field("Prompt mode", prompt_mode),
             _format_field("Identity mode", identity_mode),
+            _format_field("Behavior", _display_value(item.day_behavior_summary, "Не задано")),
+            _format_field("Emotional arc", _display_value(item.emotional_arc, "Не задано")),
+            _format_field("Habit", _display_value(item.habit_used, "Не задано")),
+            _format_field("Place anchor", _display_value(item.familiar_place_anchor, "Не задано")),
+            _format_field("Objects", _display_value(item.recurring_objects_in_scene, "Не задано")),
+            _format_field("Self-presentation", _display_value(item.self_presentation_mode, "Не задано")),
         ]
     )
 
@@ -357,6 +367,15 @@ def serialize_context(context: PlanScreenContext, items: list[PublishingPlanItem
                 "short_caption": item.short_caption,
                 "post_timezone": item.post_timezone,
                 "delivery_status": item.delivery_status,
+                "emotional_arc": item.emotional_arc,
+                "habit_used": item.habit_used,
+                "familiar_place_anchor": item.familiar_place_anchor,
+                "recurring_objects_in_scene": item.recurring_objects_in_scene,
+                "self_presentation_mode": item.self_presentation_mode,
+                "social_presence_mode": item.social_presence_mode,
+                "transition_hint_used": item.transition_hint_used,
+                "caption_voice_mode": item.caption_voice_mode,
+                "day_behavior_summary": item.day_behavior_summary,
             }
             for item in items
         ],

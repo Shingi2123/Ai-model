@@ -45,6 +45,8 @@ class PublishingPlanEngine:
     def generate(self, package: DailyPackage) -> List[PublishingPlanItem]:
         rules = self._resolve_rules(package)
         persona_timezone = self._resolve_city_timezone(package.city)
+        behavior = package.behavioral_context
+        daily_behavior = getattr(behavior, "daily_state", None)
 
         ranked = self._rank_moments(package)
         target_posts = self._decide_post_count(package, ranked)
@@ -108,6 +110,15 @@ class PublishingPlanEngine:
                 selection_reason=selection_reason or "selected_for_publication",
                 delivery_status="planned",
                 notes=f"score={ranked_moment.score:.2f}; reasons={', '.join(ranked_moment.reasons[:3])}",
+                emotional_arc=str(getattr(behavior, "emotional_arc", "")),
+                habit_used=str(getattr(behavior, "selected_habit", "")),
+                familiar_place_anchor=str(getattr(behavior, "familiar_place_anchor", "")),
+                recurring_objects_in_scene=", ".join(getattr(behavior, "recurring_objects", []) or []),
+                self_presentation_mode=str(getattr(daily_behavior, "self_presentation_mode", "") if daily_behavior else ""),
+                social_presence_mode=str(getattr(daily_behavior, "social_presence_mode", "") if daily_behavior else ""),
+                transition_hint_used=str(getattr(behavior, "transition_hint", "")),
+                caption_voice_mode=str(getattr(daily_behavior, "caption_voice_mode", "") if daily_behavior else ""),
+                day_behavior_summary=str(getattr(behavior, "debug_summary", "")),
                 identity_mode=str(prompt_meta.get("identity_mode", "")),
                 reference_pack_type=str(prompt_meta.get("reference_pack_type", "")),
             )

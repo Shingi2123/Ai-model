@@ -25,6 +25,7 @@ from virtual_persona.pipeline.publishing_plan_engine import PublishingPlanEngine
 from virtual_persona.pipeline.quality import SceneSanityChecker
 from virtual_persona.pipeline.world_expansion_engine import WorldExpansionEngine
 from virtual_persona.pipeline.wardrobe_brain import WardrobeBrain
+from virtual_persona.pipeline.behavioral_logic_engine import BehavioralLogicEngine
 from virtual_persona.services.wardrobe import WardrobeManager
 from virtual_persona.storage.state_store import build_state_store
 
@@ -58,6 +59,7 @@ class PipelineOrchestrator:
         self.publishing_plan_engine = PublishingPlanEngine(self.state)
         self.telegram_delivery_service = TelegramDeliveryService(settings, self.state)
         self.scene_sanity_checker = SceneSanityChecker()
+        self.behavior_engine = BehavioralLogicEngine(self.state)
 
         if settings.llm_provider.lower() == "openai" and settings.llm_api_key and settings.llm_model:
             llm = OpenAIProvider(settings.llm_api_key, settings.llm_model)
@@ -179,6 +181,7 @@ class PipelineOrchestrator:
             content=content,
             continuity_issues=issues,
             life_state=context.get("life_state"),
+            behavioral_context=context.get("behavioral_context"),
         )
 
         publishing_plan = self.publishing_plan_engine.generate(package)
@@ -213,6 +216,10 @@ class PipelineOrchestrator:
                         "decision_reason": getattr(scene, "decision_reason", ""),
                     }
                 )
+        if hasattr(self.state, "append_behavior_memory") and package.behavioral_context is not None:
+            self.state.append_behavior_memory(
+                self.behavior_engine.to_memory_row(package.date, package.city, package.day_type, package.behavioral_context)
+            )
         self.state.append_daily_calendar(package)
         if hasattr(self.state, "append_life_state"):
             self.state.append_life_state(package)

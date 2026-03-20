@@ -139,6 +139,9 @@ class LocalStateStore:
     def load_content_moment_memory(self) -> List[Dict[str, Any]]:
         return self._read_json(self.base_dir / "content_moment_memory.json", [])
 
+    def load_behavior_memory(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "behavior_memory.json", [])
+
     def load_publishing_plan(self, target_date: str | None = None) -> List[Dict[str, Any]]:
         rows = self._read_json(self.base_dir / "publishing_plan.json", [])
         if target_date:
@@ -160,6 +163,7 @@ class LocalStateStore:
             "daily_calendar.json",
             "content_history.json",
             "content_moment_memory.json",
+            "behavior_memory.json",
         ]:
             self._delete_rows_by_date(file_name, target_date)
 
@@ -307,6 +311,12 @@ class LocalStateStore:
 
     def append_content_moment_memory(self, row: Dict[str, Any]) -> None:
         path = self.base_dir / "content_moment_memory.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
+
+    def append_behavior_memory(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "behavior_memory.json"
         rows = self._read_json(path, [])
         rows.append(row)
         self._write_json(path, rows)
@@ -775,6 +785,40 @@ class GoogleSheetsStateStore:
         if not self.available():
             return []
         return self._safe_records("scene_candidates")
+
+    def load_behavior_memory(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("behavior_memory")
+
+    def append_behavior_memory(self, row: Dict[str, Any]) -> None:
+        headers = [
+            "date",
+            "city",
+            "day_type",
+            "emotional_arc",
+            "selected_habit",
+            "habit_context",
+            "familiar_place_anchor",
+            "recurring_objects_in_scene",
+            "self_presentation_mode",
+            "social_presence_mode",
+            "transition_hint_used",
+            "caption_voice_mode",
+            "allowed_scene_families",
+            "likely_actions",
+            "gesture_bias",
+            "anti_repetition_flags",
+            "day_behavior_summary",
+            "daily_behavior_state",
+            "slow_behavior_state",
+        ]
+        self._ensure_headers("behavior_memory", headers)
+        payload = dict(row)
+        for field in ("daily_behavior_state", "slow_behavior_state"):
+            if isinstance(payload.get(field), (dict, list)):
+                payload[field] = json.dumps(payload[field], ensure_ascii=False)
+        self._append_dict_row("behavior_memory", headers, payload, prefer_sheet_header_order=True)
 
     def append_scene_candidate(self, row: Dict[str, Any]) -> None:
         headers = [

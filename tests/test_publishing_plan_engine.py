@@ -2,11 +2,15 @@ from datetime import date, datetime
 import json
 
 from virtual_persona.models.domain import (
+    BehavioralContext,
+    CharacterBehaviorProfile,
     DailyPackage,
+    DailyBehaviorState,
     DayScene,
     GeneratedContent,
     LifeState,
     OutfitSelection,
+    SlowBehaviorState,
     SunSnapshot,
     WeatherSnapshot,
 )
@@ -116,6 +120,26 @@ def _build_package(day_type: str = "work_day", phase: str = "growth", scenes=Non
             fatigue_level=2,
             mood_base="good",
             narrative_phase=phase,
+        ),
+        behavioral_context=BehavioralContext(
+            profile=CharacterBehaviorProfile(),
+            slow_state=SlowBehaviorState(),
+            daily_state=DailyBehaviorState(
+                self_presentation_mode="travel_neat",
+                social_presence_mode="alone_but_in_public",
+                caption_voice_mode="quiet_observational",
+            ),
+            emotional_arc="between_flights_introspection",
+            selected_habit="terminal_pause",
+            habit_context="recurring_behavior",
+            familiar_place_anchor="airport side corridor",
+            recurring_objects=["carry_on", "shoulder_bag", "phone"],
+            outfit_behavior_mode="travel_casual_mode",
+            transition_hint="same_carry_on_carried_forward",
+            allowed_scene_families=["transit", "preparation"],
+            likely_actions=["terminal_pause", "touch_bag_strap"],
+            gesture_bias=["touch_bag_strap"],
+            debug_summary="energy=0.48; quiet=0.62; arc=between_flights_introspection",
         ),
     )
 
@@ -246,6 +270,10 @@ def test_publishing_plan_row_contains_timezone_and_decision_metadata():
     assert persisted["publish_score"] is not None
     assert persisted["selection_reason"]
     assert "negative_prompt" in persisted
+    assert first.emotional_arc == "between_flights_introspection"
+    assert first.habit_used == "terminal_pause"
+    assert first.familiar_place_anchor == "airport side corridor"
+    assert first.day_behavior_summary
     assert first.identity_mode == "reference_manifest"
     assert first.reference_pack_type
     assert first.generation_mode

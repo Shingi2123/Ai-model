@@ -8,6 +8,17 @@ def package_to_markdown(package: DailyPackage) -> str:
     scenes = "\n".join(f"- {s.time_of_day.title()} • {s.location}: {s.description}" for s in package.scenes)
     photo_prompts = "\n".join(f"- {p}" for p in package.content.photo_prompts)
     video_prompts = "\n".join(f"- {p}" for p in package.content.video_prompts)
+    behavior = package.behavioral_context
+    behavior_block = ""
+    if behavior is not None:
+        behavior_block = (
+            f"**Behavior:** {behavior.debug_summary}\n"
+            f"**Emotional arc:** {behavior.emotional_arc}\n"
+            f"**Habit:** {behavior.selected_habit}\n"
+            f"**Place anchor:** {behavior.familiar_place_anchor}\n"
+            f"**Objects:** {', '.join(behavior.recurring_objects)}\n"
+            f"**Self-presentation:** {behavior.daily_state.self_presentation_mode}\n\n"
+        )
 
     return (
         f"# Daily Content Package — {package.date}\n\n"
@@ -17,6 +28,7 @@ def package_to_markdown(package: DailyPackage) -> str:
         f"**Weather:** {package.weather.condition}, {package.weather.temp_c}°C\n"
         f"**Sun:** {package.sun.sunrise_local.time()} / {package.sun.sunset_local.time()}\n"
         f"**Outfit:** {package.outfit.summary}\n\n"
+        f"{behavior_block}"
         f"## Scenes\n{scenes}\n\n"
         f"## Post Caption\n{package.content.post_caption}\n\n"
         f"## Story Lines\n" + "\n".join(f"- {s}" for s in package.content.story_lines) + "\n\n"

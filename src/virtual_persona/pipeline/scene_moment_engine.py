@@ -99,6 +99,11 @@ class SceneMomentGenerator:
         phase = str(getattr(context.get("narrative_context"), "narrative_phase", "") or "")
         energy = str(getattr(context.get("narrative_context"), "energy_state", "") or "")
         location = str(scene.location or "").lower()
+        behavior = context.get("behavioral_context")
+        selected_habit = str(getattr(behavior, "selected_habit", "") or "")
+        place_anchor = str(getattr(behavior, "familiar_place_anchor", "") or "")
+        recurring_objects = list(getattr(behavior, "recurring_objects", []) or [])
+        social_mode = str(getattr(getattr(behavior, "daily_state", None), "social_presence_mode", "") or "")
 
         airport_pool = [
             {"type": "coffee_window_moment", "moment": "Quiet coffee by the terminal window before boarding", "focus": "coffee cup in hand, runway view through glass"},
@@ -134,6 +139,27 @@ class SceneMomentGenerator:
             pool = [p for p in pool if "walk" not in p["type"]]
         if phase == "exploration_phase":
             pool = city_pool + airport_pool + hotel_pool
+        if selected_habit == "terminal_pause" and airport_pool:
+            pool = airport_pool + pool
+        if selected_habit == "window_pause" and hotel_pool:
+            pool = sorted(pool, key=lambda row: 0 if "window" in row["type"] else 1)
+        if place_anchor and not any(place_anchor in p["moment"].lower() for p in pool):
+            pool.insert(
+                0,
+                {
+                    "type": f"{selected_habit or 'behavior'}_moment",
+                    "moment": f"Quiet everyday pause near the {place_anchor}",
+                    "focus": ", ".join(recurring_objects[:2]) or "familiar corner details",
+                },
+            )
+        if social_mode == "quiet_crowd_around":
+            pool.append(
+                {
+                    "type": "public_pause_moment",
+                    "moment": "A quiet pause while the world moves softly in the background",
+                    "focus": "subtle crowd blur behind a calm foreground gesture",
+                }
+            )
         return pool
 
     def _pick_candidate(
@@ -147,9 +173,16 @@ class SceneMomentGenerator:
         day_type = str(context.get("day_type") or "")
         continuity = context.get("continuity_context") or {}
         arc_hint = str(continuity.get("arc_hint") or "")
+        behavior = context.get("behavioral_context")
+        anti_repeat = set(getattr(behavior, "anti_repetition_flags", []) or [])
         pool = self._candidate_pool(context, scene)
         if arc_hint == "arrival_and_adaptation":
             pool = sorted(pool, key=lambda row: 0 if "walk" in row["type"] or "checkout" in row["type"] else 1)
+        if "habit_recently_used" in anti_repeat:
+            pool = [row for row in pool if not row["type"].startswith(str(getattr(behavior, "selected_habit", "")))] or pool
+        if "place_recently_used" in anti_repeat:
+            familiar = str(getattr(behavior, "familiar_place_anchor", "") or "")
+            pool = [row for row in pool if familiar.lower() not in row["moment"].lower()] or pool
         for candidate in pool:
             sig = self._build_signature(day_type, scene, candidate["type"], candidate["moment"])
             archetype = self.ARCHETYPE_BY_TYPE.get(candidate["type"], "daily")

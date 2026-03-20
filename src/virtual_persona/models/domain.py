@@ -51,6 +51,86 @@ class CharacterBible:
 
 
 @dataclass
+class CharacterBehaviorProfile:
+    baseline_temperament: str = "soft_observant"
+    social_openness: float = 0.42
+    organization_level: float = 0.74
+    comfort_with_haste: float = 0.32
+    ritual_need: float = 0.78
+    solitude_preference: float = 0.68
+    city_wandering_affinity: float = 0.58
+    coffee_affinity: float = 0.71
+    window_pause_affinity: float = 0.8
+    morning_pause_affinity: float = 0.82
+    work_uniform_alignment: float = 0.76
+    orderliness_with_items: float = 0.79
+    self_photography_affinity: float = 0.41
+    environment_photography_affinity: float = 0.64
+    improvisation_tolerance: float = 0.43
+    aesthetic_attention: float = 0.81
+    repeat_place_affinity: float = 0.75
+    prefers_quiet_mornings: bool = True
+    keeps_small_rituals: bool = True
+    often_pauses_by_window: bool = True
+    likes_light_travel_routine: bool = True
+    not_overly_social_on_workdays: bool = True
+    more_reflective_after_flights: bool = True
+    keeps_outfit_neat_even_off_duty: bool = True
+    avoids_overly_party_scenes_without_reason: bool = True
+    uses_familiar_gestures_more_than_dramatic_posing: bool = True
+    stable_caption_voice: str = "quiet_observational"
+    favorite_habits: List[str] = field(default_factory=list)
+    favorite_place_archetypes: List[str] = field(default_factory=list)
+    recurring_objects: List[str] = field(default_factory=list)
+
+
+@dataclass
+class SlowBehaviorState:
+    city_adaptation: float = 0.5
+    accumulated_fatigue: float = 0.35
+    sense_of_home: float = 0.45
+    route_familiarity: float = 0.4
+    emotional_comfort: float = 0.52
+    social_reserve: float = 0.58
+
+
+@dataclass
+class DailyBehaviorState:
+    energy_level: float = 0.56
+    social_openness: float = 0.42
+    routine_stability: float = 0.64
+    transit_fatigue: float = 0.24
+    comfort_in_city: float = 0.52
+    desire_for_quiet: float = 0.63
+    desire_for_movement: float = 0.47
+    emotional_tone: str = "grounded"
+    mental_load: float = 0.48
+    self_presentation_mode: str = "soft_neat"
+    internal_focus: str = "gentle"
+    social_presence_mode: str = "alone_but_in_public"
+    caption_voice_mode: str = "quiet_observational"
+
+
+@dataclass
+class BehavioralContext:
+    profile: CharacterBehaviorProfile
+    slow_state: SlowBehaviorState
+    daily_state: DailyBehaviorState
+    emotional_arc: str
+    selected_habit: str
+    habit_context: str
+    familiar_place_anchor: str
+    recurring_objects: List[str]
+    outfit_behavior_mode: str
+    transition_hint: str
+    allowed_scene_families: List[str]
+    likely_actions: List[str]
+    gesture_bias: List[str]
+    anti_repetition_flags: List[str] = field(default_factory=list)
+    debug_summary: str = ""
+
+
+@dataclass
 class WardrobeItem:
     id: str
     category: str
@@ -178,6 +258,15 @@ class PublishingPlanItem:
     selection_reason: str = ""
     delivery_status: str = "planned"
     notes: str = ""
+    emotional_arc: str = ""
+    habit_used: str = ""
+    familiar_place_anchor: str = ""
+    recurring_objects_in_scene: str = ""
+    self_presentation_mode: str = ""
+    social_presence_mode: str = ""
+    transition_hint_used: str = ""
+    caption_voice_mode: str = ""
+    day_behavior_summary: str = ""
     selected_image_path: str = ""
     clean_image_export_path: str = ""
     generation_diagnostics: str = ""
@@ -220,6 +309,7 @@ class DailyPackage:
     content: GeneratedContent
     continuity_issues: List[ContinuityIssue] = field(default_factory=list)
     life_state: Optional["LifeState"] = None
+    behavioral_context: Optional[BehavioralContext] = None
     publishing_plan: List[PublishingPlanItem] = field(default_factory=list)
 
     def to_dict(self) -> dict:

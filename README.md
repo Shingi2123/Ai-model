@@ -322,3 +322,16 @@ Publishing plan rows now include additional package fields:
 - expanded `publishing_plan`, `content_history`, `run_log`
 
 All writes use header names (not fixed column indexes), including reordered sheet headers.
+
+### 9) Behavioral logic engine
+
+The pipeline now has a dedicated behavioral layer between life state and daily content generation.
+
+- Stable behavior traits live in the character profile as machine-readable tendencies such as quiet-morning preference, ritual need, repeat-place affinity, social openness, and stable caption voice.
+- Slow behavior state tracks adaptation to city, accumulated fatigue, route familiarity, sense of home, emotional comfort, and social reserve.
+- Daily behavior state computes energy, social openness, routine stability, transit fatigue, desire for quiet, desire for movement, emotional tone, self-presentation mode, social presence mode, and caption voice mode.
+- Recurring habits, familiar place anchors, recurring objects, emotional arc, and transition hints are now generated and persisted into `behavior_memory`.
+- Scene planning, scene moments, captions, and publishing metadata all consume the same `BehavioralContext` upstream.
+- Telegram detail views now expose compact behavior diagnostics for each post.
+
+See [docs/behavioral_engine.md](docs/behavioral_engine.md) for the full model and pipeline order.
