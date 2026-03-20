@@ -326,6 +326,29 @@ def test_callback_refresh_uses_same_generate_if_missing_flow(monkeypatch):
     assert context.user_data["plan_screen"] == "cached-plan"
 
 
+def test_callback_refresh_with_existing_plan_does_not_regenerate(monkeypatch):
+    module = _load_module()
+    target_date = date(2026, 3, 20)
+    plan_context = _make_context(module, target_date)
+    plan_items = [_make_item(target_date)]
+
+    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
+    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("PLAN", object()))
+    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached-plan")
+    generate_day = Mock(side_effect=AssertionError("refresh must not regenerate when plan already exists"))
+    monkeypatch.setattr(module.orchestrator, "generate_day", generate_day, raising=False)
+
+    update, query = _callback_update("plan:2026-03-20")
+    context = types.SimpleNamespace(user_data={})
+
+    asyncio.run(module.callback_nav(update, context))
+
+    assert query.answer_calls == [((), {})]
+    assert query.edit_calls[-1]["text"] == "PLAN"
+    assert generate_day.call_count == 0
+    assert context.user_data["plan_screen"] == "cached-plan"
+
+
 def test_concurrent_generate_if_missing_starts_only_one_generation(monkeypatch):
     module = _load_module()
     target_date = date(2026, 3, 20)

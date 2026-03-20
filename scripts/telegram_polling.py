@@ -62,7 +62,7 @@ MISSING_PLAN_MESSAGE = (
     "\U0001F4ED План на сегодня ещё не подготовлен.\n\n"
     f"Нажмите «{GET_PLAN_BUTTON}», чтобы бот попробовал подготовить его автоматически."
 )
-LOADING_PLAN_MESSAGE = "\u23F3 Формирую план на сегодня..."
+LOADING_PLAN_MESSAGE = "\u23F3 Загружаю план на сегодня..."
 GENERATING_PLAN_MESSAGE = (
     "\u23F3 План на сегодня ещё не найден.\n"
     "Начинаю генерацию дня, подождите немного..."
@@ -115,20 +115,6 @@ def _load_persisted_plan(target_date: date) -> tuple[PlanScreenContext, list]:
 
 def _is_today(target_date: date) -> bool:
     return target_date == date.today()
-
-
-def _load_plan_or_generate(target_date: date, *, auto_generate_if_missing: bool = False) -> tuple[PlanScreenContext, list]:
-    context, items = _load_persisted_plan(target_date)
-    if items or not auto_generate_if_missing:
-        return context, items
-
-    package = orchestrator.generate_day(target_date=target_date)
-    regenerated_context, regenerated_items = _load_persisted_plan(target_date)
-    if regenerated_items:
-        return regenerated_context, regenerated_items
-
-    generated_items = normalize_plan_items(package.publishing_plan or [])
-    return _build_context(target_date, [], generated_items), generated_items
 
 
 def _ensure_today_plan() -> tuple[PlanScreenContext, list]:
@@ -334,6 +320,31 @@ async def _load_plan_for_interactive_request(
     return _load_plan_for_ui(target_date, action=action, session_restored=session_restored)
 
 
+async def _show_interactive_plan(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    target_date: date,
+    action: str,
+    session_restored: bool,
+    auto_generate_if_missing: bool,
+    status_message,
+    render_result,
+) -> None:
+    plan_context, items, has_plan = await _load_plan_for_interactive_request(
+        update,
+        target_date=target_date,
+        action=action,
+        session_restored=session_restored,
+        auto_generate_if_missing=auto_generate_if_missing,
+        status_message=status_message,
+    )
+    text, markup = _render_plan(plan_context, items) if has_plan else _render_missing_plan(plan_context)
+    if has_plan:
+        context.user_data["plan_screen"] = serialize_context(plan_context, items)
+    await render_result(text=text, reply_markup=markup)
+
+
 async def safe_edit_message(
     query,
     *,
@@ -432,7 +443,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     context.user_data["started"] = True
     await update.message.reply_text(
-        "Привет! Я помогу работать с контент-планом через кнопки.\nНажмите кнопку ниже 👇",
+        "Привет! Я помогу работать с контент-планом через кнопки.\nНажмите кнопку ниже.",
         reply_markup=keyboard,
     )
 
@@ -440,21 +451,16 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def show_today_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     loading = await update.message.reply_text(LOADING_PLAN_MESSAGE)
     try:
-        async def update_loading(text: str) -> None:
-            await loading.edit_text(text=text)
-
-        plan_context, items, has_plan = await _load_plan_for_interactive_request(
+        await _show_interactive_plan(
             update,
+            context,
             target_date=date.today(),
             action="show_today",
             session_restored=False,
             auto_generate_if_missing=True,
-            status_message=update_loading,
+            status_message=lambda text: loading.edit_text(text=text),
+            render_result=lambda **kwargs: loading.edit_text(**kwargs),
         )
-        text, markup = _render_plan(plan_context, items) if has_plan else _render_missing_plan(plan_context)
-        if has_plan:
-            context.user_data["plan_screen"] = serialize_context(plan_context, items)
-        await loading.edit_text(text=text, reply_markup=markup)
     except Exception as exc:
         logger.exception("telegram_plan_view failed action=show_today error=%s", exc)
         await loading.edit_text(GENERATION_FAILED_MESSAGE)
