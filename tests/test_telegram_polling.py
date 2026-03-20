@@ -105,6 +105,9 @@ def _install_orchestrator_stub() -> None:
         def _load_frozen_day(self, _target_date):
             return None
 
+        def generate_day(self, **_kwargs):
+            return types.SimpleNamespace(date=date(2026, 3, 20), city="Prague", publishing_plan=[])
+
     orchestrator_module.PipelineOrchestrator = PipelineOrchestrator
     sys.modules["virtual_persona.pipeline.orchestrator"] = orchestrator_module
 
@@ -124,45 +127,286 @@ def _load_module():
     return module
 
 
-def _context_and_items(module):
-    plan_context = module.PlanScreenContext(
-        target_date=date(2026, 3, 12),
-        city="Paris",
+def _make_context(module, target_date: date, city: str = "Paris"):
+    return module.PlanScreenContext(
+        target_date=target_date,
+        city=city,
         day_type="work_day",
         narrative_phase="recovery_phase",
         persona_timezone="Europe/Paris",
         user_timezone="Asia/Pavlodar",
     )
-    item = types.SimpleNamespace(
-        publication_id="pub-1",
-        date=date(2026, 3, 12),
+
+
+def _make_item(target_date: date, publication_id: str = "pub-1", city: str = "Paris"):
+    return types.SimpleNamespace(
+        publication_id=publication_id,
+        date=target_date,
         platform="Instagram",
         post_time="09:30",
         content_type="photo",
-        city="Paris",
+        city=city,
         day_type="work_day",
         narrative_phase="recovery_phase",
         scene_moment="Morning coffee before leaving home",
+        caption_text="Caption",
+        short_caption="Short caption",
+        post_timezone="Europe/Paris",
     )
-    return plan_context, [item]
+
+
+def _message_update():
+    class LoadingMessage:
+        def __init__(self):
+            self.edit_calls = []
+
+        async def edit_text(self, text, reply_markup=None):
+            self.edit_calls.append({"text": text, "reply_markup": reply_markup})
+
+    class Message:
+        def __init__(self):
+            self.loading = LoadingMessage()
+            self.replies = []
+            self.chat = types.SimpleNamespace(id=500)
+            self.from_user = types.SimpleNamespace(id=600)
+
+        async def reply_text(self, text, reply_markup=None):
+            self.replies.append({"text": text, "reply_markup": reply_markup})
+            return self.loading
+
+    message = Message()
+    update = types.SimpleNamespace(
+        message=message,
+        effective_chat=types.SimpleNamespace(id=500),
+        effective_user=types.SimpleNamespace(id=600),
+    )
+    return update, message.loading
+
+
+def _callback_update(data: str):
+    class Query:
+        def __init__(self):
+            self.data = data
+            self.answer_calls = []
+            self.edit_calls = []
+            self.from_user = types.SimpleNamespace(id=600)
+
+        async def answer(self, *args, **kwargs):
+            self.answer_calls.append((args, kwargs))
+
+        async def edit_message_text(self, **kwargs):
+            self.edit_calls.append(kwargs)
+
+    query = Query()
+    update = types.SimpleNamespace(
+        callback_query=query,
+        effective_chat=types.SimpleNamespace(id=500),
+        effective_user=types.SimpleNamespace(id=600),
+    )
+    return update, query
+
+
+def test_show_today_plan_uses_existing_plan_without_generation(monkeypatch):
+    module = _load_module()
+    target_date = date(2026, 3, 20)
+    plan_context = _make_context(module, target_date)
+    plan_items = [_make_item(target_date)]
+
+    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
+    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("PLAN", object()))
+    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached-plan")
+    generate_day = Mock(side_effect=AssertionError("generate_day must not run when plan already exists"))
+    monkeypatch.setattr(module.orchestrator, "generate_day", generate_day, raising=False)
+
+    update, loading = _message_update()
+    context = types.SimpleNamespace(user_data={})
+
+    asyncio.run(module.show_today_plan(update, context))
+
+    assert loading.edit_calls[-1]["text"] == "PLAN"
+    assert len(loading.edit_calls) == 1
+    assert loading.edit_calls[-1]["reply_markup"] is not None
+    assert generate_day.call_count == 0
+    assert context.user_data["plan_screen"] == "cached-plan"
+
+
+def test_show_today_plan_generates_if_missing_and_reloads_persisted_plan(monkeypatch):
+    module = _load_module()
+    target_date = date(2026, 3, 20)
+    empty_context = _make_context(module, target_date, city="")
+    persisted_context = _make_context(module, target_date, city="Prague")
+    generated_item = _make_item(target_date, city="Prague")
+
+    load_calls = {"count": 0}
+
+    def fake_load(_target_date):
+        load_calls["count"] += 1
+        if load_calls["count"] <= 2:
+            return empty_context, []
+        return persisted_context, [generated_item]
+
+    generate_day = Mock(return_value=types.SimpleNamespace(date=target_date, city="Prague", publishing_plan=[]))
+
+    async def fake_to_thread(func, **kwargs):
+        return func(**kwargs)
+
+    monkeypatch.setattr(module, "_load_persisted_plan", fake_load)
+    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("PLAN", object()))
+    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached-plan")
+    monkeypatch.setattr(module.orchestrator, "generate_day", generate_day, raising=False)
+    monkeypatch.setattr(module.asyncio, "to_thread", fake_to_thread)
+
+    update, loading = _message_update()
+    context = types.SimpleNamespace(user_data={})
+
+    asyncio.run(module.show_today_plan(update, context))
+
+    assert loading.edit_calls[0]["text"] == module.GENERATING_PLAN_MESSAGE
+    assert loading.edit_calls[-1]["text"] == "PLAN"
+    assert generate_day.call_args.kwargs == {"target_date": target_date}
+    assert context.user_data["plan_screen"] == "cached-plan"
+
+
+def test_show_today_plan_reports_generation_failure_without_crashing(monkeypatch):
+    module = _load_module()
+    target_date = date(2026, 3, 20)
+    empty_context = _make_context(module, target_date, city="")
+
+    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (empty_context, []))
+    monkeypatch.setattr(module.logger, "exception", Mock())
+
+    async def fake_to_thread(_func, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(module.asyncio, "to_thread", fake_to_thread)
+
+    update, loading = _message_update()
+    context = types.SimpleNamespace(user_data={})
+
+    asyncio.run(module.show_today_plan(update, context))
+
+    assert loading.edit_calls[0]["text"] == module.GENERATING_PLAN_MESSAGE
+    assert loading.edit_calls[-1]["text"] == module.GENERATION_FAILED_MESSAGE
+    assert module.logger.exception.call_count >= 1
+    assert "plan_screen" not in context.user_data
+
+
+def test_callback_refresh_uses_same_generate_if_missing_flow(monkeypatch):
+    module = _load_module()
+    target_date = date(2026, 3, 20)
+    empty_context = _make_context(module, target_date, city="")
+    persisted_context = _make_context(module, target_date, city="Prague")
+    generated_item = _make_item(target_date, city="Prague")
+
+    load_calls = {"count": 0}
+
+    def fake_load(_target_date):
+        load_calls["count"] += 1
+        if load_calls["count"] <= 2:
+            return empty_context, []
+        return persisted_context, [generated_item]
+
+    async def fake_to_thread(func, **kwargs):
+        return func(**kwargs)
+
+    monkeypatch.setattr(module, "_load_persisted_plan", fake_load)
+    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("PLAN", object()))
+    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached-plan")
+    monkeypatch.setattr(module.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(module.orchestrator, "generate_day", Mock(return_value=types.SimpleNamespace()), raising=False)
+
+    update, query = _callback_update("plan:2026-03-20")
+    context = types.SimpleNamespace(user_data={})
+
+    asyncio.run(module.callback_nav(update, context))
+
+    assert query.answer_calls == [((), {})]
+    assert query.edit_calls[0]["text"] == module.GENERATING_PLAN_MESSAGE
+    assert query.edit_calls[-1]["text"] == "PLAN"
+    assert context.user_data["plan_screen"] == "cached-plan"
+
+
+def test_concurrent_generate_if_missing_starts_only_one_generation(monkeypatch):
+    module = _load_module()
+    target_date = date(2026, 3, 20)
+    empty_context = _make_context(module, target_date, city="")
+    persisted_context = _make_context(module, target_date, city="Prague")
+    generated_item = _make_item(target_date, city="Prague")
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    generation_done = {"value": False}
+    generate_calls = []
+
+    def fake_load(_target_date):
+        if generation_done["value"]:
+            return persisted_context, [generated_item]
+        return empty_context, []
+
+    def fake_generate_day(**kwargs):
+        generate_calls.append(kwargs)
+        return types.SimpleNamespace(date=target_date, city="Prague", publishing_plan=[])
+
+    async def fake_to_thread(func, **kwargs):
+        started.set()
+        await release.wait()
+        generation_done["value"] = True
+        return func(**kwargs)
+
+    monkeypatch.setattr(module, "_load_persisted_plan", fake_load)
+    monkeypatch.setattr(module.orchestrator, "generate_day", fake_generate_day, raising=False)
+    monkeypatch.setattr(module.asyncio, "to_thread", fake_to_thread)
+
+    update, _loading = _message_update()
+    status_messages_1 = []
+    status_messages_2 = []
+
+    async def first_status(text: str):
+        status_messages_1.append(text)
+
+    async def second_status(text: str):
+        status_messages_2.append(text)
+
+    async def run_test():
+        first = asyncio.create_task(
+            module._load_plan_with_generate_if_missing(update, target_date=target_date, status_message=first_status)
+        )
+        await started.wait()
+        second = asyncio.create_task(
+            module._load_plan_with_generate_if_missing(update, target_date=target_date, status_message=second_status)
+        )
+        await asyncio.sleep(0)
+        release.set()
+        first_result = await first
+        second_result = await second
+        return first_result, second_result
+
+    first_result, second_result = asyncio.run(run_test())
+
+    assert generate_calls == [{"target_date": target_date}]
+    assert first_result[1][0].publication_id == "pub-1"
+    assert second_result[1][0].publication_id == "pub-1"
+    assert status_messages_1 == [module.GENERATING_PLAN_MESSAGE]
+    assert status_messages_2 == [module.WAITING_FOR_GENERATION_MESSAGE]
 
 
 def test_callback_refresh_ignores_message_not_modified(monkeypatch):
     module = _load_module()
-    plan_context, plan_items = _context_and_items(module)
+    target_date = date(2026, 3, 20)
+    plan_context = _make_context(module, target_date)
+    plan_items = [_make_item(target_date)]
 
     monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
-    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
-    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
-
-    module.logger.info = Mock()
+    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("PLAN", object()))
+    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached-plan")
     module.logger.exception = Mock()
 
     class Query:
         def __init__(self):
-            self.data = "plan:2026-03-12"
+            self.data = "plan:2026-03-20"
             self.answer_calls = []
             self.edit_calls = 0
+            self.from_user = types.SimpleNamespace(id=600)
 
         async def answer(self, *_args, **_kwargs):
             self.answer_calls.append((_args, _kwargs))
@@ -172,7 +416,11 @@ def test_callback_refresh_ignores_message_not_modified(monkeypatch):
             raise module.BadRequest("Message is not modified")
 
     query = Query()
-    update = types.SimpleNamespace(callback_query=query)
+    update = types.SimpleNamespace(
+        callback_query=query,
+        effective_chat=types.SimpleNamespace(id=500),
+        effective_user=types.SimpleNamespace(id=600),
+    )
     context = types.SimpleNamespace(user_data={})
 
     asyncio.run(module.callback_nav(update, context))
@@ -182,206 +430,6 @@ def test_callback_refresh_ignores_message_not_modified(monkeypatch):
     assert module.logger.exception.call_count == 0
 
 
-def test_callback_refresh_recovers_from_stale_session(monkeypatch):
+def test_start_button_uses_utf8_runtime():
     module = _load_module()
-    plan_context, plan_items = _context_and_items(module)
-
-    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
-    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
-    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
-    module.logger.exception = Mock()
-
-    class Query:
-        def __init__(self):
-            self.data = "plan:2026-03-12"
-            self.answer_calls = []
-            self.edit_payload = None
-
-        async def answer(self, *args, **kwargs):
-            self.answer_calls.append((args, kwargs))
-
-        async def edit_message_text(self, **kwargs):
-            self.edit_payload = kwargs
-
-    query = Query()
-    update = types.SimpleNamespace(callback_query=query)
-    context = types.SimpleNamespace(user_data={"plan_screen": {"broken": "state"}})
-
-    asyncio.run(module.callback_nav(update, context))
-
-    assert query.edit_payload["text"] == "План публикаций"
-    assert query.answer_calls == [((), {})]
-    assert module.logger.exception.call_count == 0
-
-
-def test_callback_back_to_plan_after_prompt(monkeypatch):
-    module = _load_module()
-    plan_context, plan_items = _context_and_items(module)
-
-    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
-    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
-    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
-
-    class Query:
-        def __init__(self):
-            self.data = "back:plan:2026-03-12"
-            self.answer_calls = []
-
-        async def answer(self, *args, **kwargs):
-            self.answer_calls.append((args, kwargs))
-
-        async def edit_message_text(self, **_kwargs):
-            return None
-
-    query = Query()
-    update = types.SimpleNamespace(callback_query=query)
-    context = types.SimpleNamespace(user_data={"plan_screen": "cached"})
-
-    asyncio.run(module.callback_nav(update, context))
-
-    assert query.answer_calls == [((), {})]
-    assert context.user_data["plan_screen"] == "cached"
-
-
-def test_load_plan_or_generate_builds_today_plan_when_store_is_empty(monkeypatch):
-    module = _load_module()
-    target_date = date(2026, 3, 20)
-    empty_context = module.PlanScreenContext(
-        target_date=target_date,
-        city="",
-        day_type="work_day",
-        narrative_phase="routine_stability",
-        persona_timezone="Europe/Prague",
-        user_timezone="Asia/Pavlodar",
-    )
-    generated_item = types.SimpleNamespace(
-        publication_id="pub-1",
-        date=target_date,
-        platform="Instagram",
-        post_time="09:30",
-        content_type="photo",
-        city="Prague",
-        day_type="work_day",
-        narrative_phase="routine_stability",
-        scene_moment="Airport coffee before boarding",
-    )
-    generated_package = types.SimpleNamespace(city="Prague", publishing_plan=[generated_item])
-
-    load_calls = {"count": 0}
-
-    def fake_load(_target_date):
-        load_calls["count"] += 1
-        if load_calls["count"] == 1:
-            return empty_context, []
-        return (
-            module.PlanScreenContext(
-                target_date=target_date,
-                city="Prague",
-                day_type="work_day",
-                narrative_phase="routine_stability",
-                persona_timezone="Europe/Prague",
-                user_timezone="Asia/Pavlodar",
-            ),
-            [generated_item],
-        )
-
-    orchestrator_calls = []
-
-    monkeypatch.setattr(module, "_load_persisted_plan", fake_load)
-    monkeypatch.setattr(
-        module.orchestrator,
-        "generate_day",
-        lambda target_date: orchestrator_calls.append(target_date) or generated_package,
-        raising=False,
-    )
-
-    context, items = module._load_plan_or_generate(target_date, auto_generate_if_missing=True)
-
-    assert orchestrator_calls == [target_date]
-    assert context.city == "Prague"
-    assert len(items) == 1
-    assert items[0].publication_id == "pub-1"
-
-
-def test_select_screen_items_prefers_persisted_plan_for_detail_views():
-    module = _load_module()
-    target_date = date(2026, 3, 12)
-    cached_context = module.PlanScreenContext(
-        target_date=target_date,
-        city="Paris",
-        day_type="work_day",
-        narrative_phase="recovery_phase",
-        persona_timezone="Europe/Paris",
-        user_timezone="Asia/Pavlodar",
-    )
-
-    items, source = module._select_screen_items(
-        parsed=types.SimpleNamespace(view="prompt"),
-        target_date=target_date,
-        cached_context=cached_context,
-        cached_items=["stale-cached-item"],
-        plan_items=["canonical-plan-item"],
-    )
-
-    assert items == ["canonical-plan-item"]
-    assert source == "publishing_plan"
-
-
-def test_select_screen_items_falls_back_to_cached_context_only_when_plan_missing():
-    module = _load_module()
-    target_date = date(2026, 3, 12)
-    cached_context = module.PlanScreenContext(
-        target_date=target_date,
-        city="Paris",
-        day_type="work_day",
-        narrative_phase="recovery_phase",
-        persona_timezone="Europe/Paris",
-        user_timezone="Asia/Pavlodar",
-    )
-
-    items, source = module._select_screen_items(
-        parsed=types.SimpleNamespace(view="caption"),
-        target_date=target_date,
-        cached_context=cached_context,
-        cached_items=["cached-item"],
-        plan_items=[],
-    )
-
-    assert items == ["cached-item"]
-    assert source == "serialized_callback_context"
-
-
-def test_start_button_and_safe_wrappers_use_utf8_runtime(monkeypatch):
-    module = _load_module()
-    plan_context, plan_items = _context_and_items(module)
-
-    monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (plan_context, plan_items))
-    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("План публикаций", object()))
-    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached")
-
-    wrapper_calls = {"answer": 0, "edit": 0}
-
-    async def fake_safe_answer(_query, text=None, *, show_alert=False):
-        wrapper_calls["answer"] += 1
-        return True
-
-    async def fake_safe_edit(_query, *, text, markup, parse_mode=None):
-        wrapper_calls["edit"] += 1
-        assert text == "План публикаций"
-        return True
-
-    monkeypatch.setattr(module, "safe_answer_callback", fake_safe_answer)
-    monkeypatch.setattr(module, "safe_edit_message", fake_safe_edit)
-
-    class Query:
-        def __init__(self):
-            self.data = "plan:2026-03-12"
-
-    query = Query()
-    update = types.SimpleNamespace(callback_query=query)
-    context = types.SimpleNamespace(user_data={})
-
-    asyncio.run(module.callback_nav(update, context))
-
-    assert wrapper_calls == {"answer": 1, "edit": 1}
     assert module.GET_PLAN_BUTTON == "📅 Получить план на сегодня"

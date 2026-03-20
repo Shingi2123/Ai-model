@@ -14,6 +14,7 @@ Commands:
 /help
 """
 
+import asyncio
 import logging
 import sys
 from datetime import date
@@ -56,18 +57,28 @@ if not isinstance(orchestrator.state, TelegramStateView):
         f"got {type(orchestrator.state).__name__}"
     )
 
-GET_PLAN_BUTTON = "📅 Получить план на сегодня"
-logger = logging.getLogger(__name__)
+GET_PLAN_BUTTON = "\U0001F4C5 Получить план на сегодня"
 MISSING_PLAN_MESSAGE = (
-    "📭 План на сегодня ещё не подготовлен.\n\n"
-    "Сначала выполните генерацию дня отдельно, затем снова откройте план.\n\n"
-    "Что делать:\n"
-    "1. Запустить generate-day\n"
-    "2. При необходимости отправить план через send-telegram\n"
-    "3. Вернуться в бота и нажать «Получить план на сегодня»\n\n"
-    "Рекомендуемая команда:\n"
-    "python main.py generate-day"
+    "\U0001F4ED План на сегодня ещё не подготовлен.\n\n"
+    f"Нажмите «{GET_PLAN_BUTTON}», чтобы бот попробовал подготовить его автоматически."
 )
+LOADING_PLAN_MESSAGE = "\u23F3 Формирую план на сегодня..."
+GENERATING_PLAN_MESSAGE = (
+    "\u23F3 План на сегодня ещё не найден.\n"
+    "Начинаю генерацию дня, подождите немного..."
+)
+WAITING_FOR_GENERATION_MESSAGE = (
+    "\u23F3 План на сегодня уже генерируется.\n"
+    "Подождите немного..."
+)
+GENERATION_FAILED_MESSAGE = (
+    "\u26A0\uFE0F Не удалось подготовить план на сегодня.\n"
+    "Попробуйте ещё раз чуть позже.\n\n"
+    "Если проблема повторяется, проверьте доступ к Google Sheets и OpenAI."
+)
+
+logger = logging.getLogger(__name__)
+_generation_locks: dict[str, asyncio.Lock] = {}
 
 
 def _inline_markup(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
@@ -125,6 +136,92 @@ def _ensure_today_plan() -> tuple[PlanScreenContext, list]:
     return _load_persisted_plan(today)
 
 
+def _generation_key(update: Update, target_date: date) -> str:
+    chat_id = getattr(getattr(update, "effective_chat", None), "id", None)
+    user_id = getattr(getattr(update, "effective_user", None), "id", None)
+    if chat_id is None and getattr(update, "message", None) is not None:
+        chat_id = getattr(getattr(update.message, "chat", None), "id", None)
+    if user_id is None and getattr(update, "message", None) is not None:
+        user_id = getattr(getattr(update.message, "from_user", None), "id", None)
+    if user_id is None and getattr(update, "callback_query", None) is not None:
+        user_id = getattr(getattr(update.callback_query, "from_user", None), "id", None)
+    return f"{chat_id or 'chat'}:{user_id or 'user'}:{target_date.isoformat()}"
+
+
+def _get_generation_lock(key: str) -> asyncio.Lock:
+    lock = _generation_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _generation_locks[key] = lock
+    return lock
+
+
+async def _maybe_update_generation_status(status_message, text: str) -> None:
+    if status_message is None:
+        return
+    try:
+        await status_message(text)
+    except Exception:
+        logger.debug("telegram_polling status update skipped", exc_info=True)
+
+
+async def _load_plan_with_generate_if_missing(
+    update: Update,
+    *,
+    target_date: date,
+    status_message=None,
+) -> tuple[PlanScreenContext, list]:
+    context, items = _load_persisted_plan(target_date)
+    if items:
+        logger.info("telegram_polling plan lookup: found existing plan for %s", target_date.isoformat())
+        return context, items
+
+    generation_key = _generation_key(update, target_date)
+    lock = _get_generation_lock(generation_key)
+
+    if lock.locked():
+        logger.info("telegram_polling generation already in progress for %s", target_date.isoformat())
+        await _maybe_update_generation_status(status_message, WAITING_FOR_GENERATION_MESSAGE)
+        async with lock:
+            pass
+        waited_context, waited_items = _load_persisted_plan(target_date)
+        logger.info(
+            "telegram_polling generation complete: loaded %s item(s) for %s",
+            len(waited_items),
+            target_date.isoformat(),
+        )
+        if waited_items:
+            return waited_context, waited_items
+        raise RuntimeError(f"plan still missing after waiting for generation: {target_date.isoformat()}")
+
+    async with lock:
+        context, items = _load_persisted_plan(target_date)
+        if items:
+            logger.info("telegram_polling plan lookup: found existing plan for %s", target_date.isoformat())
+            return context, items
+
+        logger.info(
+            "telegram_polling plan lookup: no plan found for %s, starting generate-if-missing",
+            target_date.isoformat(),
+        )
+        await _maybe_update_generation_status(status_message, GENERATING_PLAN_MESSAGE)
+        try:
+            await asyncio.to_thread(orchestrator.generate_day, target_date=target_date)
+        except Exception as exc:
+            logger.exception("telegram_polling generation failed for %s: %s", target_date.isoformat(), exc)
+            raise
+
+    regenerated_context, regenerated_items = _load_persisted_plan(target_date)
+    logger.info(
+        "telegram_polling generation complete: loaded %s item(s) for %s",
+        len(regenerated_items),
+        target_date.isoformat(),
+    )
+    if regenerated_items:
+        return regenerated_context, regenerated_items
+    raise RuntimeError(f"persisted plan missing after generate_day: {target_date.isoformat()}")
+
+
 def _render_plan(context: PlanScreenContext, items: list):
     normalized = normalize_plan_items(items)
     return format_plan_screen(context, normalized), _inline_markup(build_plan_keyboard(normalized, context.target_date))
@@ -177,7 +274,6 @@ def _log_plan_lookup(target_date: date, items: list) -> None:
     if items:
         logger.info("telegram_polling plan lookup: found existing plan for %s", target_date.isoformat())
         return
-    logger.info("telegram_polling autogenerate disabled in UI flow")
     logger.info(
         "telegram_polling plan lookup: no plan found for %s, returning missing-plan message",
         target_date.isoformat(),
@@ -213,11 +309,36 @@ def _load_plan_for_ui(target_date: date, *, action: str, session_restored: bool)
     return context, items, bool(items)
 
 
+async def _load_plan_for_interactive_request(
+    update: Update,
+    *,
+    target_date: date,
+    action: str,
+    session_restored: bool,
+    auto_generate_if_missing: bool = False,
+    status_message=None,
+) -> tuple[PlanScreenContext, list, bool]:
+    if auto_generate_if_missing:
+        context, items = await _load_plan_with_generate_if_missing(
+            update,
+            target_date=target_date,
+            status_message=status_message,
+        )
+        raw_rows = (
+            orchestrator.state.load_publishing_plan(target_date.isoformat())
+            if hasattr(orchestrator.state, "load_publishing_plan")
+            else []
+        )
+        _log_plan_view(action, target_date, len(raw_rows), len(items), session_restored=session_restored)
+        return context, items, bool(items)
+    return _load_plan_for_ui(target_date, action=action, session_restored=session_restored)
+
+
 async def safe_edit_message(
     query,
     *,
     text: str,
-    markup: InlineKeyboardMarkup,
+    markup: InlineKeyboardMarkup | None = None,
     parse_mode: str | None = None,
 ) -> bool:
     try:
@@ -317,18 +438,26 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def show_today_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    loading = await update.message.reply_text("⏳ Формирую план на сегодня...")
+    loading = await update.message.reply_text(LOADING_PLAN_MESSAGE)
     try:
-        plan_context, items, has_plan = _load_plan_for_ui(date.today(), action="show_today", session_restored=False)
+        async def update_loading(text: str) -> None:
+            await loading.edit_text(text=text)
+
+        plan_context, items, has_plan = await _load_plan_for_interactive_request(
+            update,
+            target_date=date.today(),
+            action="show_today",
+            session_restored=False,
+            auto_generate_if_missing=True,
+            status_message=update_loading,
+        )
+        text, markup = _render_plan(plan_context, items) if has_plan else _render_missing_plan(plan_context)
         if has_plan:
-            text, markup = _render_plan(plan_context, items)
             context.user_data["plan_screen"] = serialize_context(plan_context, items)
-        else:
-            text, markup = _render_missing_plan(plan_context)
         await loading.edit_text(text=text, reply_markup=markup)
     except Exception as exc:
         logger.exception("telegram_plan_view failed action=show_today error=%s", exc)
-        await loading.edit_text("⚠️ Не удалось получить план на сегодня. Попробуйте ещё раз.")
+        await loading.edit_text(GENERATION_FAILED_MESSAGE)
 
 
 async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -343,11 +472,15 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         cached_context, cached_items = _load_cached_screen(context)
         target_date = _resolve_target_date(parsed, cached_context)
         session_restored = bool(cached_context)
+        is_refresh_action = (query.data or "").startswith("plan:")
 
-        plan_context, plan_items, has_plan = _load_plan_for_ui(
-            target_date,
+        plan_context, plan_items, has_plan = await _load_plan_for_interactive_request(
+            update,
+            target_date=target_date,
             action=parsed.view,
             session_restored=session_restored,
+            auto_generate_if_missing=is_refresh_action and _is_today(target_date),
+            status_message=lambda text: safe_edit_message(query, text=text, markup=None),
         )
         logger.info(
             "telegram_callback plan_loaded date=%s rows=%s deduped_rows=%s",
@@ -387,7 +520,11 @@ async def callback_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception as exc:
         logger.exception("telegram_callback fatal_error data=%s error=%s", query.data, exc)
         try:
-            await safe_answer_callback(query, "Не удалось обработать действие. Нажмите «📅 Получить план на сегодня».", show_alert=True)
+            await safe_answer_callback(
+                query,
+                f"Не удалось обработать действие. Нажмите «{GET_PLAN_BUTTON}».",
+                show_alert=True,
+            )
         except Exception:
             logger.exception("telegram_callback fatal_error_notify_failed data=%s", query.data)
 
