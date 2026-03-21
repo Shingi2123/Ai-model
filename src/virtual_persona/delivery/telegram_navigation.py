@@ -98,6 +98,7 @@ def format_post_screen(context: PlanScreenContext, item: PublishingPlanItem, pos
             f"\nArc: {item.emotional_arc or 'n/a'}"
             f"\nHabit: {item.habit_used or 'n/a'}"
             f"\nPlace: {item.familiar_place_anchor or 'n/a'}"
+            f"\nObjects: {short_text(item.recurring_objects_in_scene or item.object_presence_mode, 80)}"
         )
     return (
         f"{emoji} POST #{post_index + 1}\n\n"
@@ -189,12 +190,20 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
             _format_field("Emotional arc", _display_value(item.emotional_arc, "Not set")),
             _format_field("Habit", _display_value(item.habit_used, "Not set")),
             _format_field("Habit family", _display_value(item.habit_family, "Not set")),
+            _format_field("Habit memory", _display_value(item.recurring_habit_summary, "Not set")),
             _format_field("Place anchor", _display_value(item.familiar_place_anchor, "Not set")),
             _format_field("Place label", _display_value(item.familiar_place_label, "Not set")),
+            _format_field("Place family", _display_value(item.familiar_place_family, "Not set")),
+            _format_field("Familiarity", _display_value(str(item.familiarity_score) if item.familiarity_score is not None else "", "Not set")),
             _format_field("Objects", _display_value(item.recurring_objects_in_scene, "Not set")),
+            _format_field("Object mode", _display_value(item.object_presence_mode, "Not set")),
             _format_field("Self-presentation", _display_value(item.self_presentation_mode, "Not set")),
             _format_field("Social presence", _display_value(item.social_presence_mode, "Not set")),
+            _format_field("Social detail", _display_value(item.social_presence_detail, "Not set")),
+            _format_field("Transition", _display_value(item.transition_context or item.transition_hint_used, "Not set")),
             _format_field("Action family", _display_value(item.action_family, "Not set")),
+            _format_field("Tone family", _display_value(item.emotional_tone_family, "Not set")),
+            _format_field("Voice constraints", _display_value(item.caption_voice_constraints, "Not set")),
             _format_field("Social context", _display_value(item.social_context_hint, "Not set")),
         ]
     )
@@ -350,15 +359,23 @@ def serialize_context(context: PlanScreenContext, items: list[PublishingPlanItem
                 "emotional_arc": item.emotional_arc,
                 "habit_used": item.habit_used,
                 "habit_family": item.habit_family,
+                "recurring_habit_summary": item.recurring_habit_summary,
                 "familiar_place_anchor": item.familiar_place_anchor,
                 "familiar_place_label": item.familiar_place_label,
+                "familiar_place_family": item.familiar_place_family,
+                "familiarity_score": item.familiarity_score,
                 "recurring_objects_in_scene": item.recurring_objects_in_scene,
+                "object_presence_mode": item.object_presence_mode,
                 "self_presentation_mode": item.self_presentation_mode,
                 "social_presence_mode": item.social_presence_mode,
                 "transition_hint_used": item.transition_hint_used,
+                "transition_context": item.transition_context,
                 "caption_voice_mode": item.caption_voice_mode,
                 "action_family": item.action_family,
+                "emotional_tone_family": item.emotional_tone_family,
                 "social_context_hint": item.social_context_hint,
+                "social_presence_detail": item.social_presence_detail,
+                "caption_voice_constraints": item.caption_voice_constraints,
                 "day_behavior_summary": item.day_behavior_summary,
             }
             for item in items

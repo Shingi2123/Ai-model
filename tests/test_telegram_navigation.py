@@ -55,15 +55,23 @@ def _item(index: int = 1, publication_id: str | None = None) -> PublishingPlanIt
         emotional_arc="quiet_settling",
         habit_used="window_pause",
         habit_family="quiet_pause",
+        recurring_habit_summary="quiet_pause: last used 2d ago",
         familiar_place_anchor="quiet hotel window",
         familiar_place_label="familiar quiet window",
+        familiar_place_family="window_corner",
+        familiarity_score=0.71,
         recurring_objects_in_scene="mug, phone",
+        object_presence_mode="minimal_objects_soft_frame",
         self_presentation_mode="soft_neat",
         social_presence_mode="alone_but_in_public",
         transition_hint_used="echo_of_quiet_room_before_leaving",
+        transition_context="narrative_echo",
         caption_voice_mode="quiet_reflective",
         action_family="quiet_pause",
+        emotional_tone_family="quiet_softness",
         social_context_hint="quiet_people_exist_around_her_but_not_center_frame",
+        social_presence_detail="alone in frame, public life nearby",
+        caption_voice_constraints="keep it concise, stay lightly private",
         day_behavior_summary="energy=0.51; quiet=0.72; arc=quiet_settling",
     )
 
@@ -146,7 +154,9 @@ def test_prompt_screen_uses_behavior_detail_fields():
     text = format_prompt_screen(_item(), 0)
 
     assert "Habit family: quiet_pause" in text
+    assert "Habit memory: quiet_pause: last used 2d ago" in text
     assert "Place label: familiar quiet window" in text
+    assert "Place family: window_corner" in text
     assert "Action family: quiet_pause" in text
     assert "Social context: quiet_people_exist_around_her_but_not_center_frame" in text
 

@@ -205,11 +205,18 @@ class ContentGenerator:
         opening_guard = ", ".join(getattr(behavior, "caption_opening_guard", []) or [])
         transition_hint = self._safe(getattr(behavior, "transition_hint", ""))
         social_hint = self._safe(getattr(behavior, "social_context_hint", ""))
+        voice_constraints = "; ".join(getattr(behavior, "caption_voice_constraints", []) or [])
+        recurring_habit_summary = self._safe(getattr(behavior, "recurring_habit_summary", ""))
+        familiarity_score = self._safe(getattr(behavior, "familiarity_score", ""))
+        object_presence_mode = self._safe(getattr(behavior, "object_presence_mode", ""))
+        outfit_behavior_mode = self._safe(getattr(behavior, "outfit_behavior_mode", ""))
         caption_prompt = (
             f"{self.prompt_composer.compose(context, scenes[-1] if scenes else None, outfit_summary, 'caption', outfit_item_ids)} "
             f"Tone profile: {tone_profile}. Emotional arc={post_mapping.get('emotional_arc', '')}. Habit hint={post_mapping.get('behavior_habit', '')}. "
             f"Familiar place anchor={post_mapping.get('familiar_place_anchor', '')}. Visual focus={post_mapping.get('visual_focus', '')}. "
-            f"Transition hint={transition_hint}. Social context={social_hint}. Avoid caption openings similar to: {opening_guard}. "
+            f"Transition hint={transition_hint}. Social context={social_hint}. Habit memory={recurring_habit_summary}. "
+            f"Place familiarity={familiarity_score}. Object mode={object_presence_mode}. Outfit behavior={outfit_behavior_mode}. "
+            f"Voice constraints: {voice_constraints}. Avoid caption openings similar to: {opening_guard}. "
             "Avoid generic AI phrasing, keep natural social media voice, no literal prompt retelling. Keep the voice restrained, lightly reflective, recognizably the same person across days, and never overly literary or dramatic. "
             f"{self._safe_format(post_template, post_mapping)}"
         )

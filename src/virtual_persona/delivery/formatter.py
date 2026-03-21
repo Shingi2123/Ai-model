@@ -15,8 +15,10 @@ def package_to_markdown(package: DailyPackage) -> str:
             f"**Behavior:** {behavior.debug_summary}\n"
             f"**Emotional arc:** {behavior.emotional_arc}\n"
             f"**Habit:** {behavior.selected_habit} ({behavior.habit_family})\n"
+            f"**Habit memory:** {behavior.recurring_habit_summary}\n"
             f"**Place anchor:** {behavior.familiar_place_anchor} ({behavior.familiar_place_label})\n"
-            f"**Objects:** {', '.join(behavior.recurring_objects)}\n"
+            f"**Place family / familiarity:** {behavior.familiar_place_family} / {behavior.familiarity_score:.2f}\n"
+            f"**Objects:** {', '.join(behavior.recurring_objects)} ({behavior.object_presence_mode})\n"
             f"**Self-presentation:** {behavior.daily_state.self_presentation_mode}\n\n"
         )
 

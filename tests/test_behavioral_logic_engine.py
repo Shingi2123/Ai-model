@@ -170,3 +170,51 @@ def test_behavior_engine_smooths_state_and_marks_repetition_pressure():
     assert 0.3 < behavior.daily_state.energy_level < 0.7
     assert "caption_voice_streak" in behavior.anti_repetition_flags
     assert behavior.caption_opening_guard
+
+
+def test_behavior_engine_builds_transition_and_familiarity_layers():
+    engine = BehavioralLogicEngine(
+        DummyState(
+            [
+                {
+                    "date": "2026-03-18",
+                    "familiar_place_anchor": "airport side corridor",
+                    "familiar_place_family": "transit_edge",
+                    "daily_behavior_state": {"energy_level": 0.46},
+                    "slow_behavior_state": {"city_adaptation": 0.5, "route_familiarity": 0.52, "location_comfort": 0.55},
+                }
+            ]
+        )
+    )
+
+    behavior = engine.build(
+        _context(
+            day_type="travel_day",
+            city="Berlin",
+            recent_history=[
+                {"date": "2026-03-20", "city": "Paris", "day_type": "travel_day"},
+                {"date": "2026-03-21", "city": "Berlin", "day_type": "travel_day"},
+            ],
+        )
+    )
+
+    assert behavior.transition_context in {"city_change_transition", "post_transit_recovery", "object_continuity"}
+    assert 0 <= behavior.familiarity_score <= 1
+    assert behavior.familiar_place_family
+    assert behavior.object_presence_mode
+
+
+def test_behavior_engine_generates_caption_constraints_and_tone_family():
+    engine = BehavioralLogicEngine(DummyState())
+
+    behavior = engine.build(_context(day_type="hotel_rest", phase="quiet_reset_phase", energy="low"))
+
+    assert behavior.caption_voice_constraints
+    assert behavior.daily_state.emotional_tone_family in {
+        "quiet_softness",
+        "travel_reflection",
+        "grounded_daily",
+        "work_focus",
+        "open_city",
+    }
+    assert behavior.social_presence_detail

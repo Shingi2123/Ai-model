@@ -71,6 +71,9 @@ class CharacterBehaviorProfile:
     repeat_place_affinity: float = 0.75
     preferred_repeat_routes: float = 0.72
     quiet_caption_restraint: float = 0.78
+    caption_openness: float = 0.34
+    caption_length_preference: float = 0.42
+    reflective_bias: float = 0.72
     visual_consistency_need: float = 0.8
     familiar_space_bias: float = 0.74
     travel_lightness_preference: float = 0.76
@@ -99,6 +102,9 @@ class SlowBehaviorState:
     social_reserve: float = 0.58
     city_confidence: float = 0.48
     settledness: float = 0.44
+    location_comfort: float = 0.48
+    familiarity_weight: float = 0.46
+    recent_transition_load: float = 0.28
 
 
 @dataclass
@@ -119,6 +125,7 @@ class DailyBehaviorState:
     internal_focus: str = "gentle"
     social_presence_mode: str = "alone_but_in_public"
     caption_voice_mode: str = "quiet_observational"
+    emotional_tone_family: str = "grounded_daily"
 
 
 @dataclass
@@ -130,16 +137,23 @@ class BehavioralContext:
     selected_habit: str
     habit_family: str
     habit_context: str
+    recurring_habit_summary: str
     familiar_place_anchor: str
     familiar_place_label: str
+    familiar_place_family: str
+    familiarity_score: float
     recurring_objects: List[str]
+    object_presence_mode: str
     outfit_behavior_mode: str
     transition_hint: str
+    transition_context: str
     allowed_scene_families: List[str]
     likely_actions: List[str]
     action_family: str
     gesture_bias: List[str]
     social_context_hint: str
+    social_presence_detail: str
+    caption_voice_constraints: List[str] = field(default_factory=list)
     caption_opening_guard: List[str] = field(default_factory=list)
     anti_repetition_flags: List[str] = field(default_factory=list)
     debug_summary: str = ""
@@ -279,15 +293,23 @@ class PublishingPlanItem:
     emotional_arc: str = ""
     habit_used: str = ""
     habit_family: str = ""
+    recurring_habit_summary: str = ""
     familiar_place_anchor: str = ""
     familiar_place_label: str = ""
+    familiar_place_family: str = ""
+    familiarity_score: float | None = None
     recurring_objects_in_scene: str = ""
+    object_presence_mode: str = ""
     self_presentation_mode: str = ""
     social_presence_mode: str = ""
     transition_hint_used: str = ""
+    transition_context: str = ""
     caption_voice_mode: str = ""
     action_family: str = ""
+    emotional_tone_family: str = ""
     social_context_hint: str = ""
+    social_presence_detail: str = ""
+    caption_voice_constraints: str = ""
     day_behavior_summary: str = ""
     selected_image_path: str = ""
     clean_image_export_path: str = ""

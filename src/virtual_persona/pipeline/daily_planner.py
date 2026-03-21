@@ -189,6 +189,9 @@ class DailyPlanner:
         action_family = str(getattr(behavior, "action_family", "") or "")
         social_hint = str(getattr(behavior, "social_context_hint", "") or "")
         emotional_arc = str(getattr(behavior, "emotional_arc", "") or "")
+        outfit_mode = str(getattr(behavior, "outfit_behavior_mode", "") or "")
+        object_mode = str(getattr(behavior, "object_presence_mode", "") or "")
+        transition_hint = str(getattr(behavior, "transition_hint", "") or "")
 
         adjusted: List[DayScene] = []
         for idx, scene in enumerate(scenes):
@@ -217,6 +220,7 @@ class DailyPlanner:
                 activity = activity or "outfit_tidy"
             if getattr(daily_behavior, "self_presentation_mode", "") == "uniform_composed" and idx == 0:
                 mood = "focused"
+                desc = f"{desc} with a more composed work rhythm"
             if habit_family == "departure_ritual" and idx == 0:
                 desc = f"{desc} with a before-leaving rhythm"
                 scene_family = scene_family or "departure_transition"
@@ -224,6 +228,14 @@ class DailyPlanner:
                 desc = f"{desc} while staying close to familiar routes"
             if social_hint and "background" in social_hint and idx > 0:
                 desc = f"{desc} with soft life around her"
+            if outfit_mode == "travel_casual_mode" and idx < 2 and any(obj in objects for obj in ["carry_on", "shoulder_bag", "jacket"]):
+                desc = f"{desc} with travel-ready details kept nearby"
+            if outfit_mode == "soft_casual_mode" and idx == 0:
+                desc = f"{desc} with a slower off-duty pace"
+            if object_mode == "minimal_objects_soft_frame" and idx == 0:
+                desc = f"{desc} with only a few personal things in frame"
+            if transition_hint and idx == 0 and "echo_of_" in transition_hint:
+                desc = f"{desc} carrying a subtle continuation from yesterday"
 
             adjusted.append(
                 DayScene(
