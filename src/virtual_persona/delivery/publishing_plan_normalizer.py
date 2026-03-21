@@ -50,12 +50,16 @@ PUBLISHING_PLAN_HEADERS = [
     "notes",
     "emotional_arc",
     "habit_used",
+    "habit_family",
     "familiar_place_anchor",
+    "familiar_place_label",
     "recurring_objects_in_scene",
     "self_presentation_mode",
     "social_presence_mode",
     "transition_hint_used",
     "caption_voice_mode",
+    "action_family",
+    "social_context_hint",
     "day_behavior_summary",
     "selected_image_path",
     "clean_image_export_path",
@@ -254,7 +258,12 @@ def resolve_canonical_prompt(
         resolved_prompt = meta_prompt
         prompt_source = "prompt_package_json.final_prompt"
     else:
-        resolved_prompt = default
+        row_prompt = _extract_value(row, "prompt_text", "prompt")
+        if row_prompt and not is_legacy_prompt(row_prompt, row=row, prompt_meta=prompt_meta):
+            resolved_prompt = row_prompt
+            prompt_source = "row.prompt_text"
+        else:
+            resolved_prompt = default
 
     return resolved_prompt, prompt_source, meta_legacy, meta_version or ("v6" if resolved_prompt == meta_prompt and resolved_prompt else "")
 
@@ -418,12 +427,16 @@ def normalize_publishing_plan_payload(
         "notes": _extract_value(row, "notes"),
         "emotional_arc": _extract_value(row, "emotional_arc"),
         "habit_used": _extract_value(row, "habit_used"),
+        "habit_family": _extract_value(row, "habit_family"),
         "familiar_place_anchor": _extract_value(row, "familiar_place_anchor"),
+        "familiar_place_label": _extract_value(row, "familiar_place_label"),
         "recurring_objects_in_scene": _extract_value(row, "recurring_objects_in_scene"),
         "self_presentation_mode": _extract_value(row, "self_presentation_mode"),
         "social_presence_mode": _extract_value(row, "social_presence_mode"),
         "transition_hint_used": _extract_value(row, "transition_hint_used"),
         "caption_voice_mode": _extract_value(row, "caption_voice_mode"),
+        "action_family": _extract_value(row, "action_family"),
+        "social_context_hint": _extract_value(row, "social_context_hint"),
         "day_behavior_summary": _extract_value(row, "day_behavior_summary"),
         "selected_image_path": _extract_value(row, "selected_image_path"),
         "clean_image_export_path": _extract_value(row, "clean_image_export_path"),

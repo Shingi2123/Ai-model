@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import date
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 from virtual_persona.models.domain import (
     BehavioralContext,
@@ -20,6 +20,7 @@ class BehavioralLogicEngine:
     DEFAULT_HABITS = {
         "window_pause": {
             "contexts": {"hotel_rest", "day_off", "layover_day", "travel_day", "work_day"},
+            "family": "quiet_pause",
             "min_gap_days": 2,
             "place": "quiet hotel window",
             "objects": ["mug", "phone"],
@@ -27,6 +28,7 @@ class BehavioralLogicEngine:
         },
         "coffee_before_leaving": {
             "contexts": {"travel_day", "work_day", "day_off", "layover_day"},
+            "family": "departure_ritual",
             "min_gap_days": 1,
             "place": "soft morning desk",
             "objects": ["mug", "bag"],
@@ -34,6 +36,7 @@ class BehavioralLogicEngine:
         },
         "terminal_pause": {
             "contexts": {"travel_day", "airport_transfer", "work_day"},
+            "family": "transit_ritual",
             "min_gap_days": 2,
             "place": "airport side corridor",
             "objects": ["carry_on", "shoulder_bag", "headphones"],
@@ -41,6 +44,7 @@ class BehavioralLogicEngine:
         },
         "outfit_tidy": {
             "contexts": {"work_day", "travel_day", "airport_transfer"},
+            "family": "self_presentation",
             "min_gap_days": 1,
             "place": "hallway mirror",
             "objects": ["jacket", "phone"],
@@ -48,6 +52,7 @@ class BehavioralLogicEngine:
         },
         "quiet_before_leaving": {
             "contexts": {"travel_day", "hotel_rest", "layover_day"},
+            "family": "departure_ritual",
             "min_gap_days": 2,
             "place": "tidy room mirror",
             "objects": ["bag", "jacket", "suitcase"],
@@ -55,38 +60,42 @@ class BehavioralLogicEngine:
         },
         "slow_walk": {
             "contexts": {"day_off", "layover_day", "hotel_rest"},
+            "family": "gentle_movement",
             "min_gap_days": 2,
             "place": "cafe corner near glass",
             "objects": ["shoulder_bag", "sunglasses"],
             "actions": ["slow_walk", "look_sideways", "quiet_notice"],
         },
     }
-
-    DEFAULT_PLACE_ANCHORS = [
-        "quiet hotel window",
-        "airport side corridor",
-        "cafe corner near glass",
-        "tidy room mirror",
-        "hallway mirror",
-        "living space corner",
-        "soft morning desk",
-    ]
-
+    DEFAULT_PLACE_ANCHORS = {
+        "quiet hotel window": {"family": "window_corner", "label": "familiar quiet window"},
+        "airport side corridor": {"family": "transit_edge", "label": "side corridor she tends to choose"},
+        "cafe corner near glass": {"family": "public_corner", "label": "glass-side cafe corner"},
+        "tidy room mirror": {"family": "private_reset", "label": "tidy mirror corner"},
+        "hallway mirror": {"family": "departure_axis", "label": "hallway mirror before leaving"},
+        "living space corner": {"family": "home_base", "label": "soft living-space corner"},
+        "soft morning desk": {"family": "morning_station", "label": "small morning desk setup"},
+    }
     DEFAULT_OBJECTS = {
-        "travel_day": ["carry_on", "shoulder_bag", "jacket", "headphones", "phone"],
+        "travel_day": ["carry_on", "shoulder_bag", "jacket", "headphones", "phone", "scarf"],
         "airport_transfer": ["carry_on", "shoulder_bag", "phone", "scarf"],
         "work_day": ["phone", "shoulder_bag", "jacket", "notebook"],
         "day_off": ["mug", "notebook", "phone"],
         "layover_day": ["shoulder_bag", "sunglasses", "phone", "mug"],
         "hotel_rest": ["mug", "bag", "jacket"],
     }
-
     EMOTIONAL_ARCS = {
         "travel_phase": "between_flights_introspection",
         "exploration_phase": "curious_city_openness",
         "recovery_phase": "low_energy_recovery",
         "quiet_reset_phase": "quiet_settling",
         "routine_stability": "routine_stability",
+        "transition_phase": "subtle_pre_departure_melancholy",
+    }
+    CAPTION_OPENINGS = {
+        "quiet_reflective": ["still", "today", "kept", "softly"],
+        "restrained_workday": ["early", "workday", "between", "just"],
+        "quiet_observational": ["small", "somehow", "another", "little"],
     }
 
     def __init__(self, state_store: Any) -> None:
@@ -94,39 +103,57 @@ class BehavioralLogicEngine:
 
     def build(self, context: Dict[str, Any]) -> BehavioralContext:
         profile = self._build_profile(context.get("character_profile") or {})
-        slow_state = self._build_slow_state(context, profile)
-        daily_state = self._build_daily_state(context, profile, slow_state)
-        emotional_arc = self._select_emotional_arc(context, daily_state)
-        habit = self._select_habit(context, profile, daily_state)
-        familiar_place_anchor = self._select_place_anchor(context, profile, daily_state, habit)
-        recurring_objects = self._select_recurring_objects(context, profile, habit)
+        memory = self._load_behavior_memory()
+        slow_state = self._build_slow_state(context, profile, memory)
+        daily_state = self._build_daily_state(context, profile, slow_state, memory)
+        emotional_arc = self._select_emotional_arc(context, daily_state, slow_state)
+        habit = self._select_habit(context, profile, daily_state, memory)
+        familiar_place_anchor = self._select_place_anchor(context, profile, daily_state, slow_state, habit, memory)
+        recurring_objects = self._select_recurring_objects(context, profile, daily_state, habit, memory)
         transition_hint = self._build_transition_hint(context, daily_state, familiar_place_anchor, recurring_objects)
         outfit_behavior_mode = self._outfit_behavior_mode(context, daily_state)
-        allowed_scene_families = self._scene_families(context, daily_state, emotional_arc)
-        likely_actions = self._likely_actions(habit, daily_state)
+        allowed_scene_families = self._scene_families(context, daily_state, emotional_arc, habit["family"])
+        likely_actions = self._likely_actions(habit, daily_state, recurring_objects)
         gesture_bias = self._gesture_bias(profile, daily_state)
-        anti_repetition_flags = self._anti_repetition_flags(context, habit["name"], familiar_place_anchor, emotional_arc)
-
+        anti_repetition_flags = self._anti_repetition_flags(
+            context,
+            memory,
+            habit["name"],
+            habit["family"],
+            familiar_place_anchor,
+            emotional_arc,
+            recurring_objects,
+            daily_state.caption_voice_mode,
+        )
+        social_context_hint = self._social_context_hint(daily_state)
+        caption_opening_guard = self._caption_opening_guard(daily_state.caption_voice_mode, memory)
+        familiar_place_label = self.DEFAULT_PLACE_ANCHORS.get(familiar_place_anchor, {}).get("label", familiar_place_anchor)
+        action_family = self._primary_action_family(habit["family"], likely_actions)
         debug_summary = (
             f"energy={daily_state.energy_level:.2f}; quiet={daily_state.desire_for_quiet:.2f}; "
-            f"movement={daily_state.desire_for_movement:.2f}; arc={emotional_arc}; habit={habit['name']}; "
-            f"place={familiar_place_anchor}; objects={','.join(recurring_objects[:3])}"
+            f"movement={daily_state.desire_for_movement:.2f}; hurry={daily_state.hurry_level:.2f}; "
+            f"arc={emotional_arc}; habit={habit['name']}; place={familiar_place_anchor}; "
+            f"objects={','.join(recurring_objects[:3])}; social={daily_state.social_presence_mode}"
         )
-
         return BehavioralContext(
             profile=profile,
             slow_state=slow_state,
             daily_state=daily_state,
             emotional_arc=emotional_arc,
             selected_habit=habit["name"],
+            habit_family=habit["family"],
             habit_context=habit["context"],
             familiar_place_anchor=familiar_place_anchor,
+            familiar_place_label=familiar_place_label,
             recurring_objects=recurring_objects,
             outfit_behavior_mode=outfit_behavior_mode,
             transition_hint=transition_hint,
             allowed_scene_families=allowed_scene_families,
             likely_actions=likely_actions,
+            action_family=action_family,
             gesture_bias=gesture_bias,
+            social_context_hint=social_context_hint,
+            caption_opening_guard=caption_opening_guard,
             anti_repetition_flags=anti_repetition_flags,
             debug_summary=debug_summary,
         )
@@ -140,16 +167,21 @@ class BehavioralLogicEngine:
             "day_type": day_type,
             "emotional_arc": behavior.emotional_arc,
             "selected_habit": behavior.selected_habit,
+            "habit_family": behavior.habit_family,
             "habit_context": behavior.habit_context,
             "familiar_place_anchor": behavior.familiar_place_anchor,
+            "familiar_place_label": behavior.familiar_place_label,
             "recurring_objects_in_scene": ", ".join(behavior.recurring_objects),
             "self_presentation_mode": behavior.daily_state.self_presentation_mode,
             "social_presence_mode": behavior.daily_state.social_presence_mode,
             "transition_hint_used": behavior.transition_hint,
             "caption_voice_mode": behavior.daily_state.caption_voice_mode,
+            "action_family": behavior.action_family,
+            "social_context_hint": behavior.social_context_hint,
             "allowed_scene_families": ", ".join(behavior.allowed_scene_families),
             "likely_actions": ", ".join(behavior.likely_actions),
             "gesture_bias": ", ".join(behavior.gesture_bias),
+            "caption_opening_guard": ", ".join(behavior.caption_opening_guard),
             "anti_repetition_flags": ", ".join(behavior.anti_repetition_flags),
             "day_behavior_summary": behavior.debug_summary,
             "daily_behavior_state": daily,
@@ -158,7 +190,7 @@ class BehavioralLogicEngine:
 
     def _build_profile(self, profile: Dict[str, Any]) -> CharacterBehaviorProfile:
         habits = self._split_csv(profile.get("behavior_favorite_habits")) or ["window_pause", "coffee_before_leaving", "outfit_tidy"]
-        place_archetypes = self._split_csv(profile.get("behavior_favorite_place_archetypes")) or list(self.DEFAULT_PLACE_ANCHORS[:4])
+        place_archetypes = self._split_csv(profile.get("behavior_favorite_place_archetypes")) or list(self.DEFAULT_PLACE_ANCHORS.keys())[:4]
         recurring_objects = self._split_csv(profile.get("behavior_recurring_objects")) or ["shoulder_bag", "mug", "phone", "jacket"]
         return CharacterBehaviorProfile(
             baseline_temperament=str(profile.get("behavior_baseline_temperament") or "soft_observant"),
@@ -178,6 +210,11 @@ class BehavioralLogicEngine:
             improvisation_tolerance=float(profile.get("behavior_improvisation_tolerance") or 0.43),
             aesthetic_attention=float(profile.get("behavior_aesthetic_attention") or 0.81),
             repeat_place_affinity=float(profile.get("behavior_repeat_place_affinity") or 0.75),
+            preferred_repeat_routes=float(profile.get("behavior_preferred_repeat_routes") or 0.72),
+            quiet_caption_restraint=float(profile.get("behavior_quiet_caption_restraint") or 0.78),
+            visual_consistency_need=float(profile.get("behavior_visual_consistency_need") or 0.8),
+            familiar_space_bias=float(profile.get("behavior_familiar_space_bias") or 0.74),
+            travel_lightness_preference=float(profile.get("behavior_travel_lightness_preference") or 0.76),
             prefers_quiet_mornings=self._as_bool(profile.get("prefers_quiet_mornings"), True),
             keeps_small_rituals=self._as_bool(profile.get("keeps_small_rituals"), True),
             often_pauses_by_window=self._as_bool(profile.get("often_pauses_by_window"), True),
@@ -193,25 +230,31 @@ class BehavioralLogicEngine:
             recurring_objects=recurring_objects,
         )
 
-    def _build_slow_state(self, context: Dict[str, Any], profile: CharacterBehaviorProfile) -> SlowBehaviorState:
+    def _build_slow_state(
+        self,
+        context: Dict[str, Any],
+        profile: CharacterBehaviorProfile,
+        memory: Sequence[Dict[str, Any]],
+    ) -> SlowBehaviorState:
         history = context.get("recent_history") or []
-        behavior_memory = self._load_behavior_memory()
-        last_behavior = behavior_memory[-1] if behavior_memory else {}
         city = str(context.get("city") or "")
         life_state = context.get("life_state")
         fatigue_level = float(getattr(life_state, "fatigue_level", 3) or 3)
-        recent_city_days = [row for row in history[-5:] if str(row.get("city") or "") == city]
-        city_changes = sum(1 for row in history[-5:] if str(row.get("city") or "") != city)
-        adaptation = _clamp(0.3 + 0.12 * len(recent_city_days) - 0.08 * city_changes)
-        last_city = str(history[-1].get("city") or "") if history else ""
-        sense_of_home = _clamp(0.35 + (0.2 if last_city == city else 0.0) + 0.25 * profile.repeat_place_affinity)
-        route_familiarity = _clamp(0.28 + 0.1 * len(recent_city_days))
-        emotional_comfort = _clamp(0.4 + adaptation * 0.3 + sense_of_home * 0.2 - fatigue_level / 25)
-        social_reserve = _clamp(0.45 + profile.solitude_preference * 0.35 + (0.08 if city_changes else 0.0))
-        if last_behavior:
-            slow = last_behavior.get("slow_behavior_state") or {}
-            adaptation = _clamp((adaptation + float(slow.get("city_adaptation", adaptation))) / 2)
-            route_familiarity = _clamp((route_familiarity + float(slow.get("route_familiarity", route_familiarity))) / 2)
+        recent_city_days = [row for row in history[-6:] if str(row.get("city") or "") == city]
+        recent_city_changes = sum(1 for row in history[-4:] if str(row.get("city") or "") != city)
+        last_slow = self._coerce_mapping(memory[-1].get("slow_behavior_state")) if memory else {}
+        adaptation = _clamp(0.24 + 0.13 * len(recent_city_days) - 0.08 * recent_city_changes + profile.familiar_space_bias * 0.1)
+        sense_of_home = _clamp(0.22 + adaptation * 0.35 + profile.repeat_place_affinity * 0.25)
+        route_familiarity = _clamp(0.2 + len(recent_city_days) * 0.11 + profile.preferred_repeat_routes * 0.18)
+        city_confidence = _clamp(0.18 + adaptation * 0.4 + route_familiarity * 0.25)
+        settledness = _clamp(0.16 + sense_of_home * 0.32 + (0.18 if recent_city_days else 0.0) - fatigue_level / 18)
+        emotional_comfort = _clamp(0.26 + adaptation * 0.28 + sense_of_home * 0.18 + settledness * 0.14 - fatigue_level / 24)
+        social_reserve = _clamp(0.42 + profile.solitude_preference * 0.3 + (0.1 if recent_city_changes else 0.0))
+        if last_slow:
+            adaptation = _clamp((adaptation * 0.6) + float(last_slow.get("city_adaptation", adaptation)) * 0.4)
+            route_familiarity = _clamp((route_familiarity * 0.55) + float(last_slow.get("route_familiarity", route_familiarity)) * 0.45)
+            city_confidence = _clamp((city_confidence * 0.55) + float(last_slow.get("city_confidence", city_confidence)) * 0.45)
+            settledness = _clamp((settledness * 0.6) + float(last_slow.get("settledness", settledness)) * 0.4)
         return SlowBehaviorState(
             city_adaptation=adaptation,
             accumulated_fatigue=_clamp(fatigue_level / 10),
@@ -219,6 +262,8 @@ class BehavioralLogicEngine:
             route_familiarity=route_familiarity,
             emotional_comfort=emotional_comfort,
             social_reserve=social_reserve,
+            city_confidence=city_confidence,
+            settledness=settledness,
         )
 
     def _build_daily_state(
@@ -226,28 +271,39 @@ class BehavioralLogicEngine:
         context: Dict[str, Any],
         profile: CharacterBehaviorProfile,
         slow_state: SlowBehaviorState,
+        memory: Sequence[Dict[str, Any]],
     ) -> DailyBehaviorState:
         day_type = str(context.get("day_type") or "")
         narrative = context.get("narrative_context")
         phase = str(getattr(narrative, "narrative_phase", "routine_stability") or "routine_stability")
         energy_state = str(getattr(narrative, "energy_state", "medium") or "medium")
-        phase_factor = {
-            "recovery_phase": -0.18,
-            "quiet_reset_phase": -0.12,
-            "travel_phase": -0.08,
-            "exploration_phase": 0.08,
-            "routine_stability": 0.03,
-        }.get(phase, 0.0)
-        base_energy = {"low": 0.34, "medium": 0.55, "high": 0.74}.get(energy_state, 0.55)
-        transit_fatigue = _clamp(slow_state.accumulated_fatigue + (0.25 if day_type in {"travel_day", "airport_transfer", "work_day"} else 0.0))
-        energy = _clamp(base_energy + phase_factor - transit_fatigue * 0.3 + slow_state.city_adaptation * 0.1)
-        quiet = _clamp(profile.morning_pause_affinity * 0.35 + slow_state.social_reserve * 0.3 + transit_fatigue * 0.25)
-        movement = _clamp(profile.city_wandering_affinity * 0.45 + (0.24 if day_type in {"travel_day", "layover_day"} else 0.08) - quiet * 0.18)
-        social = _clamp(profile.social_openness * 0.55 + (0.06 if phase == "exploration_phase" else -0.04 if day_type == "work_day" and profile.not_overly_social_on_workdays else 0.0) - slow_state.social_reserve * 0.18)
-        routine = _clamp(profile.organization_level * 0.4 + slow_state.route_familiarity * 0.25 + (0.18 if day_type in {"work_day", "hotel_rest"} else -0.08 if day_type in {"travel_day", "airport_transfer"} else 0.0))
-        comfort = _clamp(slow_state.emotional_comfort * 0.7 + slow_state.city_adaptation * 0.15)
-        mental_load = _clamp(transit_fatigue * 0.35 + (0.24 if day_type in {"work_day", "travel_day"} else 0.1) + (0.08 if phase == "transition_phase" else 0.0))
-
+        last_daily = self._coerce_mapping(memory[-1].get("daily_behavior_state")) if memory else {}
+        base_energy = {"low": 0.34, "medium": 0.56, "high": 0.74}.get(energy_state, 0.56)
+        transit_fatigue = _clamp(
+            slow_state.accumulated_fatigue
+            + (0.26 if day_type in {"travel_day", "airport_transfer"} else 0.18 if day_type == "work_day" else 0.04)
+        )
+        hurry = _clamp(
+            0.16
+            + (0.3 if day_type in {"travel_day", "airport_transfer"} else 0.18 if day_type == "work_day" else 0.06)
+            + (0.1 if phase == "transition_phase" else 0.0)
+            - profile.comfort_with_haste * 0.12
+        )
+        quiet = _clamp(profile.morning_pause_affinity * 0.32 + slow_state.social_reserve * 0.28 + transit_fatigue * 0.18 + (0.1 if phase in {"recovery_phase", "quiet_reset_phase"} else 0.0))
+        movement = _clamp(profile.city_wandering_affinity * 0.4 + slow_state.city_confidence * 0.18 + (0.26 if day_type in {"travel_day", "layover_day"} else 0.08) - quiet * 0.16)
+        social = _clamp(profile.social_openness * 0.5 + slow_state.emotional_comfort * 0.16 + (0.08 if phase == "exploration_phase" else 0.0) - slow_state.social_reserve * 0.18)
+        routine = _clamp(profile.organization_level * 0.34 + slow_state.route_familiarity * 0.2 + slow_state.settledness * 0.18 + (0.18 if day_type in {"work_day", "hotel_rest"} else -0.06 if day_type in {"travel_day", "airport_transfer"} else 0.04))
+        comfort = _clamp(slow_state.emotional_comfort * 0.64 + slow_state.city_adaptation * 0.14 + slow_state.city_confidence * 0.12)
+        mental_load = _clamp(transit_fatigue * 0.3 + hurry * 0.24 + (0.24 if day_type == "work_day" else 0.16 if day_type in {"travel_day", "airport_transfer"} else 0.08))
+        softness = _clamp(quiet * 0.38 + comfort * 0.26 + profile.quiet_caption_restraint * 0.14 - hurry * 0.12)
+        internal_coherence = _clamp(routine * 0.33 + profile.organization_level * 0.22 + slow_state.settledness * 0.18 - mental_load * 0.1)
+        energy = _clamp(base_energy - transit_fatigue * 0.24 - mental_load * 0.12 + slow_state.city_adaptation * 0.08 + movement * 0.06)
+        if last_daily:
+            energy = _clamp(energy * 0.68 + float(last_daily.get("energy_level", energy)) * 0.32)
+            social = _clamp(social * 0.68 + float(last_daily.get("social_openness", social)) * 0.32)
+            routine = _clamp(routine * 0.68 + float(last_daily.get("routine_stability", routine)) * 0.32)
+            quiet = _clamp(quiet * 0.68 + float(last_daily.get("desire_for_quiet", quiet)) * 0.32)
+            movement = _clamp(movement * 0.68 + float(last_daily.get("desire_for_movement", movement)) * 0.32)
         if day_type == "work_day":
             presentation = "uniform_composed"
         elif day_type in {"travel_day", "airport_transfer"}:
@@ -256,7 +312,6 @@ class BehavioralLogicEngine:
             presentation = "soft_neat"
         else:
             presentation = "casual_open"
-
         emotional_tone = "grounded"
         if transit_fatigue >= 0.58 and profile.more_reflective_after_flights:
             emotional_tone = "reflective"
@@ -266,19 +321,19 @@ class BehavioralLogicEngine:
             emotional_tone = "soft"
         elif day_type == "work_day":
             emotional_tone = "focused"
-
         focus = "gentle" if quiet >= movement else "forward"
         social_mode = "alone_but_in_public"
-        if social >= 0.58 and comfort >= 0.55:
+        if social >= 0.6 and comfort >= 0.52:
             social_mode = "quiet_crowd_around"
-        if day_type == "work_day" and social < 0.44:
+        elif day_type == "work_day":
             social_mode = "colleague_implied_world"
+        elif social <= 0.34 and quiet >= 0.62:
+            social_mode = "unseen_social_context"
         caption_voice = profile.stable_caption_voice
         if emotional_tone in {"reflective", "soft"}:
             caption_voice = "quiet_reflective"
         elif day_type == "work_day":
             caption_voice = "restrained_workday"
-
         return DailyBehaviorState(
             energy_level=energy,
             social_openness=social,
@@ -289,13 +344,16 @@ class BehavioralLogicEngine:
             desire_for_movement=movement,
             emotional_tone=emotional_tone,
             mental_load=mental_load,
+            hurry_level=hurry,
+            internal_coherence=internal_coherence,
+            softness=softness,
             self_presentation_mode=presentation,
             internal_focus=focus,
             social_presence_mode=social_mode,
             caption_voice_mode=caption_voice,
         )
 
-    def _select_emotional_arc(self, context: Dict[str, Any], daily: DailyBehaviorState) -> str:
+    def _select_emotional_arc(self, context: Dict[str, Any], daily: DailyBehaviorState, slow: SlowBehaviorState) -> str:
         narrative = context.get("narrative_context")
         phase = str(getattr(narrative, "narrative_phase", "routine_stability") or "routine_stability")
         day_type = str(context.get("day_type") or "")
@@ -305,14 +363,22 @@ class BehavioralLogicEngine:
             return "low_energy_recovery"
         if phase == "exploration_phase" and daily.desire_for_movement > 0.55:
             return "curious_city_openness"
-        if daily.comfort_in_city < 0.42:
+        if slow.city_adaptation < 0.42:
             return "adaptation_in_new_city"
+        if phase == "transition_phase":
+            return "subtle_pre_departure_melancholy"
+        if daily.desire_for_quiet > 0.66:
+            return "quiet_settling"
         return self.EMOTIONAL_ARCS.get(phase, "routine_stability")
 
-    def _select_habit(self, context: Dict[str, Any], profile: CharacterBehaviorProfile, daily: DailyBehaviorState) -> Dict[str, str]:
+    def _select_habit(
+        self,
+        context: Dict[str, Any],
+        profile: CharacterBehaviorProfile,
+        daily: DailyBehaviorState,
+        memory: Sequence[Dict[str, Any]],
+    ) -> Dict[str, str]:
         day_type = str(context.get("day_type") or "")
-        habit_memory = self._load_behavior_memory()
-        recent_names = [str(row.get("selected_habit") or "") for row in habit_memory[-3:]]
         candidates: List[tuple[float, str]] = []
         for habit_name, meta in self.DEFAULT_HABITS.items():
             if day_type not in meta["contexts"]:
@@ -320,65 +386,92 @@ class BehavioralLogicEngine:
             score = 1.0
             if habit_name in profile.favorite_habits:
                 score += 0.45
-            recent_count = recent_names.count(habit_name)
-            if recent_count:
-                score -= 0.7
-            if recent_count >= 2:
+            last_used_gap = self._days_since(memory, "selected_habit", habit_name)
+            if last_used_gap is not None and last_used_gap < int(meta["min_gap_days"]):
                 score -= 1.2
-            if habit_name == "window_pause" and daily.desire_for_quiet > 0.55:
+            if last_used_gap is not None and last_used_gap <= int(meta["min_gap_days"]) + 1:
+                score -= 0.35
+            if habit_name == "window_pause" and daily.desire_for_quiet > 0.58:
                 score += 0.35
-            if habit_name == "slow_walk" and daily.desire_for_movement > 0.55:
-                score += 0.25
+            if habit_name == "slow_walk" and daily.desire_for_movement > 0.56:
+                score += 0.26
             if habit_name == "terminal_pause" and day_type in {"travel_day", "airport_transfer"}:
-                score += 0.4
+                score += 0.44
+            if habit_name == "outfit_tidy" and daily.self_presentation_mode in {"uniform_composed", "travel_neat"}:
+                score += 0.24
             candidates.append((score, habit_name))
         candidates.sort(key=lambda item: (-item[0], item[1]))
         chosen = candidates[0][1] if candidates else "coffee_before_leaving"
-        context_label = "recurring_behavior" if chosen in recent_names else "fresh_rotation"
-        return {"name": chosen, "context": context_label}
+        return {
+            "name": chosen,
+            "family": str(self.DEFAULT_HABITS.get(chosen, {}).get("family", "daily_ritual")),
+            "context": "recurring_behavior" if self._days_since(memory, "selected_habit", chosen) is not None else "fresh_rotation",
+        }
 
     def _select_place_anchor(
         self,
         context: Dict[str, Any],
         profile: CharacterBehaviorProfile,
         daily: DailyBehaviorState,
+        slow: SlowBehaviorState,
         habit: Dict[str, str],
+        memory: Sequence[Dict[str, Any]],
     ) -> str:
         day_type = str(context.get("day_type") or "")
-        habit_place = self.DEFAULT_HABITS.get(habit["name"], {}).get("place", "")
-        place_memory = self._load_behavior_memory()
-        recent_places = [str(row.get("familiar_place_anchor") or "") for row in place_memory[-3:]]
-        preferred = list(profile.favorite_place_archetypes) + [habit_place] + list(self.DEFAULT_PLACE_ANCHORS)
+        habit_place = str(self.DEFAULT_HABITS.get(habit["name"], {}).get("place", ""))
+        preferred = list(dict.fromkeys(list(profile.favorite_place_archetypes) + [habit_place] + list(self.DEFAULT_PLACE_ANCHORS.keys())))
+        best_place = habit_place or "living space corner"
+        best_score = -999.0
         for place in preferred:
             if not place:
                 continue
-            if place in recent_places and recent_places.count(place) >= 2:
-                continue
+            score = 1.0
+            meta = self.DEFAULT_PLACE_ANCHORS.get(place, {})
+            gap = self._days_since(memory, "familiar_place_anchor", place)
+            if gap is not None and gap < 2:
+                score -= 0.8
+            if gap is not None and gap >= 3:
+                score += 0.18
+            if place == habit_place:
+                score += 0.42
             if day_type in {"travel_day", "airport_transfer"} and "airport" in place:
-                return place
+                score += 0.34
             if daily.desire_for_quiet > 0.6 and any(token in place for token in ["window", "desk", "corner", "mirror"]):
-                return place
+                score += 0.24
             if daily.desire_for_movement > 0.58 and "cafe" in place:
-                return place
-        return habit_place or "living space corner"
+                score += 0.16
+            if slow.city_adaptation < 0.45 and meta.get("family") in {"window_corner", "private_reset", "morning_station"}:
+                score += 0.12
+            if score > best_score:
+                best_place = place
+                best_score = score
+        return best_place
 
     def _select_recurring_objects(
         self,
         context: Dict[str, Any],
         profile: CharacterBehaviorProfile,
+        daily: DailyBehaviorState,
         habit: Dict[str, str],
+        memory: Sequence[Dict[str, Any]],
     ) -> List[str]:
         day_type = str(context.get("day_type") or "")
-        objects = list(dict.fromkeys(
-            self.DEFAULT_OBJECTS.get(day_type, ["phone", "bag"]) +
-            self.DEFAULT_HABITS.get(habit["name"], {}).get("objects", []) +
-            profile.recurring_objects
-        ))
-        behavior_memory = self._load_behavior_memory()
-        recent_object_sets = [self._split_csv(row.get("recurring_objects_in_scene")) for row in behavior_memory[-2:]]
+        objects = list(
+            dict.fromkeys(
+                self.DEFAULT_OBJECTS.get(day_type, ["phone", "bag"])
+                + self.DEFAULT_HABITS.get(habit["name"], {}).get("objects", [])
+                + profile.recurring_objects
+            )
+        )
+        recent_object_sets = [self._split_csv(row.get("recurring_objects_in_scene")) for row in memory[-3:]]
         filtered: List[str] = []
         for obj in objects:
-            if sum(1 for row in recent_object_sets if obj in row) >= 2 and len(objects) > 3:
+            repeat_hits = sum(1 for row in recent_object_sets if obj in row)
+            if repeat_hits >= 3 and len(objects) > 4:
+                continue
+            if obj == "phone" and daily.desire_for_quiet > 0.72 and day_type == "day_off":
+                continue
+            if obj in {"carry_on", "suitcase"} and day_type not in {"travel_day", "airport_transfer"}:
                 continue
             filtered.append(obj)
         return filtered[:4]
@@ -413,7 +506,13 @@ class BehavioralLogicEngine:
             return "soft_casual_mode"
         return "lifestyle_mode"
 
-    def _scene_families(self, context: Dict[str, Any], daily: DailyBehaviorState, emotional_arc: str) -> List[str]:
+    def _scene_families(
+        self,
+        context: Dict[str, Any],
+        daily: DailyBehaviorState,
+        emotional_arc: str,
+        habit_family: str,
+    ) -> List[str]:
         day_type = str(context.get("day_type") or "")
         families: List[str] = []
         if day_type in {"travel_day", "airport_transfer"}:
@@ -424,19 +523,32 @@ class BehavioralLogicEngine:
             families.extend(["private", "quiet_public"])
         if daily.desire_for_movement > 0.56:
             families.append("city_walk")
+        if habit_family == "departure_ritual":
+            families.append("departure_transition")
         if emotional_arc in {"curious_city_openness", "adaptation_in_new_city"}:
             families.append("urban_observation")
         if emotional_arc in {"low_energy_recovery", "quiet_settling"}:
             families.append("gentle_reset")
         return list(dict.fromkeys(families or ["quiet_public", "private"]))
 
-    def _likely_actions(self, habit: Dict[str, str], daily: DailyBehaviorState) -> List[str]:
+    def _likely_actions(self, habit: Dict[str, str], daily: DailyBehaviorState, recurring_objects: List[str]) -> List[str]:
         actions = list(self.DEFAULT_HABITS.get(habit["name"], {}).get("actions", []))
         if daily.self_presentation_mode in {"uniform_composed", "travel_neat"}:
             actions.append("adjust_clothing")
         if daily.social_presence_mode == "quiet_crowd_around":
             actions.append("move_through_background_crowd")
+        if recurring_objects and any(obj in {"carry_on", "bag", "shoulder_bag"} for obj in recurring_objects):
+            actions.append("check_belongings")
         return list(dict.fromkeys(actions))
+
+    def _primary_action_family(self, habit_family: str, actions: Sequence[str]) -> str:
+        if habit_family:
+            return habit_family
+        if any("walk" in action for action in actions):
+            return "gentle_movement"
+        if any("check" in action or "adjust" in action for action in actions):
+            return "preparation"
+        return "quiet_pause"
 
     def _gesture_bias(self, profile: CharacterBehaviorProfile, daily: DailyBehaviorState) -> List[str]:
         gestures = ["small_hair_adjustment", "touch_bag_strap", "brief_side_glance"]
@@ -446,16 +558,52 @@ class BehavioralLogicEngine:
             gestures.append("straighten_jacket")
         return list(dict.fromkeys(gestures))
 
-    def _anti_repetition_flags(self, context: Dict[str, Any], habit: str, place: str, arc: str) -> List[str]:
-        behavior_memory = self._load_behavior_memory()
+    def _social_context_hint(self, daily: DailyBehaviorState) -> str:
+        mapping = {
+            "alone_but_in_public": "quiet_people_exist_around_her_but_not_center_frame",
+            "quiet_crowd_around": "soft_background_presence_and_city_flow",
+            "colleague_implied_world": "work_context_exists_without_second_main_character",
+            "unseen_social_context": "social_world_is_implied_off_camera",
+        }
+        return mapping.get(daily.social_presence_mode, "subtle_social_background")
+
+    def _caption_opening_guard(self, voice_mode: str, memory: Sequence[Dict[str, Any]]) -> List[str]:
+        recent_modes = [str(row.get("caption_voice_mode") or "") for row in memory[-4:]]
+        blocked = list(self.CAPTION_OPENINGS.get(voice_mode, []))
+        if recent_modes.count(voice_mode) >= 2:
+            blocked = blocked[:2]
+        return blocked
+
+    def _anti_repetition_flags(
+        self,
+        context: Dict[str, Any],
+        memory: Sequence[Dict[str, Any]],
+        habit: str,
+        habit_family: str,
+        place: str,
+        arc: str,
+        objects: Sequence[str],
+        caption_voice_mode: str,
+    ) -> List[str]:
         flags: List[str] = []
-        last_rows = behavior_memory[-3:]
+        last_rows = list(memory[-3:])
         if sum(1 for row in last_rows if str(row.get("selected_habit") or "") == habit) >= 1:
             flags.append("habit_recently_used")
+        if sum(1 for row in last_rows if str(row.get("habit_family") or "") == habit_family) >= 2:
+            flags.append("habit_family_streak")
         if sum(1 for row in last_rows if str(row.get("familiar_place_anchor") or "") == place) >= 1:
             flags.append("place_recently_used")
         if sum(1 for row in last_rows if str(row.get("emotional_arc") or "") == arc) >= 2:
             flags.append("arc_repetition_pressure")
+        if sum(1 for row in last_rows if str(row.get("caption_voice_mode") or "") == caption_voice_mode) >= 2:
+            flags.append("caption_voice_streak")
+        object_hits = 0
+        for row in last_rows:
+            row_objects = set(self._split_csv(row.get("recurring_objects_in_scene")))
+            if row_objects and row_objects.intersection(objects):
+                object_hits += 1
+        if object_hits >= 3:
+            flags.append("object_rotation_needed")
         recent_history = context.get("recent_history") or []
         if len(recent_history) >= 2 and all(str(row.get("day_type") or "") == str(context.get("day_type") or "") for row in recent_history[-2:]):
             flags.append("same_day_type_streak")
@@ -468,6 +616,20 @@ class BehavioralLogicEngine:
             except Exception:
                 return []
         return []
+
+    @staticmethod
+    def _coerce_mapping(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        return {}
+
+    def _days_since(self, memory: Sequence[Dict[str, Any]], key: str, value: str) -> int | None:
+        if not value:
+            return None
+        for idx, row in enumerate(reversed(memory), start=1):
+            if str(row.get(key) or "") == value:
+                return idx
+        return None
 
     @staticmethod
     def _split_csv(value: Any) -> List[str]:

@@ -109,3 +109,64 @@ def test_behavior_engine_selects_caption_voice_and_object_continuity():
     assert behavior.daily_state.caption_voice_mode in {"restrained_workday", "quiet_reflective", "quiet_observational"}
     assert behavior.daily_state.self_presentation_mode == "uniform_composed"
     assert "phone" in behavior.recurring_objects
+    assert behavior.habit_family
+    assert behavior.action_family
+
+
+def test_behavior_engine_smooths_state_and_marks_repetition_pressure():
+    engine = BehavioralLogicEngine(
+        DummyState(
+            [
+                {
+                    "date": "2026-03-17",
+                    "selected_habit": "coffee_before_leaving",
+                    "habit_family": "departure_ritual",
+                    "familiar_place_anchor": "soft morning desk",
+                    "emotional_arc": "quiet_settling",
+                    "caption_voice_mode": "quiet_reflective",
+                    "recurring_objects_in_scene": "mug, bag, phone",
+                    "daily_behavior_state": {
+                        "energy_level": 0.52,
+                        "social_openness": 0.4,
+                        "routine_stability": 0.66,
+                        "desire_for_quiet": 0.69,
+                        "desire_for_movement": 0.31,
+                    },
+                    "slow_behavior_state": {
+                        "city_adaptation": 0.61,
+                        "route_familiarity": 0.58,
+                        "city_confidence": 0.55,
+                        "settledness": 0.57,
+                    },
+                },
+                {
+                    "date": "2026-03-18",
+                    "selected_habit": "quiet_before_leaving",
+                    "habit_family": "departure_ritual",
+                    "familiar_place_anchor": "soft morning desk",
+                    "emotional_arc": "quiet_settling",
+                    "caption_voice_mode": "quiet_reflective",
+                    "recurring_objects_in_scene": "mug, bag, phone",
+                    "daily_behavior_state": {
+                        "energy_level": 0.49,
+                        "social_openness": 0.39,
+                        "routine_stability": 0.68,
+                        "desire_for_quiet": 0.72,
+                        "desire_for_movement": 0.28,
+                    },
+                    "slow_behavior_state": {
+                        "city_adaptation": 0.64,
+                        "route_familiarity": 0.61,
+                        "city_confidence": 0.58,
+                        "settledness": 0.6,
+                    },
+                },
+            ]
+        )
+    )
+
+    behavior = engine.build(_context(day_type="travel_day", phase="transition_phase", energy="medium"))
+
+    assert 0.3 < behavior.daily_state.energy_level < 0.7
+    assert "caption_voice_streak" in behavior.anti_repetition_flags
+    assert behavior.caption_opening_guard

@@ -123,6 +123,8 @@ class PipelineOrchestrator:
 
         narrative_context = self.life_narrative_engine.build_context(context["date"], context)
         context["narrative_context"] = narrative_context
+        context["behavioral_context"] = self.behavior_engine.build(context)
+        context["behavior_profile"] = context["behavioral_context"].profile
         if context.get("life_state"):
             context["life_state"].narrative_phase = narrative_context.narrative_phase
             context["life_state"].energy_state = narrative_context.energy_state

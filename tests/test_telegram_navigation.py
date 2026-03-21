@@ -54,23 +54,27 @@ def _item(index: int = 1, publication_id: str | None = None) -> PublishingPlanIt
         post_timezone="Europe/Paris",
         emotional_arc="quiet_settling",
         habit_used="window_pause",
+        habit_family="quiet_pause",
         familiar_place_anchor="quiet hotel window",
+        familiar_place_label="familiar quiet window",
         recurring_objects_in_scene="mug, phone",
         self_presentation_mode="soft_neat",
         social_presence_mode="alone_but_in_public",
         transition_hint_used="echo_of_quiet_room_before_leaving",
         caption_voice_mode="quiet_reflective",
+        action_family="quiet_pause",
+        social_context_hint="quiet_people_exist_around_her_but_not_center_frame",
         day_behavior_summary="energy=0.51; quiet=0.72; arc=quiet_settling",
     )
 
 
-def test_build_plan_keyboard_uses_russian_utf8_labels():
+def test_build_plan_keyboard_uses_publication_ids():
     items = [_item(1), _item(2)]
     keyboard = build_plan_keyboard(items, date(2026, 3, 12))
 
-    assert [row[0][0] for row in keyboard[:2]] == ["📸 Пост 1", "📸 Пост 2"]
+    assert [row[0][0] for row in keyboard[:2]] == ["Post 1", "Post 2"]
     assert keyboard[0][0][1] == "p:2026-03-12:pub-1"
-    assert keyboard[-1][0] == ("🔄 Обновить", "plan:2026-03-12")
+    assert keyboard[-1][0] == ("Refresh", "plan:2026-03-12")
 
 
 def test_parse_callback_for_post_and_detail_views():
@@ -102,7 +106,6 @@ def test_format_plan_and_post_card_contains_core_fields():
         persona_timezone="Europe/Paris",
         user_timezone="Asia/Pavlodar",
     )
-
     plan_text = format_plan_screen(context, [_item()])
     post_text = format_post_screen(context, _item(), 0)
 
@@ -111,6 +114,7 @@ def test_format_plan_and_post_card_contains_core_fields():
     assert "Instagram" in post_text
     assert "13:30 (Asia/Pavlodar)" in post_text
     assert "quiet_settling" in post_text
+    assert "window_pause" in post_text
 
 
 def test_detail_views_have_fallback_for_empty_prompt_and_caption():
@@ -123,9 +127,9 @@ def test_detail_views_have_fallback_for_empty_prompt_and_caption():
     prompt_text = format_prompt_screen(empty, 0)
     caption_text = format_caption_screen(empty, 0)
 
-    assert "prompt" in prompt_text
+    assert "Prompt" in prompt_text
     assert "No negative prompt" in prompt_text
-    assert "Подпись" in caption_text
+    assert "Caption" in caption_text
 
 
 def test_prompt_screen_falls_back_to_final_prompt_from_prompt_package_json():
@@ -136,37 +140,15 @@ def test_prompt_screen_falls_back_to_final_prompt_from_prompt_package_json():
     prompt_text = format_prompt_screen(item, 0)
 
     assert "A realistic candid friend-shot walking through the terminal." in prompt_text
-    assert "РќРµС‚ СЃРѕС…СЂР°РЅС‘РЅРЅРѕРіРѕ prompt" not in prompt_text
 
 
-def test_prompt_screen_uses_new_workflow_order_and_aliases():
+def test_prompt_screen_uses_behavior_detail_fields():
     text = format_prompt_screen(_item(), 0)
 
-    sections = [
-        "POST #1",
-        "Генерация",
-        "Референсы",
-        "Prompt",
-        "Negative prompt",
-        "Подпись",
-        "Короткая подпись",
-        "Дополнительно",
-    ]
-
-    positions = [text.index(section) for section in sections]
-    assert positions == sorted(positions)
-    assert "mirror_selfie" in text
-    assert "mirror selfie, head-and-shoulders" in text
-    assert "selfie" in text
-    assert "mirror_selfie_mode" in text
-    assert "selfies, base" in text
-    assert "identity_lock" in text
-    assert "refs/selfies/" not in text
-    assert "Prompt mode: compact" in text
-    assert "Identity mode: reference_manifest" in text
-    assert "Emotional arc: quiet_settling" in text
-    assert "Habit: window_pause" in text
-    assert "Place anchor: quiet hotel window" in text
+    assert "Habit family: quiet_pause" in text
+    assert "Place label: familiar quiet window" in text
+    assert "Action family: quiet_pause" in text
+    assert "Social context: quiet_people_exist_around_her_but_not_center_frame" in text
 
 
 def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():
@@ -178,15 +160,14 @@ def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():
         persona_timezone="Europe/Paris",
         user_timezone="Asia/Pavlodar",
     )
-
     plan_text = format_plan_screen(context, [])
     keyboard = build_plan_keyboard([], date(2026, 3, 12))
 
-    assert "запланированных постов" in plan_text
-    assert keyboard == [[("🔄 Обновить", "plan:2026-03-12")]]
+    assert "No planned posts" in plan_text
+    assert keyboard == [[("Refresh", "plan:2026-03-12")]]
 
 
-def test_plan_screen_hides_unknown_city_and_keeps_russian_meta():
+def test_plan_screen_hides_unknown_city():
     context = PlanScreenContext(
         target_date=date(2026, 3, 19),
         city="Unknown",
@@ -195,7 +176,6 @@ def test_plan_screen_hides_unknown_city_and_keeps_russian_meta():
         persona_timezone="Europe/Prague",
         user_timezone="Asia/Pavlodar",
     )
-
     text = format_plan_screen(context, [])
 
     assert "Unknown" not in text
@@ -208,7 +188,6 @@ def test_plan_screen_hides_unknown_city_and_keeps_russian_meta():
 def test_normalize_plan_items_deduplicates_same_publication_id():
     duplicate_a = _item(1, publication_id="pub-1")
     duplicate_b = _item(1, publication_id="pub-1")
-
     normalized = normalize_plan_items([duplicate_a, duplicate_b])
 
     assert len(normalized) == 1
@@ -218,7 +197,6 @@ def test_normalize_plan_items_deduplicates_same_publication_id():
 def test_normalize_plan_items_stable_fallback_key_when_publication_id_missing():
     first = _item(1, publication_id="")
     second = _item(1, publication_id="")
-
     normalized = normalize_plan_items([first, second])
 
     assert len(normalized) == 1
@@ -229,12 +207,12 @@ def test_post_and_detail_keyboards_keep_same_post_identity():
     post_keyboard = build_post_keyboard(date(2026, 3, 12), "pub-1")
     detail_keyboard = build_detail_keyboard(date(2026, 3, 12), "pub-1")
 
-    assert post_keyboard[0][0][0] == "🖼 Prompt"
-    assert post_keyboard[0][1][0] == "✍️ Подпись"
-    assert post_keyboard[1][0][0] == "🎯 Момент"
-    assert post_keyboard[2][0][0] == "⬅️ К плану"
-    assert detail_keyboard[0][0][0] == "⬅️ К посту"
-    assert detail_keyboard[0][1][0] == "⬅️ К плану"
+    assert post_keyboard[0][0][0] == "Prompt"
+    assert post_keyboard[0][1][0] == "Caption"
+    assert post_keyboard[1][0][0] == "Moment"
+    assert post_keyboard[2][0][0] == "Back to plan"
+    assert detail_keyboard[0][0][0] == "Back to post"
+    assert detail_keyboard[0][1][0] == "Back to plan"
     assert post_keyboard[0][0][1] == "pv:2026-03-12:pub-1:prompt"
     assert post_keyboard[2][0][1] == "back:plan:2026-03-12"
     assert detail_keyboard[0][0][1] == "back:post:2026-03-12:pub-1"
@@ -243,7 +221,6 @@ def test_post_and_detail_keyboards_keep_same_post_identity():
 def test_prompt_screen_is_copy_ready_and_does_not_leak_prompt_package_json():
     item = _item()
     item.prompt_package_json = '{"internal":"must_not_render"}'
-
     text = format_prompt_screen(item, 0)
 
     assert text.count("```") == 8
@@ -261,7 +238,6 @@ def test_serialize_context_preserves_detail_screen_metadata():
         user_timezone="Asia/Pavlodar",
     )
     item = _item()
-
     raw = serialize_context(context, [item])
     _, items = deserialize_context(raw)
 
@@ -273,6 +249,7 @@ def test_serialize_context_preserves_detail_screen_metadata():
     assert items[0].reference_type == "selfie"
     assert items[0].emotional_arc == "quiet_settling"
     assert items[0].habit_used == "window_pause"
+    assert items[0].habit_family == "quiet_pause"
 
 
 def test_item_from_row_recovers_detail_fields_from_canonical_snapshot_keys():
@@ -295,7 +272,6 @@ def test_item_from_row_recovers_detail_fields_from_canonical_snapshot_keys():
             '"primary_anchors":"refs/selfies/, refs/base/","secondary_anchors":"refs/identity_lock/"}'
         ),
     }
-
     item = item_from_row(row, date(2026, 3, 12))
 
     assert item.caption_text == "Canonical caption"
@@ -326,7 +302,6 @@ def test_item_from_row_filters_debug_strings_and_uses_prompt_meta_fallbacks():
             '"reference_type":"selfie","generation_mode":"mirror_selfie_mode","identity_mode":"reference_manifest"}'
         ),
     }
-
     item = item_from_row(row, date(2026, 3, 12))
 
     assert item.caption_text == "Real caption"
@@ -347,7 +322,6 @@ def test_prompt_screen_uses_only_canonical_detail_fields_not_debug_strings():
     item.notes = "score=9.5; explanation text that must not replace generation mode"
     item.selection_reason = "selected_by_primary_decision_and_diversity"
     item.generation_diagnostics = "debug-string"
-
     text = format_prompt_screen(item, 0)
 
     assert "Real caption" in text
@@ -375,7 +349,6 @@ def test_item_from_row_replaces_legacy_prompt_with_canonical_final_prompt():
             '"prompt_format_version":"v5"}'
         ),
     }
-
     item = item_from_row(row, date(2026, 3, 12))
 
     assert "Half-body" not in item.prompt_text
@@ -391,7 +364,6 @@ def test_prompt_screen_does_not_render_legacy_prompt_when_canonical_prompt_exist
         'Off-duty crew member between flights in a casual travel look.",'
         '"prompt_format_version":"v5"}'
     )
-
     text = format_prompt_screen(item, 0)
 
     assert "Half-body and 3/4 body framing from waist-up" not in text

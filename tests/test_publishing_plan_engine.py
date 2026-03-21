@@ -131,14 +131,18 @@ def _build_package(day_type: str = "work_day", phase: str = "growth", scenes=Non
             ),
             emotional_arc="between_flights_introspection",
             selected_habit="terminal_pause",
+            habit_family="transit_ritual",
             habit_context="recurring_behavior",
             familiar_place_anchor="airport side corridor",
+            familiar_place_label="side corridor she tends to choose",
             recurring_objects=["carry_on", "shoulder_bag", "phone"],
             outfit_behavior_mode="travel_casual_mode",
             transition_hint="same_carry_on_carried_forward",
             allowed_scene_families=["transit", "preparation"],
             likely_actions=["terminal_pause", "touch_bag_strap"],
+            action_family="transit_ritual",
             gesture_bias=["touch_bag_strap"],
+            social_context_hint="quiet_people_exist_around_her_but_not_center_frame",
             debug_summary="energy=0.48; quiet=0.62; arc=between_flights_introspection",
         ),
     )
@@ -272,8 +276,12 @@ def test_publishing_plan_row_contains_timezone_and_decision_metadata():
     assert "negative_prompt" in persisted
     assert first.emotional_arc == "between_flights_introspection"
     assert first.habit_used == "terminal_pause"
+    assert first.habit_family == "transit_ritual"
     assert first.familiar_place_anchor == "airport side corridor"
+    assert first.familiar_place_label
     assert first.day_behavior_summary
+    assert first.action_family == "transit_ritual"
+    assert first.social_context_hint
     assert first.identity_mode == "reference_manifest"
     assert first.reference_pack_type
     assert first.generation_mode

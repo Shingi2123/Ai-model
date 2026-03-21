@@ -112,9 +112,13 @@ class ContentGenerator:
                 "energy_state": self._safe(getattr(narrative, "energy_state", "medium") if narrative else "medium"),
                 "emotional_arc": self._safe(getattr(behavior, "emotional_arc", "")),
                 "behavior_habit": self._safe(getattr(behavior, "selected_habit", "")),
+                "behavior_habit_family": self._safe(getattr(behavior, "habit_family", "")),
                 "familiar_place_anchor": self._safe(getattr(behavior, "familiar_place_anchor", "")),
+                "familiar_place_label": self._safe(getattr(behavior, "familiar_place_label", "")),
                 "recurring_objects": self._safe(", ".join(getattr(behavior, "recurring_objects", []) or [])),
                 "self_presentation_mode": self._safe(getattr(daily_behavior, "self_presentation_mode", "") if daily_behavior else ""),
+                "social_presence_mode": self._safe(getattr(daily_behavior, "social_presence_mode", "") if daily_behavior else ""),
+                "transition_hint": self._safe(getattr(behavior, "transition_hint", "")),
             }
 
             # фото-промпт
@@ -153,7 +157,11 @@ class ContentGenerator:
             story_package = self.prompt_composer.compose_package(context, scene, outfit_summary, 'story', outfit_item_ids)
 
             photo_prompt_text = photo_package["final_prompt"]
+            if scene_description and scene_description not in photo_prompt_text:
+                photo_prompt_text = f"{scene_description}. {photo_prompt_text}"
             video_prompt_text = video_package["final_prompt"]
+            if scene_description and scene_description not in video_prompt_text:
+                video_prompt_text = f"{scene_description}. {video_prompt_text}"
             story_text = f"{story_package['final_prompt']} {self._safe_format(story_template, mapping)}"
 
             photo_prompts.append(photo_prompt_text)
@@ -188,15 +196,21 @@ class ContentGenerator:
             "location": self._safe(scenes[-1].location if scenes else city),
             "emotional_arc": self._safe(getattr(behavior, "emotional_arc", "")),
             "behavior_habit": self._safe(getattr(behavior, "selected_habit", "")),
+            "behavior_habit_family": self._safe(getattr(behavior, "habit_family", "")),
             "familiar_place_anchor": self._safe(getattr(behavior, "familiar_place_anchor", "")),
+            "familiar_place_label": self._safe(getattr(behavior, "familiar_place_label", "")),
         }
 
         tone_profile = self._select_caption_tone(context, scenes)
+        opening_guard = ", ".join(getattr(behavior, "caption_opening_guard", []) or [])
+        transition_hint = self._safe(getattr(behavior, "transition_hint", ""))
+        social_hint = self._safe(getattr(behavior, "social_context_hint", ""))
         caption_prompt = (
             f"{self.prompt_composer.compose(context, scenes[-1] if scenes else None, outfit_summary, 'caption', outfit_item_ids)} "
             f"Tone profile: {tone_profile}. Emotional arc={post_mapping.get('emotional_arc', '')}. Habit hint={post_mapping.get('behavior_habit', '')}. "
             f"Familiar place anchor={post_mapping.get('familiar_place_anchor', '')}. Visual focus={post_mapping.get('visual_focus', '')}. "
-            "Avoid generic AI phrasing, keep natural social media voice, no literal prompt retelling. Keep the voice restrained, lightly reflective, and recognizably the same person across days. "
+            f"Transition hint={transition_hint}. Social context={social_hint}. Avoid caption openings similar to: {opening_guard}. "
+            "Avoid generic AI phrasing, keep natural social media voice, no literal prompt retelling. Keep the voice restrained, lightly reflective, recognizably the same person across days, and never overly literary or dramatic. "
             f"{self._safe_format(post_template, post_mapping)}"
         )
         post_caption = self.provider.generate(caption_prompt)
@@ -213,6 +227,8 @@ class ContentGenerator:
                 f"caption_tone={tone_profile}",
                 f"emotional_arc={getattr(behavior, 'emotional_arc', '')}",
                 f"habit={getattr(behavior, 'selected_habit', '')}",
+                f"habit_family={getattr(behavior, 'habit_family', '')}",
+                f"social_context={getattr(behavior, 'social_context_hint', '')}",
             ],
             prompt_packages=prompt_packages,
         )

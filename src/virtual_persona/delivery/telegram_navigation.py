@@ -15,7 +15,7 @@ from virtual_persona.models.domain import PublishingPlanItem
 
 
 logger = logging.getLogger(__name__)
-SUMMARY_DIVIDER = "────────────────"
+SUMMARY_DIVIDER = "----------------"
 
 
 @dataclass
@@ -51,23 +51,21 @@ def _is_missing_value(value: str | None) -> bool:
 def _format_compact_meta(context: PlanScreenContext) -> list[str]:
     lines: list[str] = []
     if not _is_missing_value(context.city):
-        lines.append(f"📍 Город персонажа: {context.city}")
-    lines.append(f"🕒 Таймзона персонажа: {context.persona_timezone}")
-    lines.append(f"🕒 Таймзона пользователя: {context.user_timezone}")
+        lines.append(f"City: {context.city}")
+    lines.append(f"Persona TZ: {context.persona_timezone}")
+    lines.append(f"User TZ: {context.user_timezone}")
     lines.append("")
-    lines.append(f"🧭 День: {context.day_type}")
-    lines.append(f"🎭 Фаза: {context.narrative_phase}")
+    lines.append(f"Day type: {context.day_type}")
+    lines.append(f"Phase: {context.narrative_phase}")
     return lines
 
 
 def format_plan_screen(context: PlanScreenContext, items: list[PublishingPlanItem]) -> str:
-    header_lines = [f"📅 План публикаций — {context.target_date.strftime('%d %B')}"]
+    header_lines = [f"Plan for {context.target_date.strftime('%d %B')}"]
     header_lines.extend(_format_compact_meta(context))
     header = "\n".join(header_lines)
-
     if not items:
-        return f"{header}\n\nПока нет запланированных постов на этот день."
-
+        return f"{header}\n\nNo planned posts for this day yet."
     rows = []
     for idx, item in enumerate(items, start=1):
         source_tz = item.post_timezone or context.persona_timezone
@@ -78,11 +76,11 @@ def format_plan_screen(context: PlanScreenContext, items: list[PublishingPlanIte
                     SUMMARY_DIVIDER,
                     "",
                     f"{_post_header_emoji(item.content_type)} POST #{idx}",
-                    f"🕒 Персонаж: {item.post_time} ({source_tz})",
-                    f"🕒 Вы: {user_time} ({context.user_timezone})",
-                    f"🌐 Платформа: {item.platform} • {item.content_type.title()}",
-                    f"🎯 Момент: {short_text(item.scene_moment, 110)}",
-                    f"✍️ Подпись: {short_text(item.short_caption or item.caption_text, 140)}",
+                    f"Persona: {item.post_time} ({source_tz})",
+                    f"You: {user_time} ({context.user_timezone})",
+                    f"Platform: {item.platform} • {item.content_type.title()}",
+                    f"Moment: {short_text(item.scene_moment, 110)}",
+                    f"Caption: {short_text(item.short_caption or item.caption_text, 140)}",
                 ]
             )
         )
@@ -95,21 +93,26 @@ def format_post_screen(context: PlanScreenContext, item: PublishingPlanItem, pos
     emoji = _post_header_emoji(item.content_type)
     behavior_line = ""
     if item.day_behavior_summary or item.emotional_arc:
-        behavior_line = f"\n\n🧠 Поведение: {short_text(item.day_behavior_summary or item.emotional_arc, 160)}"
+        behavior_line = (
+            f"\n\nBehavior: {short_text(item.day_behavior_summary or item.emotional_arc, 160)}"
+            f"\nArc: {item.emotional_arc or 'n/a'}"
+            f"\nHabit: {item.habit_used or 'n/a'}"
+            f"\nPlace: {item.familiar_place_anchor or 'n/a'}"
+        )
     return (
         f"{emoji} POST #{post_index + 1}\n\n"
-        f"🌐 Платформа: {item.platform}\n"
-        f"{emoji} Формат: {item.content_type.title()}\n"
-        f"🕒 Персонаж: {item.post_time} ({source_tz})\n"
-        f"🕒 Вы: {user_time} ({context.user_timezone})\n\n"
-        f"🎯 Момент: {short_text(item.scene_moment, 220)}\n"
-        f"✍️ Подпись: {short_text(item.short_caption or item.caption_text, 220)}"
+        f"Platform: {item.platform}\n"
+        f"Format: {item.content_type.title()}\n"
+        f"Persona: {item.post_time} ({source_tz})\n"
+        f"You: {user_time} ({context.user_timezone})\n\n"
+        f"Moment: {short_text(item.scene_moment, 220)}\n"
+        f"Caption: {short_text(item.short_caption or item.caption_text, 220)}"
         f"{behavior_line}"
     )
 
 
 def _format_detail_header(item: PublishingPlanItem, post_index: int) -> str:
-    return f"POST #{post_index + 1} — {item.platform} / {item.content_type.title()}"
+    return f"POST #{post_index + 1} - {item.platform} / {item.content_type.title()}"
 
 
 def _display_value(value: str | None, fallback: str) -> str:
@@ -123,22 +126,13 @@ def _format_field(label: str, value: str) -> str:
 def _format_manual_generation_step(step: str | None) -> str:
     text = (step or "").strip()
     if not text:
-        return "Прикрепите 2–3 основных референса. Если генерация уходит, добавьте 1 дополнительный."
-
+        return "Attach 2-3 primary anchors. Add 1 extra only if generation starts drifting."
     lowered = " ".join(text.lower().split())
     known_translations = {
-        "attach 2-3 primary anchors, add 1 secondary anchor if the generator starts drifting.": (
-            "Прикрепите 2–3 основных референса. Если генерация начинает уходить, добавьте 1 дополнительный."
-        ),
-        "use the primary anchors first. add secondary anchors only if you need to reinforce angle, emotion, or body consistency.": (
-            "Сначала используйте основные референсы. Дополнительные подключайте только если нужно усилить ракурс, эмоцию или консистентность тела."
-        ),
-        "attach the primary anchors listed below for generation.": (
-            "Для генерации прикрепите основные референсы из списка ниже."
-        ),
-        "attach 2-3 primary anchors, add 1 secondary anchor only if needed.": (
-            "Прикрепите 2–3 основных референса. Дополнительный добавляйте только при необходимости."
-        ),
+        "attach 2-3 primary anchors, add 1 secondary anchor if the generator starts drifting.": "Attach 2-3 primary anchors. Add 1 extra only if generation starts drifting.",
+        "use the primary anchors first. add secondary anchors only if you need to reinforce angle, emotion, or body consistency.": "Use primary anchors first. Add secondary anchors only to reinforce angle, emotion, or body consistency.",
+        "attach the primary anchors listed below for generation.": "Attach the primary anchors listed below.",
+        "attach 2-3 primary anchors, add 1 secondary anchor only if needed.": "Attach 2-3 primary anchors. Add 1 secondary only if needed.",
     }
     return known_translations.get(lowered, text)
 
@@ -151,100 +145,89 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
         prompt = str(prompt_meta.get("final_prompt") or "").strip()
         if prompt:
             prompt_source = "prompt_package_json.final_prompt_fallback"
-    prompt = _display_value(prompt, "Нет сохранённого prompt для этого поста.")
-    caption = _display_value(item.caption_text, "Нет сохранённой подписи.")
-    short_caption = _display_value(item.short_caption or item.caption_text, "Нет короткой подписи.")
+    prompt = _display_value(prompt, "No saved prompt for this post.")
+    caption = _display_value(item.caption_text, "No saved caption.")
+    short_caption = _display_value(item.short_caption or item.caption_text, "No short caption.")
     negative = _display_value(item.negative_prompt, "No negative prompt.")
-    shot_archetype = _display_value(item.shot_archetype, "Не задано")
-    generation_mode = _display_value(item.generation_mode, "Не задано")
-    framing_mode = _display_value(item.framing_mode, "Не задано")
-    prompt_mode = _display_value(item.prompt_mode, "Не задано")
-    identity_mode = _display_value(item.identity_mode, "Не задано")
-    reference_type = _display_value(item.reference_type or item.reference_pack_type, "Не задано")
-    primary_anchors = _display_value(format_reference_aliases(item.primary_anchors), "Нет основных референсов")
-    secondary_anchors = _display_value(format_reference_aliases(item.secondary_anchors), "Нет дополнительных референсов")
+    shot_archetype = _display_value(item.shot_archetype, "Not set")
+    generation_mode = _display_value(item.generation_mode, "Not set")
+    framing_mode = _display_value(item.framing_mode, "Not set")
+    prompt_mode = _display_value(item.prompt_mode, "Not set")
+    identity_mode = _display_value(item.identity_mode, "Not set")
+    reference_type = _display_value(item.reference_type or item.reference_pack_type, "Not set")
+    primary_anchors = _display_value(format_reference_aliases(item.primary_anchors), "No primary anchors")
+    secondary_anchors = _display_value(format_reference_aliases(item.secondary_anchors), "No secondary anchors")
     manual_generation_step = _format_manual_generation_step(item.manual_generation_step)
-
     logger.info(
-        "telegram_detail_render publication_id=%s prompt_source=%s prompt_format_version=%s legacy_prompt_detected=%s caption=%r short_caption=%r reference_type=%r generation_mode=%r identity_mode=%r framing_mode=%r",
+        "telegram_detail_render publication_id=%s prompt_source=%s prompt_format_version=%s legacy_prompt_detected=%s",
         item.publication_id,
         prompt_source,
         prompt_format_version or "unknown",
         "yes" if legacy_detected else "no",
-        item.caption_text,
-        item.short_caption,
-        item.reference_type or item.reference_pack_type,
-        item.generation_mode,
-        item.identity_mode,
-        item.framing_mode,
     )
-
     generation_block = "\n".join(
         [
-            _format_field("Тип кадра", shot_archetype),
-            _format_field("Фрейминг", framing_mode),
-            _format_field("Тип референсов", reference_type),
-            _format_field("Режим генерации", generation_mode),
+            _format_field("Shot type", shot_archetype),
+            _format_field("Framing", framing_mode),
+            _format_field("Reference type", reference_type),
+            _format_field("Generation mode", generation_mode),
         ]
     )
     references_block = "\n".join(
         [
-            _format_field("Основные", primary_anchors),
-            _format_field("Дополнительные", secondary_anchors),
-            _format_field("Как использовать", manual_generation_step),
+            _format_field("Primary", primary_anchors),
+            _format_field("Secondary", secondary_anchors),
+            _format_field("How to use", manual_generation_step),
         ]
     )
     extra_block = "\n".join(
         [
-            _format_field("Платформа", item.platform),
+            _format_field("Platform", item.platform),
             _format_field("Prompt mode", prompt_mode),
             _format_field("Identity mode", identity_mode),
-            _format_field("Behavior", _display_value(item.day_behavior_summary, "Не задано")),
-            _format_field("Emotional arc", _display_value(item.emotional_arc, "Не задано")),
-            _format_field("Habit", _display_value(item.habit_used, "Не задано")),
-            _format_field("Place anchor", _display_value(item.familiar_place_anchor, "Не задано")),
-            _format_field("Objects", _display_value(item.recurring_objects_in_scene, "Не задано")),
-            _format_field("Self-presentation", _display_value(item.self_presentation_mode, "Не задано")),
+            _format_field("Behavior", _display_value(item.day_behavior_summary, "Not set")),
+            _format_field("Emotional arc", _display_value(item.emotional_arc, "Not set")),
+            _format_field("Habit", _display_value(item.habit_used, "Not set")),
+            _format_field("Habit family", _display_value(item.habit_family, "Not set")),
+            _format_field("Place anchor", _display_value(item.familiar_place_anchor, "Not set")),
+            _format_field("Place label", _display_value(item.familiar_place_label, "Not set")),
+            _format_field("Objects", _display_value(item.recurring_objects_in_scene, "Not set")),
+            _format_field("Self-presentation", _display_value(item.self_presentation_mode, "Not set")),
+            _format_field("Social presence", _display_value(item.social_presence_mode, "Not set")),
+            _format_field("Action family", _display_value(item.action_family, "Not set")),
+            _format_field("Social context", _display_value(item.social_context_hint, "Not set")),
         ]
     )
-
     return (
-        f"📌 {_format_detail_header(item, post_index)}\n\n"
-        "🎯 Генерация\n"
-        f"{generation_block}\n\n"
-        "🧠 Референсы\n"
-        f"{references_block}\n\n"
-        "🖼 Prompt\n"
-        "```\n"
+        f"Prompt for {_format_detail_header(item, post_index)}\n\n"
+        f"Generation\n{generation_block}\n\n"
+        f"References\n{references_block}\n\n"
+        "Prompt\n```\n"
         f"{prompt}\n"
         "```\n\n"
-        "🚫 Negative prompt\n"
-        "```\n"
+        "Negative prompt\n```\n"
         f"{negative}\n"
         "```\n\n"
-        "✍️ Подпись\n"
-        "```\n"
+        "Caption\n```\n"
         f"{caption}\n"
         "```\n\n"
-        "📝 Короткая подпись\n"
-        "```\n"
+        "Short caption\n```\n"
         f"{short_caption}\n"
         "```\n\n"
-        "⚙️ Дополнительно\n"
-        f"{extra_block}"
+        f"Extra\n{extra_block}"
     )
 
 
 def format_caption_screen(item: PublishingPlanItem, post_index: int) -> str:
     caption = (item.caption_text or item.short_caption or "").strip()
-    body = caption if caption else "Для этого поста пока нет сохранённой подписи."
-    return f"{_format_detail_header(item, post_index)}\n\nПодпись:\n{body}"
+    body = caption if caption else "No saved caption for this post yet."
+    return f"{_format_detail_header(item, post_index)}\n\nCaption:\n{body}"
 
 
 def format_moment_screen(item: PublishingPlanItem, post_index: int) -> str:
     moment = (item.scene_moment or "").strip()
-    body = moment if moment else "Для этого поста пока нет сохранённого момента."
-    return f"{_format_detail_header(item, post_index)}\n\nМомент:\n{body}"
+    body = moment if moment else "No saved moment for this post yet."
+    return f"{_format_detail_header(item, post_index)}\n\nMoment:\n{body}"
 
 
 def plan_item_key(item: PublishingPlanItem) -> str:
@@ -254,10 +237,7 @@ def plan_item_key(item: PublishingPlanItem) -> str:
 
 
 def normalize_plan_items(items: list[PublishingPlanItem]) -> list[PublishingPlanItem]:
-    ordered = sorted(
-        items,
-        key=lambda item: (item.post_time, item.platform, item.content_type, item.publication_id or "", item.scene_moment),
-    )
+    ordered = sorted(items, key=lambda item: (item.post_time, item.platform, item.content_type, item.publication_id or "", item.scene_moment))
     unique: list[PublishingPlanItem] = []
     seen: set[str] = set()
     for item in ordered:
@@ -275,23 +255,23 @@ def build_plan_keyboard(items: list[PublishingPlanItem], target_date: date) -> l
     rows = []
     day = target_date.isoformat()
     for idx, item in enumerate(items):
-        rows.append([(f"📸 Пост {idx + 1}", f"p:{day}:{item.publication_id}")])
-    rows.append([("🔄 Обновить", f"plan:{day}")])
+        rows.append([(f"Post {idx + 1}", f"p:{day}:{item.publication_id}")])
+    rows.append([("Refresh", f"plan:{day}")])
     return rows
 
 
 def build_post_keyboard(target_date: date, publication_id: str) -> list[list[tuple[str, str]]]:
     day = target_date.isoformat()
     return [
-        [("🖼 Prompt", f"pv:{day}:{publication_id}:prompt"), ("✍️ Подпись", f"pv:{day}:{publication_id}:caption")],
-        [("🎯 Момент", f"pv:{day}:{publication_id}:moment")],
-        [("⬅️ К плану", f"back:plan:{day}")],
+        [("Prompt", f"pv:{day}:{publication_id}:prompt"), ("Caption", f"pv:{day}:{publication_id}:caption")],
+        [("Moment", f"pv:{day}:{publication_id}:moment")],
+        [("Back to plan", f"back:plan:{day}")],
     ]
 
 
 def build_detail_keyboard(target_date: date, publication_id: str) -> list[list[tuple[str, str]]]:
     day = target_date.isoformat()
-    return [[("⬅️ К посту", f"back:post:{day}:{publication_id}"), ("⬅️ К плану", f"back:plan:{day}")]]
+    return [[("Back to post", f"back:post:{day}:{publication_id}"), ("Back to plan", f"back:plan:{day}")]]
 
 
 def parse_callback(data: str) -> ParsedCallback:
@@ -369,12 +349,16 @@ def serialize_context(context: PlanScreenContext, items: list[PublishingPlanItem
                 "delivery_status": item.delivery_status,
                 "emotional_arc": item.emotional_arc,
                 "habit_used": item.habit_used,
+                "habit_family": item.habit_family,
                 "familiar_place_anchor": item.familiar_place_anchor,
+                "familiar_place_label": item.familiar_place_label,
                 "recurring_objects_in_scene": item.recurring_objects_in_scene,
                 "self_presentation_mode": item.self_presentation_mode,
                 "social_presence_mode": item.social_presence_mode,
                 "transition_hint_used": item.transition_hint_used,
                 "caption_voice_mode": item.caption_voice_mode,
+                "action_family": item.action_family,
+                "social_context_hint": item.social_context_hint,
                 "day_behavior_summary": item.day_behavior_summary,
             }
             for item in items

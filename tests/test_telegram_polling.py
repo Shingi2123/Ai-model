@@ -232,7 +232,7 @@ def test_show_today_plan_uses_existing_plan_without_generation(monkeypatch):
 
 def test_show_today_plan_generates_if_missing_and_reloads_persisted_plan(monkeypatch):
     module = _load_module()
-    target_date = date(2026, 3, 20)
+    target_date = date.today()
     empty_context = _make_context(module, target_date, city="")
     persisted_context = _make_context(module, target_date, city="Prague")
     generated_item = _make_item(target_date, city="Prague")
@@ -269,7 +269,7 @@ def test_show_today_plan_generates_if_missing_and_reloads_persisted_plan(monkeyp
 
 def test_show_today_plan_reports_generation_failure_without_crashing(monkeypatch):
     module = _load_module()
-    target_date = date(2026, 3, 20)
+    target_date = date.today()
     empty_context = _make_context(module, target_date, city="")
 
     monkeypatch.setattr(module, "_load_persisted_plan", lambda _target_date: (empty_context, []))
@@ -293,7 +293,7 @@ def test_show_today_plan_reports_generation_failure_without_crashing(monkeypatch
 
 def test_callback_refresh_uses_same_generate_if_missing_flow(monkeypatch):
     module = _load_module()
-    target_date = date(2026, 3, 20)
+    target_date = date.today()
     empty_context = _make_context(module, target_date, city="")
     persisted_context = _make_context(module, target_date, city="Prague")
     generated_item = _make_item(target_date, city="Prague")
@@ -315,7 +315,7 @@ def test_callback_refresh_uses_same_generate_if_missing_flow(monkeypatch):
     monkeypatch.setattr(module.asyncio, "to_thread", fake_to_thread)
     monkeypatch.setattr(module.orchestrator, "generate_day", Mock(return_value=types.SimpleNamespace()), raising=False)
 
-    update, query = _callback_update("plan:2026-03-20")
+    update, query = _callback_update(f"plan:{target_date.isoformat()}")
     context = types.SimpleNamespace(user_data={})
 
     asyncio.run(module.callback_nav(update, context))
@@ -328,7 +328,7 @@ def test_callback_refresh_uses_same_generate_if_missing_flow(monkeypatch):
 
 def test_callback_refresh_with_existing_plan_does_not_regenerate(monkeypatch):
     module = _load_module()
-    target_date = date(2026, 3, 20)
+    target_date = date.today()
     plan_context = _make_context(module, target_date)
     plan_items = [_make_item(target_date)]
 
@@ -338,7 +338,7 @@ def test_callback_refresh_with_existing_plan_does_not_regenerate(monkeypatch):
     generate_day = Mock(side_effect=AssertionError("refresh must not regenerate when plan already exists"))
     monkeypatch.setattr(module.orchestrator, "generate_day", generate_day, raising=False)
 
-    update, query = _callback_update("plan:2026-03-20")
+    update, query = _callback_update(f"plan:{target_date.isoformat()}")
     context = types.SimpleNamespace(user_data={})
 
     asyncio.run(module.callback_nav(update, context))

@@ -69,6 +69,11 @@ class CharacterBehaviorProfile:
     improvisation_tolerance: float = 0.43
     aesthetic_attention: float = 0.81
     repeat_place_affinity: float = 0.75
+    preferred_repeat_routes: float = 0.72
+    quiet_caption_restraint: float = 0.78
+    visual_consistency_need: float = 0.8
+    familiar_space_bias: float = 0.74
+    travel_lightness_preference: float = 0.76
     prefers_quiet_mornings: bool = True
     keeps_small_rituals: bool = True
     often_pauses_by_window: bool = True
@@ -92,6 +97,8 @@ class SlowBehaviorState:
     route_familiarity: float = 0.4
     emotional_comfort: float = 0.52
     social_reserve: float = 0.58
+    city_confidence: float = 0.48
+    settledness: float = 0.44
 
 
 @dataclass
@@ -105,6 +112,9 @@ class DailyBehaviorState:
     desire_for_movement: float = 0.47
     emotional_tone: str = "grounded"
     mental_load: float = 0.48
+    hurry_level: float = 0.34
+    internal_coherence: float = 0.64
+    softness: float = 0.58
     self_presentation_mode: str = "soft_neat"
     internal_focus: str = "gentle"
     social_presence_mode: str = "alone_but_in_public"
@@ -118,14 +128,19 @@ class BehavioralContext:
     daily_state: DailyBehaviorState
     emotional_arc: str
     selected_habit: str
+    habit_family: str
     habit_context: str
     familiar_place_anchor: str
+    familiar_place_label: str
     recurring_objects: List[str]
     outfit_behavior_mode: str
     transition_hint: str
     allowed_scene_families: List[str]
     likely_actions: List[str]
+    action_family: str
     gesture_bias: List[str]
+    social_context_hint: str
+    caption_opening_guard: List[str] = field(default_factory=list)
     anti_repetition_flags: List[str] = field(default_factory=list)
     debug_summary: str = ""
 
@@ -199,6 +214,9 @@ class DayScene:
     moment_signature: str = ""
     moment_reason: str = ""
     visual_focus: str = ""
+    scene_family: str = ""
+    action_family: str = ""
+    location_family: str = ""
     publish_score: float | None = None
     publish_decision: str = ""
     decision_reason: str = ""
@@ -260,12 +278,16 @@ class PublishingPlanItem:
     notes: str = ""
     emotional_arc: str = ""
     habit_used: str = ""
+    habit_family: str = ""
     familiar_place_anchor: str = ""
+    familiar_place_label: str = ""
     recurring_objects_in_scene: str = ""
     self_presentation_mode: str = ""
     social_presence_mode: str = ""
     transition_hint_used: str = ""
     caption_voice_mode: str = ""
+    action_family: str = ""
+    social_context_hint: str = ""
     day_behavior_summary: str = ""
     selected_image_path: str = ""
     clean_image_export_path: str = ""
