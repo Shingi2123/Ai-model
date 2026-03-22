@@ -142,6 +142,15 @@ class LocalStateStore:
     def load_behavior_memory(self) -> List[Dict[str, Any]]:
         return self._read_json(self.base_dir / "behavior_memory.json", [])
 
+    def load_habit_memory(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "habit_memory.json", [])
+
+    def load_place_memory(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "place_memory.json", [])
+
+    def load_object_usage(self) -> List[Dict[str, Any]]:
+        return self._read_json(self.base_dir / "object_usage.json", [])
+
     def load_publishing_plan(self, target_date: str | None = None) -> List[Dict[str, Any]]:
         rows = self._read_json(self.base_dir / "publishing_plan.json", [])
         if target_date:
@@ -164,6 +173,9 @@ class LocalStateStore:
             "content_history.json",
             "content_moment_memory.json",
             "behavior_memory.json",
+            "habit_memory.json",
+            "place_memory.json",
+            "object_usage.json",
         ]:
             self._delete_rows_by_date(file_name, target_date)
 
@@ -317,6 +329,24 @@ class LocalStateStore:
 
     def append_behavior_memory(self, row: Dict[str, Any]) -> None:
         path = self.base_dir / "behavior_memory.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
+
+    def append_habit_memory(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "habit_memory.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
+
+    def append_place_memory(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "place_memory.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
+
+    def append_object_usage(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "object_usage.json"
         rows = self._read_json(path, [])
         rows.append(row)
         self._write_json(path, rows)
@@ -612,6 +642,14 @@ class GoogleSheetsStateStore:
                 "date", "city", "day_type", "scene_moment", "scene_moment_type", "moment_signature", "visual_focus",
                 "scene_source", "shot_archetype", "platform_intent", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "publish_score", "publish_decision", "decision_reason",
             ],
+            "behavior_memory": [
+                "date", "city", "day_type", "behavior_state", "energy_level", "social_mode", "emotional_arc", "habit",
+                "place_anchor", "objects", "self_presentation", "source", "day_behavior_summary",
+                "selected_habit", "familiar_place_anchor", "recurring_objects_in_scene", "self_presentation_mode", "social_presence_mode",
+            ],
+            "habit_memory": ["date", "city", "day_type", "habit", "emotional_arc", "place_anchor"],
+            "place_memory": ["date", "city", "day_type", "place_anchor", "emotional_arc", "habit"],
+            "object_usage": ["date", "city", "day_type", "place_anchor", "objects", "habit"],
         }
         for title, headers in sheets_with_headers.items():
             self._ensure_headers(title, headers)
@@ -791,47 +829,60 @@ class GoogleSheetsStateStore:
             return []
         return self._safe_records("behavior_memory")
 
+    def load_habit_memory(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("habit_memory")
+
+    def load_place_memory(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("place_memory")
+
+    def load_object_usage(self) -> List[Dict[str, Any]]:
+        if not self.available():
+            return []
+        return self._safe_records("object_usage")
+
     def append_behavior_memory(self, row: Dict[str, Any]) -> None:
         headers = [
             "date",
             "city",
             "day_type",
+            "behavior_state",
+            "energy_level",
+            "social_mode",
             "emotional_arc",
+            "habit",
+            "place_anchor",
+            "objects",
+            "self_presentation",
+            "source",
+            "day_behavior_summary",
             "selected_habit",
-            "habit_family",
-            "habit_context",
-            "recurring_habit_summary",
             "familiar_place_anchor",
-            "familiar_place_label",
-            "familiar_place_family",
-            "familiarity_score",
             "recurring_objects_in_scene",
-            "object_presence_mode",
             "self_presentation_mode",
             "social_presence_mode",
-            "transition_hint_used",
-            "transition_context",
-            "caption_voice_mode",
-            "action_family",
-            "emotional_tone_family",
-            "social_context_hint",
-            "social_presence_detail",
-            "allowed_scene_families",
-            "likely_actions",
-            "gesture_bias",
-            "caption_voice_constraints",
-            "caption_opening_guard",
-            "anti_repetition_flags",
-            "day_behavior_summary",
-            "daily_behavior_state",
-            "slow_behavior_state",
         ]
         self._ensure_headers("behavior_memory", headers)
         payload = dict(row)
-        for field in ("daily_behavior_state", "slow_behavior_state"):
-            if isinstance(payload.get(field), (dict, list)):
-                payload[field] = json.dumps(payload[field], ensure_ascii=False)
         self._append_dict_row("behavior_memory", headers, payload, prefer_sheet_header_order=True)
+
+    def append_habit_memory(self, row: Dict[str, Any]) -> None:
+        headers = ["date", "city", "day_type", "habit", "emotional_arc", "place_anchor"]
+        self._ensure_headers("habit_memory", headers)
+        self._append_dict_row("habit_memory", headers, row, prefer_sheet_header_order=True)
+
+    def append_place_memory(self, row: Dict[str, Any]) -> None:
+        headers = ["date", "city", "day_type", "place_anchor", "emotional_arc", "habit"]
+        self._ensure_headers("place_memory", headers)
+        self._append_dict_row("place_memory", headers, row, prefer_sheet_header_order=True)
+
+    def append_object_usage(self, row: Dict[str, Any]) -> None:
+        headers = ["date", "city", "day_type", "place_anchor", "objects", "habit"]
+        self._ensure_headers("object_usage", headers)
+        self._append_dict_row("object_usage", headers, row, prefer_sheet_header_order=True)
 
     def append_scene_candidate(self, row: Dict[str, Any]) -> None:
         headers = [

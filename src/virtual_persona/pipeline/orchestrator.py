@@ -25,7 +25,7 @@ from virtual_persona.pipeline.publishing_plan_engine import PublishingPlanEngine
 from virtual_persona.pipeline.quality import SceneSanityChecker
 from virtual_persona.pipeline.world_expansion_engine import WorldExpansionEngine
 from virtual_persona.pipeline.wardrobe_brain import WardrobeBrain
-from virtual_persona.pipeline.behavioral_logic_engine import BehavioralLogicEngine
+from virtual_persona.pipeline.behavior_engine import BehaviorEngine
 from virtual_persona.services.wardrobe import WardrobeManager
 from virtual_persona.storage.state_store import build_state_store
 
@@ -59,7 +59,7 @@ class PipelineOrchestrator:
         self.publishing_plan_engine = PublishingPlanEngine(self.state)
         self.telegram_delivery_service = TelegramDeliveryService(settings, self.state)
         self.scene_sanity_checker = SceneSanityChecker()
-        self.behavior_engine = BehavioralLogicEngine(self.state)
+        self.behavior_engine = BehaviorEngine(self.state)
 
         if settings.llm_provider.lower() == "openai" and settings.llm_api_key and settings.llm_model:
             llm = OpenAIProvider(settings.llm_api_key, settings.llm_model)
@@ -124,7 +124,7 @@ class PipelineOrchestrator:
         narrative_context = self.life_narrative_engine.build_context(context["date"], context)
         context["narrative_context"] = narrative_context
         context["behavioral_context"] = self.behavior_engine.build(context)
-        context["behavior_profile"] = context["behavioral_context"].profile
+        context["behavior_profile"] = {}
         if context.get("life_state"):
             context["life_state"].narrative_phase = narrative_context.narrative_phase
             context["life_state"].energy_state = narrative_context.energy_state
@@ -168,6 +168,8 @@ class PipelineOrchestrator:
         )
         scenes = self.scene_moment_engine.generate(context, scenes)
         content = self.content_generator.generate(context, scenes, outfit.summary, outfit.item_ids)
+        if hasattr(self.state, "save_run_log"):
+            self.state.save_run_log("debug", "[BEHAVIOR] applied_to_prompt: yes")
         issues = self.checker.run(context, scenes, outfit)
 
         package = DailyPackage(
@@ -221,6 +223,18 @@ class PipelineOrchestrator:
         if hasattr(self.state, "append_behavior_memory") and package.behavioral_context is not None:
             self.state.append_behavior_memory(
                 self.behavior_engine.to_memory_row(package.date, package.city, package.day_type, package.behavioral_context)
+            )
+        if hasattr(self.state, "append_habit_memory") and package.behavioral_context is not None:
+            self.state.append_habit_memory(
+                self.behavior_engine.habit_memory_row(package.date, package.city, package.day_type, package.behavioral_context)
+            )
+        if hasattr(self.state, "append_place_memory") and package.behavioral_context is not None:
+            self.state.append_place_memory(
+                self.behavior_engine.place_memory_row(package.date, package.city, package.day_type, package.behavioral_context)
+            )
+        if hasattr(self.state, "append_object_usage") and package.behavioral_context is not None:
+            self.state.append_object_usage(
+                self.behavior_engine.object_usage_row(package.date, package.city, package.day_type, package.behavioral_context)
             )
         self.state.append_daily_calendar(package)
         if hasattr(self.state, "append_life_state"):

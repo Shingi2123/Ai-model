@@ -179,48 +179,8 @@ class ContentGenerator:
         if not post_template:
             post_template = "{city} diary • {day_mood}. {short_story}"
 
-        post_mapping = {
-            "city": self._safe(city),
-            "country": "",
-            "day_type": self._safe(day_type),
-            "day_mood": self._safe(scenes[-1].mood if scenes else "calm"),
-            "scene_description": self._safe(short_story),
-            "scene_moment": self._safe(scenes[-1].scene_moment if scenes else short_story),
-            "visual_focus": self._safe(scenes[-1].visual_focus if scenes else ""),
-            "short_story": self._safe(short_story),
-            "mood": self._safe(scenes[-1].mood if scenes else "calm"),
-            "weather": self._safe(weather_text),
-            "outfit": self._safe(outfit_summary),
-            "time_block": self._safe(scenes[-1].time_of_day if scenes else "day"),
-            "time_of_day": self._safe(scenes[-1].time_of_day if scenes else "day"),
-            "location": self._safe(scenes[-1].location if scenes else city),
-            "emotional_arc": self._safe(getattr(behavior, "emotional_arc", "")),
-            "behavior_habit": self._safe(getattr(behavior, "selected_habit", "")),
-            "behavior_habit_family": self._safe(getattr(behavior, "habit_family", "")),
-            "familiar_place_anchor": self._safe(getattr(behavior, "familiar_place_anchor", "")),
-            "familiar_place_label": self._safe(getattr(behavior, "familiar_place_label", "")),
-        }
-
         tone_profile = self._select_caption_tone(context, scenes)
-        opening_guard = ", ".join(getattr(behavior, "caption_opening_guard", []) or [])
-        transition_hint = self._safe(getattr(behavior, "transition_hint", ""))
-        social_hint = self._safe(getattr(behavior, "social_context_hint", ""))
-        voice_constraints = "; ".join(getattr(behavior, "caption_voice_constraints", []) or [])
-        recurring_habit_summary = self._safe(getattr(behavior, "recurring_habit_summary", ""))
-        familiarity_score = self._safe(getattr(behavior, "familiarity_score", ""))
-        object_presence_mode = self._safe(getattr(behavior, "object_presence_mode", ""))
-        outfit_behavior_mode = self._safe(getattr(behavior, "outfit_behavior_mode", ""))
-        caption_prompt = (
-            f"{self.prompt_composer.compose(context, scenes[-1] if scenes else None, outfit_summary, 'caption', outfit_item_ids)} "
-            f"Tone profile: {tone_profile}. Emotional arc={post_mapping.get('emotional_arc', '')}. Habit hint={post_mapping.get('behavior_habit', '')}. "
-            f"Familiar place anchor={post_mapping.get('familiar_place_anchor', '')}. Visual focus={post_mapping.get('visual_focus', '')}. "
-            f"Transition hint={transition_hint}. Social context={social_hint}. Habit memory={recurring_habit_summary}. "
-            f"Place familiarity={familiarity_score}. Object mode={object_presence_mode}. Outfit behavior={outfit_behavior_mode}. "
-            f"Voice constraints: {voice_constraints}. Avoid caption openings similar to: {opening_guard}. "
-            "Avoid generic AI phrasing, keep natural social media voice, no literal prompt retelling. Keep the voice restrained, lightly reflective, recognizably the same person across days, and never overly literary or dramatic. "
-            f"{self._safe_format(post_template, post_mapping)}"
-        )
-        post_caption = self.provider.generate(caption_prompt)
+        post_caption = self._build_behavior_caption(context, scenes, city, day_type)
 
         return GeneratedContent(
             post_caption=post_caption,
@@ -233,12 +193,59 @@ class ContentGenerator:
                 "Character lifestyle must remain realistic and coherent.",
                 f"caption_tone={tone_profile}",
                 f"emotional_arc={getattr(behavior, 'emotional_arc', '')}",
-                f"habit={getattr(behavior, 'selected_habit', '')}",
-                f"habit_family={getattr(behavior, 'habit_family', '')}",
+                f"habit={getattr(behavior, 'habit', getattr(behavior, 'selected_habit', ''))}",
+                f"place_anchor={getattr(behavior, 'place_anchor', getattr(behavior, 'familiar_place_anchor', ''))}",
                 f"social_context={getattr(behavior, 'social_context_hint', '')}",
             ],
             prompt_packages=prompt_packages,
         )
+
+    def _build_behavior_caption(self, context: Dict[str, Any], scenes: List[DayScene], city: str, day_type: str) -> str:
+        behavior = context.get("behavioral_context")
+        if behavior is None:
+            return "A quiet daily moment."
+
+        emotional_arc = str(getattr(behavior, "emotional_arc", "routine") or "routine")
+        habit = str(getattr(behavior, "habit", getattr(behavior, "selected_habit", "none")) or "none")
+        place_anchor = str(getattr(behavior, "place_anchor", getattr(behavior, "familiar_place_anchor", "")) or "")
+        self_presentation = str(getattr(behavior, "self_presentation", "relaxed") or "relaxed")
+        final_scene = scenes[-1] if scenes else None
+        mood = str(getattr(final_scene, "mood", "calm") or "calm")
+
+        arc_line = {
+            "arrival": f"New place, slower breath, and a little time to take {city} in.",
+            "routine": "Keeping the day simple and steady.",
+            "reflection": "One of those quieter days that feels better when nothing is rushed.",
+            "transition": "Everything feels a little in-between before the next move.",
+            "departure": "Almost ready to go, just not in a hurry yet.",
+        }.get(emotional_arc, "Keeping the day grounded.")
+        habit_line = {
+            "coffee_moment": "Coffee first always makes the rest of the day feel more possible.",
+            "window_pause": "Needed a small pause by the window before continuing.",
+            "packing": "Packing in small steps is still the easiest way to calm the day down.",
+            "slow_walk": "A slow walk helped everything settle into place.",
+            "none": "Some days work best when I keep them simple.",
+        }.get(habit, "Some days work best when I keep them simple.")
+        day_line = {
+            "work_day": "Workday rhythm, but softer at the edges.",
+            "travel_day": "Travel day logic: keep the bag close and the pace gentle.",
+            "airport_transfer": "In transit again, trying to make the waiting feel lighter.",
+            "day_off": "Off-duty and keeping the pace kind.",
+            "layover_day": "A small pocket of time between places.",
+        }.get(day_type, "Letting the day stay uncomplicated.")
+        place_line = {
+            "hotel_window": "The hotel window has become the easiest reset point.",
+            "kitchen_corner": "The kitchen corner felt like enough of a world this morning.",
+            "terminal_gate": "The gate was quieter than expected today.",
+            "cafe_corner": "A cafe corner can fix more than it should.",
+        }.get(place_anchor, "")
+        tone_line = f"{self_presentation.capitalize()} energy, {mood} mood."
+
+        lines = [arc_line, habit_line, day_line]
+        if place_line:
+            lines.append(place_line)
+        lines.append(tone_line)
+        return " ".join(line for line in lines if line).strip()
 
     @staticmethod
     def _select_caption_tone(context: Dict[str, Any], scenes: List[DayScene]) -> str:

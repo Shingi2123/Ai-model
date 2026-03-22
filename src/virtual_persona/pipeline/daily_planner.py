@@ -178,64 +178,96 @@ class DailyPlanner:
 
     def _apply_behavioral_bias(self, scenes: List[DayScene], context: Dict[str, Any], daily_behavior: Any) -> List[DayScene]:
         behavior = context.get("behavioral_context")
-        if not behavior or not daily_behavior:
+        if not behavior:
             return scenes
 
-        preferred_families = set(getattr(behavior, "allowed_scene_families", []) or [])
-        habit = str(getattr(behavior, "selected_habit", "") or "")
-        habit_family = str(getattr(behavior, "habit_family", "") or "")
-        place_anchor = str(getattr(behavior, "familiar_place_anchor", "") or "")
-        objects = list(getattr(behavior, "recurring_objects", []) or [])
-        action_family = str(getattr(behavior, "action_family", "") or "")
-        social_hint = str(getattr(behavior, "social_context_hint", "") or "")
-        emotional_arc = str(getattr(behavior, "emotional_arc", "") or "")
-        outfit_mode = str(getattr(behavior, "outfit_behavior_mode", "") or "")
-        object_mode = str(getattr(behavior, "object_presence_mode", "") or "")
-        transition_hint = str(getattr(behavior, "transition_hint", "") or "")
+        energy = str(getattr(behavior, "energy_level", "medium") or "medium")
+        social_mode = str(getattr(behavior, "social_mode", "alone") or "alone")
+        habit = str(getattr(behavior, "habit", "") or "")
+        place_anchor = str(getattr(behavior, "place_anchor", "") or "")
+        objects = list(getattr(behavior, "objects", []) or [])
+        emotional_arc = str(getattr(behavior, "emotional_arc", "routine") or "routine")
+        self_presentation = str(getattr(behavior, "self_presentation", "relaxed") or "relaxed")
+
+        anchor_locations = {
+            "hotel_window": "hotel room",
+            "kitchen_corner": "home kitchen",
+            "terminal_gate": "airport terminal",
+            "cafe_corner": "cafe",
+        }
+        movement_hint = {
+            "low": "still posture",
+            "medium": "natural pause moment",
+            "high": "slow relaxed movement",
+        }[energy]
+        social_hint = {
+            "alone": "no other people in frame",
+            "light_public": "soft background people",
+            "social": "shared public atmosphere",
+        }[social_mode]
+        interaction_hint = {
+            "window_pause": "touching the window lightly",
+            "coffee_moment": "holding a coffee cup",
+            "packing": "handling luggage",
+            "slow_walk": "walking with a bag",
+            "none": "resting hands naturally",
+        }[habit or "none"]
 
         adjusted: List[DayScene] = []
         for idx, scene in enumerate(scenes):
             location = scene.location.lower()
+            target_location = anchor_locations.get(place_anchor, scene.location)
             desc = scene.description
             mood = scene.mood
             activity = scene.activity
             scene_family = ""
-            location_family = "private" if any(token in location for token in ["hotel", "home", "room"]) else "public"
+            location_family = "private" if any(token in target_location.lower() for token in ["hotel", "home", "room", "kitchen"]) else "public"
 
-            if "private" in preferred_families and idx == 0 and "hotel" in location:
-                desc = f"{desc} with a familiar {place_anchor}"
-                scene_family = "private"
-            if "transit" in preferred_families and "airport" in location:
-                desc = f"{desc} while keeping {', '.join(objects[:2])}".strip()
-                activity = activity or "transit_routine"
-                scene_family = "transit"
-            if "gentle_reset" in preferred_families and idx == 0:
-                mood = "soft"
-                scene_family = scene_family or "gentle_reset"
-            if "city_walk" in preferred_families and idx == 1 and "city" in location:
-                activity = activity or "slow_walk"
-                desc = f"{desc} with an unhurried route"
-                scene_family = "city_walk"
-            if habit == "outfit_tidy" and idx == 0:
-                activity = activity or "outfit_tidy"
-            if getattr(daily_behavior, "self_presentation_mode", "") == "uniform_composed" and idx == 0:
+            if idx == 0:
+                scene.location = target_location
+                desc = f"{desc} at the familiar {place_anchor.replace('_', ' ')}"
+
+            if energy == "low":
+                if idx == 0 and place_anchor in {"kitchen_corner", "hotel_window"}:
+                    scene.location = anchor_locations.get(place_anchor, scene.location)
+                mood = "calm" if emotional_arc != "transition" else "reflective"
+                activity = activity or "still_pause"
+                desc = f"{desc}, {movement_hint}, {interaction_hint}"
+                scene_family = "static"
+            elif energy == "high":
+                if idx == 1:
+                    scene.location = "city street" if place_anchor != "terminal_gate" else "airport terminal"
+                activity = activity or "walking"
+                desc = f"{desc}, {movement_hint}, {interaction_hint}"
+                mood = "curious" if emotional_arc == "arrival" else "focused"
+                scene_family = "movement"
+            else:
+                activity = activity or "daily_pause"
+                desc = f"{desc}, {movement_hint}, {interaction_hint}"
+                scene_family = "anchored"
+
+            if social_mode == "alone":
+                desc = f"{desc}, {social_hint}"
+            elif social_mode == "light_public":
+                desc = f"{desc}, {social_hint}"
+            else:
+                desc = f"{desc}, {social_hint}"
+
+            if objects:
+                desc = f"{desc}, with {' and '.join(objects[:2])} nearby"
+            if emotional_arc == "arrival":
+                desc = f"{desc}, with the feeling of a new place"
+            elif emotional_arc == "transition":
+                desc = f"{desc}, before moving on again"
+            elif emotional_arc == "reflection":
+                desc = f"{desc}, in a more reflective rhythm"
+
+            if self_presentation == "focused":
                 mood = "focused"
-                desc = f"{desc} with a more composed work rhythm"
-            if habit_family == "departure_ritual" and idx == 0:
-                desc = f"{desc} with a before-leaving rhythm"
-                scene_family = scene_family or "departure_transition"
-            if emotional_arc == "adaptation_in_new_city" and idx == 1 and "city" in location:
-                desc = f"{desc} while staying close to familiar routes"
-            if social_hint and "background" in social_hint and idx > 0:
-                desc = f"{desc} with soft life around her"
-            if outfit_mode == "travel_casual_mode" and idx < 2 and any(obj in objects for obj in ["carry_on", "shoulder_bag", "jacket"]):
-                desc = f"{desc} with travel-ready details kept nearby"
-            if outfit_mode == "soft_casual_mode" and idx == 0:
-                desc = f"{desc} with a slower off-duty pace"
-            if object_mode == "minimal_objects_soft_frame" and idx == 0:
-                desc = f"{desc} with only a few personal things in frame"
-            if transition_hint and idx == 0 and "echo_of_" in transition_hint:
-                desc = f"{desc} carrying a subtle continuation from yesterday"
+            elif self_presentation == "soft":
+                mood = "soft"
+            elif self_presentation == "transitional":
+                mood = "reflective"
 
             adjusted.append(
                 DayScene(
@@ -246,8 +278,8 @@ class DailyPlanner:
                     time_of_day=scene.time_of_day,
                     activity=activity,
                     source=scene.source,
-                    scene_family=scene_family or ("workday" if "aircraft" in location else "private" if location_family == "private" else "quiet_public"),
-                    action_family=action_family or habit_family or activity or "daily_life",
+                    scene_family=scene_family or ("private" if location_family == "private" else "quiet_public"),
+                    action_family=behavior.action_family or activity or "daily_life",
                     location_family=location_family,
                 )
             )

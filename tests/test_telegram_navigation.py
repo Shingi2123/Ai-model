@@ -52,6 +52,11 @@ def _item(index: int = 1, publication_id: str | None = None) -> PublishingPlanIt
         caption_text="Last quiet moments before heading out...",
         short_caption="Last quiet moments before heading out...",
         post_timezone="Europe/Paris",
+        behavior_state="energy=low; social=alone; arc=transition; habit=window_pause; place=hotel_window; objects=mug, phone; self=soft",
+        habit="window_pause",
+        place_anchor="hotel_window",
+        objects="mug, phone",
+        self_presentation="soft",
         emotional_arc="quiet_settling",
         habit_used="window_pause",
         habit_family="quiet_pause",
@@ -123,6 +128,9 @@ def test_format_plan_and_post_card_contains_core_fields():
     assert "13:30 (Asia/Pavlodar)" in post_text
     assert "quiet_settling" in post_text
     assert "window_pause" in post_text
+    assert "🧠 Behavior:" in post_text
+    assert "Energy: low" in post_text
+    assert "Social: alone_but_in_public" in post_text
 
 
 def test_detail_views_have_fallback_for_empty_prompt_and_caption():
@@ -153,6 +161,11 @@ def test_prompt_screen_falls_back_to_final_prompt_from_prompt_package_json():
 def test_prompt_screen_uses_behavior_detail_fields():
     text = format_prompt_screen(_item(), 0)
 
+    assert "Behavior: energy=low; social=alone" in text
+    assert "Habit: window_pause" in text
+    assert "Place anchor: hotel_window" in text
+    assert "Objects: mug, phone" in text
+    assert "Self-presentation: soft" in text
     assert "Habit family: quiet_pause" in text
     assert "Habit memory: quiet_pause: last used 2d ago" in text
     assert "Place label: familiar quiet window" in text

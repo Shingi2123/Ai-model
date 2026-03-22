@@ -42,6 +42,10 @@ class HelperGoogleStore(GoogleSheetsStateStore):
             "life_state": FakeWS(),
             "daily_calendar": FakeWS(),
             "content_history": FakeWS(),
+            "behavior_memory": FakeWS(),
+            "habit_memory": FakeWS(),
+            "place_memory": FakeWS(),
+            "object_usage": FakeWS(),
             "scene_memory": FakeWS(),
             "activity_memory": FakeWS(),
             "location_memory": FakeWS(),
@@ -161,6 +165,10 @@ def test_google_store_reset_day_records_removes_target_date_rows():
         "daily_calendar": [{"date": "2026-03-12"}],
         "content_history": [{"date": "2026-03-12"}, {"date": "2026-03-11"}],
         "content_moment_memory": [{"date": "2026-03-12"}, {"date": "2026-03-12"}],
+        "behavior_memory": [{"date": "2026-03-12"}, {"date": "2026-03-11"}],
+        "habit_memory": [{"date": "2026-03-12"}],
+        "place_memory": [{"date": "2026-03-12"}],
+        "object_usage": [{"date": "2026-03-12"}],
     }
 
     store.reset_day_records("2026-03-12")
@@ -169,20 +177,24 @@ def test_google_store_reset_day_records_removes_target_date_rows():
     assert store.replaced["life_state"]["rows"] == []
     assert [r["date"] for r in store.replaced["content_history"]["rows"]] == ["2026-03-11"]
     assert store.replaced["content_moment_memory"]["rows"] == []
+    assert [r["date"] for r in store.replaced["behavior_memory"]["rows"]] == ["2026-03-11"]
+    assert store.replaced["habit_memory"]["rows"] == []
+    assert store.replaced["place_memory"]["rows"] == []
+    assert store.replaced["object_usage"]["rows"] == []
 
 
 def test_local_store_reset_day_records_keeps_single_day_slice(tmp_path):
     store = LocalStateStore(base_dir=str(tmp_path / "state"))
     target = "2026-03-12"
 
-    for name in ["publishing_plan", "life_state", "daily_calendar", "content_history", "content_moment_memory"]:
+    for name in ["publishing_plan", "life_state", "daily_calendar", "content_history", "content_moment_memory", "behavior_memory", "habit_memory", "place_memory", "object_usage"]:
         path = store.base_dir / f"{name}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('[{"date":"2026-03-12"},{"date":"2026-03-13"}]', encoding='utf-8')
 
     store.reset_day_records(target)
 
-    for name in ["publishing_plan", "life_state", "daily_calendar", "content_history", "content_moment_memory"]:
+    for name in ["publishing_plan", "life_state", "daily_calendar", "content_history", "content_moment_memory", "behavior_memory", "habit_memory", "place_memory", "object_usage"]:
         rows = __import__('json').loads((store.base_dir / f"{name}.json").read_text(encoding='utf-8'))
         assert rows == [{"date": "2026-03-13"}]
 

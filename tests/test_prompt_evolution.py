@@ -1,4 +1,5 @@
 from virtual_persona.pipeline.prompt_composer import PromptComposer
+from virtual_persona.models.domain import BehaviorState
 
 
 class DummyState:
@@ -242,3 +243,32 @@ def test_positive_prompt_has_no_duplicate_blocks_or_repeated_words():
     assert "cream cardigan, cream cardigan" not in prompt.lower()
     assert "walking walking" not in prompt.lower()
 
+
+def test_behavior_influences_prompt_with_movement_mood_and_objects():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["behavioral_context"] = BehaviorState(
+        energy_level="low",
+        social_mode="light_public",
+        emotional_arc="transition",
+        habit="coffee_moment",
+        place_anchor="terminal_gate",
+        objects=["coffee_cup", "carry_on", "bag"],
+        self_presentation="transitional",
+    )
+    scene = Scene()
+    scene.scene_moment = "Coffee at the gate before boarding"
+    scene.description = "Quiet pause before boarding"
+    scene.location = "airport terminal"
+    scene.activity = "waiting"
+
+    package = composer.compose_package(context, scene, "cream cardigan + denim", "photo", ["top_1"])
+    prompt = package["final_prompt"].lower()
+
+    assert "natural pause moment" in prompt or "still posture" in prompt
+    assert "holding cup naturally" in prompt
+    assert "coffee cup" in prompt
+    assert "carry on" in prompt
+    assert "bag" in prompt
+    assert "transitional mood" in prompt
+    assert "soft background people only" in prompt

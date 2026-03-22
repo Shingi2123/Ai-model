@@ -129,6 +129,7 @@ class PromptComposer:
         scene_desc = getattr(scene, "scene_moment", "") or getattr(scene, "description", "daily lifestyle moment")
         item_ids_text = ", ".join(outfit_item_ids or [])
         reference_selection = identity_manager.select_reference_bundle(shot_archetype, generation_mode, identity_pack)
+        behavior = context.get("behavioral_context")
 
         identity_anchor = identity_manager.identity_anchor(context, identity_pack)
         body_anchor_shot = "full_body" if generation_mode == "full-body_mode" and shot_archetype == "friend_shot" else shot_archetype
@@ -189,6 +190,12 @@ class PromptComposer:
             "negative_prompt": negative_prompt,
             "video_motion": "subtle body movement with stable identity",
             "video_camera_motion": "light handheld or slow tripod drift",
+            "behavior_state": (
+                f"energy={getattr(behavior, 'energy_level', '')}; social={getattr(behavior, 'social_mode', '')}; "
+                f"arc={getattr(behavior, 'emotional_arc', '')}; habit={getattr(behavior, 'habit', '')}; "
+                f"place={getattr(behavior, 'place_anchor', '')}; objects={', '.join(getattr(behavior, 'objects', []) or [])}; "
+                f"self={getattr(behavior, 'self_presentation', '')}"
+            ),
         }
 
         final_prompt = self._build_final_prompt(
@@ -196,6 +203,7 @@ class PromptComposer:
             identity_anchor=identity_anchor,
             body_anchor=body_anchor,
             framing_mode=framing_mode,
+            context=context,
             shot_archetype=shot_archetype,
             scene=scene,
             scene_desc=scene_desc,
@@ -634,6 +642,7 @@ class PromptComposer:
         identity_anchor: str,
         body_anchor: str,
         framing_mode: str,
+        context: Dict[str, Any],
         shot_archetype: str,
         scene: Any,
         scene_desc: str,
@@ -649,10 +658,10 @@ class PromptComposer:
 
         identity_block = self._identity_block(identity_anchor=identity_anchor, body_anchor=body_anchor)
         framing_block = self._framing_block(framing_mode, shot_archetype, scene)
-        scene_block = self._scene_block(scene, scene_desc, scene_loc, scene_tags)
+        scene_block = self._scene_block(context, scene, scene_desc, scene_loc, scene_tags)
         outfit_block = self._outfit_block(wardrobe_block)
-        environment_block = self._environment_block(scene, scene_loc, scene_tags, continuity_block)
-        mood_block = self._mood_block(scene, continuity_block)
+        environment_block = self._environment_block(context, scene, scene_loc, scene_tags, continuity_block)
+        mood_block = self._mood_block(context, scene, continuity_block)
 
         blocks = [
             identity_block,
@@ -722,15 +731,37 @@ class PromptComposer:
             return "mirror selfie waist-up shot"
         return canonical.get(shot_archetype, "candid 3/4 body shot")
 
-    def _scene_block(self, scene: Any, scene_desc: str, scene_loc: str, scene_tags: List[str]) -> str:
+    def _scene_block(self, context: Dict[str, Any], scene: Any, scene_desc: str, scene_loc: str, scene_tags: List[str]) -> str:
         lowered = self._scene_text(scene).lower()
         visual_focus = self._strip_scene_noise(str(getattr(scene, "visual_focus", "") or "").strip())
         tag_prefix = self._scene_tag_prefix(scene_tags)
+        behavior = context.get("behavioral_context")
+        movement = ""
+        interaction = ""
+        objects = ""
+        if behavior is not None:
+            movement = {
+                "low": "still posture",
+                "medium": "natural pause moment",
+                "high": "slow relaxed movement",
+            }.get(str(getattr(behavior, "energy_level", "medium") or "medium"), "")
+            interaction = {
+                "window_pause": "touching window lightly",
+                "coffee_moment": "holding cup naturally",
+                "packing": "handling luggage",
+                "slow_walk": "walking with a bag",
+                "none": "resting hands naturally",
+            }.get(str(getattr(behavior, "habit", "none") or "none"), "")
+            objects = ", ".join(getattr(behavior, "objects", []) or [])
         if self._is_travel_walk(lowered):
             pieces = [f"{tag_prefix} walking through the airport terminal before boarding" if tag_prefix else "Walking through the airport terminal before boarding"]
             luggage_phrase = self._travel_luggage_phrase(lowered, visual_focus).lstrip(", ").strip()
             if luggage_phrase:
                 pieces.append(f"with {luggage_phrase.replace('pulling ', '').replace('carrying ', '')}")
+            if movement:
+                pieces.append(movement)
+            if interaction:
+                pieces.append(interaction)
             return f"Scene: {', '.join(self._dedupe_phrases(pieces))}."
 
         activity = str(getattr(scene, "activity", "") or "").strip().replace("_", " ")
@@ -749,6 +780,12 @@ class PromptComposer:
             pieces.append(activity)
         if visual_focus and visual_focus.lower() not in " ".join(pieces).lower():
             pieces.append(f"with {visual_focus}")
+        if movement and movement.lower() not in " ".join(pieces).lower():
+            pieces.append(movement)
+        if interaction and interaction.lower() not in " ".join(pieces).lower():
+            pieces.append(interaction)
+        if objects and objects.lower() not in " ".join(pieces).lower():
+            pieces.append(f"objects visible: {objects}")
         return f"Scene: {', '.join(self._dedupe_phrases(pieces))}."
 
     def _outfit_block(self, wardrobe_block: str) -> str:
@@ -758,11 +795,12 @@ class PromptComposer:
         normalized = [self._clean_fragment(item) for item in items if self._clean_fragment(item)]
         return f"Outfit: {', '.join(self._dedupe_phrases(normalized))}."
 
-    def _environment_block(self, scene: Any, scene_loc: str, scene_tags: List[str], continuity_block: str) -> str:
+    def _environment_block(self, context: Dict[str, Any], scene: Any, scene_loc: str, scene_tags: List[str], continuity_block: str) -> str:
         del continuity_block, scene_tags
         lighting = self._lighting_hint(getattr(scene, "time_of_day", "day"))
         lowered_loc = str(scene_loc or "").lower()
         location_phrase = "airport terminal" if any(token in lowered_loc for token in ["airport", "terminal"]) else self._clean_fragment(scene_loc)
+        behavior = context.get("behavioral_context")
         parts: List[str] = [
             f"Environment: photorealistic {location_phrase}",
             "physically plausible spatial depth",
@@ -773,11 +811,20 @@ class PromptComposer:
             parts.insert(1, "real terminal architecture")
         else:
             parts.insert(1, "lived-in environmental detail")
+        if behavior is not None:
+            presence = {
+                "alone": "no other people in frame",
+                "light_public": "soft background people only",
+                "social": "public life present but secondary",
+            }.get(str(getattr(behavior, "social_mode", "alone") or "alone"), "")
+            if presence:
+                parts.append(presence)
         return f"{'; '.join(self._dedupe_phrases(parts))}."
 
-    def _mood_block(self, scene: Any, continuity_block: str) -> str:
+    def _mood_block(self, context: Dict[str, Any], scene: Any, continuity_block: str) -> str:
         del continuity_block
         mood = str(getattr(scene, "mood", "") or "").strip().lower()
+        behavior = context.get("behavioral_context")
         canonical = {
             "curious": "quiet curiosity",
             "focused": "composed focus",
@@ -788,7 +835,23 @@ class PromptComposer:
             "soft": "soft calm",
             "happy": "light warmth",
         }
-        return f"Mood: {canonical.get(mood, 'quiet confidence')}."
+        base = canonical.get(mood, "quiet confidence")
+        if behavior is not None:
+            arc_mood = {
+                "arrival": "calm arrival mood",
+                "routine": "grounded routine mood",
+                "reflection": "reflective calm",
+                "transition": "transitional mood",
+                "departure": "focused before-leaving mood",
+            }.get(str(getattr(behavior, "emotional_arc", "routine") or "routine"), "")
+            self_presentation = str(getattr(behavior, "self_presentation", "") or "").replace("_", " ")
+            details = [base]
+            if arc_mood:
+                details.append(arc_mood)
+            if self_presentation:
+                details.append(f"{self_presentation} self-presentation")
+            return f"Mood: {', '.join(self._dedupe_phrases(details))}."
+        return f"Mood: {base}."
 
     @staticmethod
     def _clean_fragment(text: str) -> str:

@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from virtual_persona.config.settings import AppSettings
 from virtual_persona.models.domain import CharacterBible
-from virtual_persona.pipeline.behavioral_logic_engine import BehavioralLogicEngine
+from virtual_persona.pipeline.behavior_engine import BehaviorEngine
 from virtual_persona.pipeline.life_engine import LifeEngine
 from virtual_persona.services.sun import SunService
 from virtual_persona.services.weather import WeatherService
@@ -19,7 +19,7 @@ class ContextBuilder:
         self.weather_service = WeatherService(settings)
         self.sun_service = SunService(settings)
         self.life_engine = LifeEngine(state_store)
-        self.behavior_engine = BehavioralLogicEngine(state_store)
+        self.behavior_engine = BehaviorEngine(state_store)
 
     def _split_csv(self, value: Any) -> list[str]:
         if value is None:
@@ -195,7 +195,7 @@ class ContextBuilder:
         }
         behavior_context = self.behavior_engine.build(context)
         context["behavioral_context"] = behavior_context
-        context["behavior_profile"] = behavior_context.profile
+        context["behavior_profile"] = {}
 
         return context
 

@@ -91,15 +91,21 @@ def format_post_screen(context: PlanScreenContext, item: PublishingPlanItem, pos
     source_tz = item.post_timezone or context.persona_timezone
     user_time = _convert_time_for_user(context.target_date, item.post_time, source_tz, context.user_timezone)
     emoji = _post_header_emoji(item.content_type)
-    behavior_line = ""
-    if item.day_behavior_summary or item.emotional_arc:
-        behavior_line = (
-            f"\n\nBehavior: {short_text(item.day_behavior_summary or item.emotional_arc, 160)}"
-            f"\nArc: {item.emotional_arc or 'n/a'}"
-            f"\nHabit: {item.habit_used or 'n/a'}"
-            f"\nPlace: {item.familiar_place_anchor or 'n/a'}"
-            f"\nObjects: {short_text(item.recurring_objects_in_scene or item.object_presence_mode, 80)}"
-        )
+    behavior_line = (
+        "\n\n🧠 Behavior:"
+        f"\nEnergy: {item.behavior_state.split(';')[0].replace('energy=', '').strip() if item.behavior_state else 'medium'}"
+        f"\nSocial: {item.social_presence_mode or 'alone'}"
+        "\n\n🎭 Emotional arc:"
+        f"\n{item.emotional_arc or 'routine'}"
+        "\n\n🔁 Habit:"
+        f"\n{item.habit or item.habit_used or 'none'}"
+        "\n\n📍 Place:"
+        f"\n{item.place_anchor or item.familiar_place_anchor or 'kitchen_corner'}"
+        "\n\n🎒 Objects:"
+        f"\n{short_text(item.objects or item.recurring_objects_in_scene or 'none', 80)}"
+        "\n\n👤 Self:"
+        f"\n{item.self_presentation or item.self_presentation_mode or 'relaxed'}"
+    )
     return (
         f"{emoji} POST #{post_index + 1}\n\n"
         f"Platform: {item.platform}\n"
@@ -186,25 +192,25 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
             _format_field("Platform", item.platform),
             _format_field("Prompt mode", prompt_mode),
             _format_field("Identity mode", identity_mode),
-            _format_field("Behavior", _display_value(item.day_behavior_summary, "Not set")),
-            _format_field("Emotional arc", _display_value(item.emotional_arc, "Not set")),
-            _format_field("Habit", _display_value(item.habit_used, "Not set")),
-            _format_field("Habit family", _display_value(item.habit_family, "Not set")),
-            _format_field("Habit memory", _display_value(item.recurring_habit_summary, "Not set")),
-            _format_field("Place anchor", _display_value(item.familiar_place_anchor, "Not set")),
-            _format_field("Place label", _display_value(item.familiar_place_label, "Not set")),
-            _format_field("Place family", _display_value(item.familiar_place_family, "Not set")),
-            _format_field("Familiarity", _display_value(str(item.familiarity_score) if item.familiarity_score is not None else "", "Not set")),
-            _format_field("Objects", _display_value(item.recurring_objects_in_scene, "Not set")),
-            _format_field("Object mode", _display_value(item.object_presence_mode, "Not set")),
-            _format_field("Self-presentation", _display_value(item.self_presentation_mode, "Not set")),
-            _format_field("Social presence", _display_value(item.social_presence_mode, "Not set")),
-            _format_field("Social detail", _display_value(item.social_presence_detail, "Not set")),
-            _format_field("Transition", _display_value(item.transition_context or item.transition_hint_used, "Not set")),
-            _format_field("Action family", _display_value(item.action_family, "Not set")),
-            _format_field("Tone family", _display_value(item.emotional_tone_family, "Not set")),
-            _format_field("Voice constraints", _display_value(item.caption_voice_constraints, "Not set")),
-            _format_field("Social context", _display_value(item.social_context_hint, "Not set")),
+            _format_field("Behavior", _display_value(item.behavior_state or item.day_behavior_summary, "energy=medium; social=alone")),
+            _format_field("Emotional arc", _display_value(item.emotional_arc, "routine")),
+            _format_field("Habit", _display_value(item.habit or item.habit_used, "none")),
+            _format_field("Habit family", _display_value(item.habit_family, "neutral")),
+            _format_field("Habit memory", _display_value(item.recurring_habit_summary, "same behavior thread")),
+            _format_field("Place anchor", _display_value(item.place_anchor or item.familiar_place_anchor, "kitchen_corner")),
+            _format_field("Place label", _display_value(item.familiar_place_label, item.place_anchor or "kitchen corner")),
+            _format_field("Place family", _display_value(item.familiar_place_family, "daily_anchor")),
+            _format_field("Familiarity", _display_value(str(item.familiarity_score) if item.familiarity_score is not None else "", "0.0")),
+            _format_field("Objects", _display_value(item.objects or item.recurring_objects_in_scene, "none")),
+            _format_field("Object mode", _display_value(item.object_presence_mode, "anchored_objects")),
+            _format_field("Self-presentation", _display_value(item.self_presentation or item.self_presentation_mode, "relaxed")),
+            _format_field("Social presence", _display_value(item.social_presence_mode, "alone")),
+            _format_field("Social detail", _display_value(item.social_presence_detail, "alone in frame")),
+            _format_field("Transition", _display_value(item.transition_context or item.transition_hint_used, "routine")),
+            _format_field("Action family", _display_value(item.action_family, "stillness")),
+            _format_field("Tone family", _display_value(item.emotional_tone_family, "grounded_daily")),
+            _format_field("Voice constraints", _display_value(item.caption_voice_constraints, "keep it natural")),
+            _format_field("Social context", _display_value(item.social_context_hint, "no people in frame")),
         ]
     )
     return (

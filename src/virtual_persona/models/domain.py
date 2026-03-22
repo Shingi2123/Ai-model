@@ -160,6 +160,225 @@ class BehavioralContext:
 
 
 @dataclass
+class BehaviorState:
+    energy_level: str
+    social_mode: str
+    emotional_arc: str
+    habit: str
+    place_anchor: str
+    objects: List[str]
+    self_presentation: str
+
+    @property
+    def selected_habit(self) -> str:
+        return self.habit
+
+    @property
+    def recurring_objects(self) -> List[str]:
+        return list(self.objects)
+
+    @property
+    def familiar_place_anchor(self) -> str:
+        return self.place_anchor
+
+    @property
+    def familiar_place_label(self) -> str:
+        labels = {
+            "hotel_window": "hotel window",
+            "kitchen_corner": "kitchen corner",
+            "terminal_gate": "terminal gate",
+            "cafe_corner": "cafe corner",
+        }
+        return labels.get(self.place_anchor, self.place_anchor.replace("_", " "))
+
+    @property
+    def familiar_place_family(self) -> str:
+        families = {
+            "hotel_window": "private_anchor",
+            "kitchen_corner": "domestic_anchor",
+            "terminal_gate": "transit_anchor",
+            "cafe_corner": "public_anchor",
+        }
+        return families.get(self.place_anchor, "daily_anchor")
+
+    @property
+    def habit_family(self) -> str:
+        families = {
+            "window_pause": "pause",
+            "coffee_moment": "ritual",
+            "packing": "transition",
+            "slow_walk": "movement",
+            "none": "neutral",
+        }
+        return families.get(self.habit, "neutral")
+
+    @property
+    def recurring_habit_summary(self) -> str:
+        return f"{self.habit} linked to {self.place_anchor}"
+
+    @property
+    def object_presence_mode(self) -> str:
+        return "anchored_objects" if self.objects else "no_objects"
+
+    @property
+    def self_presentation_mode(self) -> str:
+        return self.self_presentation
+
+    @property
+    def social_presence_mode(self) -> str:
+        return self.social_mode
+
+    @property
+    def caption_voice_mode(self) -> str:
+        mapping = {
+            "arrival": "observational_arrival",
+            "routine": "grounded_daily",
+            "reflection": "quiet_reflective",
+            "transition": "transitional",
+            "departure": "restrained_departure",
+        }
+        return mapping.get(self.emotional_arc, "grounded_daily")
+
+    @property
+    def emotional_tone_family(self) -> str:
+        mapping = {
+            "arrival": "fresh_place",
+            "routine": "grounded_daily",
+            "reflection": "quiet_softness",
+            "transition": "departure_tension",
+            "departure": "departure_focus",
+        }
+        return mapping.get(self.emotional_arc, "grounded_daily")
+
+    @property
+    def action_family(self) -> str:
+        mapping = {
+            "window_pause": "still_pause",
+            "coffee_moment": "small_ritual",
+            "packing": "luggage_handling",
+            "slow_walk": "walking",
+            "none": "stillness",
+        }
+        return mapping.get(self.habit, "stillness")
+
+    @property
+    def social_context_hint(self) -> str:
+        mapping = {
+            "alone": "no people in frame",
+            "light_public": "soft background people",
+            "social": "public life visible around her",
+        }
+        return mapping.get(self.social_mode, "no people in frame")
+
+    @property
+    def social_presence_detail(self) -> str:
+        mapping = {
+            "alone": "alone in frame",
+            "light_public": "background people only",
+            "social": "shared public atmosphere",
+        }
+        return mapping.get(self.social_mode, "alone in frame")
+
+    @property
+    def transition_hint(self) -> str:
+        mapping = {
+            "arrival": "new_place",
+            "routine": "steady_day",
+            "reflection": "pause_and_notice",
+            "transition": "before_leaving",
+            "departure": "ready_to_move",
+        }
+        return mapping.get(self.emotional_arc, "steady_day")
+
+    @property
+    def transition_context(self) -> str:
+        mapping = {
+            "arrival": "arrival",
+            "routine": "routine",
+            "reflection": "reflection",
+            "transition": "transition",
+            "departure": "departure",
+        }
+        return mapping.get(self.emotional_arc, "routine")
+
+    @property
+    def caption_voice_constraints(self) -> List[str]:
+        constraints = ["keep it natural", "avoid dramatic language"]
+        if self.emotional_arc == "transition":
+            constraints.append("hint at movement without overexplaining")
+        if self.habit == "coffee_moment":
+            constraints.append("allow a small everyday detail")
+        return constraints
+
+    @property
+    def caption_opening_guard(self) -> List[str]:
+        return ["another day", "just vibes"]
+
+    @property
+    def allowed_scene_families(self) -> List[str]:
+        families: List[str] = []
+        if self.energy_level == "low":
+            families.extend(["static", "interior", "pause"])
+        elif self.energy_level == "high":
+            families.extend(["movement", "street", "walk"])
+        else:
+            families.extend(["daily", "anchored"])
+        if self.social_mode == "alone":
+            families.append("private")
+        elif self.social_mode == "light_public":
+            families.append("quiet_public")
+        else:
+            families.append("social_public")
+        return families
+
+    @property
+    def likely_actions(self) -> List[str]:
+        actions = {
+            "window_pause": ["touching window", "still posture"],
+            "coffee_moment": ["holding cup", "natural pause moment"],
+            "packing": ["handling luggage", "checking bag"],
+            "slow_walk": ["slow relaxed movement", "walking"],
+            "none": ["still posture"],
+        }
+        return list(actions.get(self.habit, ["still posture"]))
+
+    @property
+    def gesture_bias(self) -> List[str]:
+        gestures = {
+            "relaxed": ["soft hands", "loose shoulders"],
+            "composed": ["upright posture", "measured gesture"],
+            "focused": ["intent gaze", "precise movement"],
+            "soft": ["gentle expression", "small pause"],
+            "transitional": ["slight distance in gaze", "thoughtful pause"],
+        }
+        return list(gestures.get(self.self_presentation, ["natural posture"]))
+
+    @property
+    def familiarity_score(self) -> float:
+        return 0.82 if self.place_anchor in {"hotel_window", "kitchen_corner"} else 0.68
+
+    @property
+    def debug_summary(self) -> str:
+        object_text = ",".join(self.objects) if self.objects else "none"
+        return (
+            f"energy={self.energy_level}; social={self.social_mode}; arc={self.emotional_arc}; "
+            f"habit={self.habit}; place={self.place_anchor}; objects={object_text}; self={self.self_presentation}"
+        )
+
+    @property
+    def daily_state(self) -> "BehaviorState":
+        return self
+
+    @property
+    def anti_repetition_flags(self) -> List[str]:
+        return list(getattr(self, "_anti_repetition_flags", []))
+
+    @property
+    def source(self) -> str:
+        return str(getattr(self, "_source", "new"))
+
+
+@dataclass
 class WardrobeItem:
     id: str
     category: str
@@ -290,6 +509,11 @@ class PublishingPlanItem:
     selection_reason: str = ""
     delivery_status: str = "planned"
     notes: str = ""
+    behavior_state: str = ""
+    habit: str = ""
+    place_anchor: str = ""
+    objects: str = ""
+    self_presentation: str = ""
     emotional_arc: str = ""
     habit_used: str = ""
     habit_family: str = ""

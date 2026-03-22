@@ -110,18 +110,28 @@ class PublishingPlanEngine:
                 selection_reason=selection_reason or "selected_for_publication",
                 delivery_status="planned",
                 notes=f"score={ranked_moment.score:.2f}; reasons={', '.join(ranked_moment.reasons[:3])}",
+                behavior_state=(
+                    f"energy={getattr(behavior, 'energy_level', '')}; social={getattr(behavior, 'social_mode', '')}; "
+                    f"arc={getattr(behavior, 'emotional_arc', '')}; habit={getattr(behavior, 'habit', '')}; "
+                    f"place={getattr(behavior, 'place_anchor', '')}; objects={', '.join(getattr(behavior, 'objects', []) or [])}; "
+                    f"self={getattr(behavior, 'self_presentation', '')}"
+                ),
+                habit=str(getattr(behavior, "habit", "")),
+                place_anchor=str(getattr(behavior, "place_anchor", "")),
+                objects=", ".join(getattr(behavior, "objects", []) or []),
+                self_presentation=str(getattr(behavior, "self_presentation", "")),
                 emotional_arc=str(getattr(behavior, "emotional_arc", "")),
-                habit_used=str(getattr(behavior, "selected_habit", "")),
+                habit_used=str(getattr(behavior, "habit", getattr(behavior, "selected_habit", ""))),
                 habit_family=str(getattr(behavior, "habit_family", "")),
                 recurring_habit_summary=str(getattr(behavior, "recurring_habit_summary", "")),
-                familiar_place_anchor=str(getattr(behavior, "familiar_place_anchor", "")),
+                familiar_place_anchor=str(getattr(behavior, "place_anchor", getattr(behavior, "familiar_place_anchor", ""))),
                 familiar_place_label=str(getattr(behavior, "familiar_place_label", "")),
                 familiar_place_family=str(getattr(behavior, "familiar_place_family", "")),
                 familiarity_score=float(getattr(behavior, "familiarity_score", 0.0) or 0.0),
-                recurring_objects_in_scene=", ".join(getattr(behavior, "recurring_objects", []) or []),
+                recurring_objects_in_scene=", ".join(getattr(behavior, "objects", getattr(behavior, "recurring_objects", [])) or []),
                 object_presence_mode=str(getattr(behavior, "object_presence_mode", "")),
-                self_presentation_mode=str(getattr(daily_behavior, "self_presentation_mode", "") if daily_behavior else ""),
-                social_presence_mode=str(getattr(daily_behavior, "social_presence_mode", "") if daily_behavior else ""),
+                self_presentation_mode=str(getattr(behavior, "self_presentation", getattr(daily_behavior, "self_presentation_mode", "") if daily_behavior else "")),
+                social_presence_mode=str(getattr(behavior, "social_mode", getattr(daily_behavior, "social_presence_mode", "") if daily_behavior else "")),
                 transition_hint_used=str(getattr(behavior, "transition_hint", "")),
                 transition_context=str(getattr(behavior, "transition_context", "")),
                 caption_voice_mode=str(getattr(daily_behavior, "caption_voice_mode", "") if daily_behavior else ""),

@@ -54,6 +54,9 @@ class SceneMomentGenerator:
         "route_familiarity_moment": "city_observation",
         "colleague_world_moment": "workday",
         "public_pause_moment": "quiet_public",
+        "arrival_room_moment": "hotel_private",
+        "routine_counter_moment": "recovery",
+        "light_public_moment": "quiet_public",
     }
 
     def __init__(self, state_store: Any = None) -> None:
@@ -100,101 +103,73 @@ class SceneMomentGenerator:
 
     def _candidate_pool(self, context: Dict[str, Any], scene: DayScene) -> List[Dict[str, str]]:
         day_type = str(context.get("day_type") or "")
-        phase = str(getattr(context.get("narrative_context"), "narrative_phase", "") or "")
-        energy = str(getattr(context.get("narrative_context"), "energy_state", "") or "")
-        location = str(scene.location or "").lower()
         behavior = context.get("behavioral_context")
-        selected_habit = str(getattr(behavior, "selected_habit", "") or "")
-        place_anchor = str(getattr(behavior, "familiar_place_anchor", "") or "")
-        recurring_objects = list(getattr(behavior, "recurring_objects", []) or [])
-        habit_family = str(getattr(behavior, "habit_family", "") or "")
+        selected_habit = str(getattr(behavior, "habit", "") or "")
+        place_anchor = str(getattr(behavior, "place_anchor", "") or "")
+        recurring_objects = list(getattr(behavior, "objects", []) or [])
         action_family = str(getattr(behavior, "action_family", "") or "")
         emotional_arc = str(getattr(behavior, "emotional_arc", "") or "")
-        social_mode = str(getattr(getattr(behavior, "daily_state", None), "social_presence_mode", "") or "")
-        place_label = str(getattr(behavior, "familiar_place_label", "") or place_anchor)
+        social_mode = str(getattr(behavior, "social_mode", "alone") or "alone")
 
-        airport_pool = [
-            {"type": "coffee_window_moment", "moment": "Quiet coffee by the terminal window before boarding", "focus": "coffee cup in hand, runway view through glass"},
-            {"type": "terminal_walk_moment", "moment": "Slow walk through a nearly empty terminal with carry-on", "focus": "airport glass reflections and carry-on silhouette"},
-            {"type": "gate_waiting_moment", "moment": "Calm waiting at the gate while watching aircraft pushback", "focus": "boarding pass and distant aircraft at gate"},
-        ]
-        hotel_pool = [
-            {"type": "packing_moment", "moment": "Packing essentials near the hotel bed before checkout", "focus": "open suitcase near bed and folded outfit"},
-            {"type": "window_pause_moment", "moment": "Quiet pause by the hotel window before leaving", "focus": "city view through hotel window and soft morning light"},
-            {"type": "checkout_moment", "moment": "Final room check with luggage ready by the door", "focus": "suitcase handle, keycard, and doorway framing"},
-        ]
-        home_pool = [
-            {"type": "home_coffee_moment", "moment": "Slow first coffee in a quiet kitchen corner", "focus": "warm mug, morning table light, simple home details"},
-            {"type": "reading_moment", "moment": "Short reading pause on the sofa before heading out", "focus": "open book, blanket texture, soft daylight"},
-            {"type": "self_care_moment", "moment": "Gentle self-care reset and tidy-up before evening", "focus": "mirror corner, skincare items, calm interior"},
-        ]
-        city_pool = [
-            {"type": "cafe_table_moment", "moment": "A quiet table moment in a local cafe between errands", "focus": "notebook, espresso, and street reflections"},
-            {"type": "street_walk_moment", "moment": "Unhurried walk along a side street during golden light", "focus": "crossbody bag movement and cobblestone texture"},
-            {"type": "grocery_moment", "moment": "Small grocery stop for essentials on the way back", "focus": "paper bag, fresh produce, everyday city details"},
-        ]
+        pools = {
+            "terminal_gate": [
+                {"type": "gate_waiting_moment", "moment": "Calm waiting at the terminal gate before boarding", "focus": "carry_on, bag, gate seating"},
+                {"type": "terminal_walk_moment", "moment": "Slow walk through the terminal with luggage in hand", "focus": "carry_on, bag, airport reflections"},
+                {"type": "coffee_window_moment", "moment": "Coffee at the gate while watching the runway", "focus": "coffee_cup, carry_on, runway view"},
+            ],
+            "hotel_window": [
+                {"type": "window_pause_moment", "moment": "Quiet pause by the hotel window before leaving", "focus": "bag, city view, window frame"},
+                {"type": "packing_moment", "moment": "Packing essentials in a hotel room with everything laid out neatly", "focus": "bag, clothes, suitcase"},
+                {"type": "arrival_room_moment", "moment": "A first quiet look around the room after arriving", "focus": "bag, clothes, new room details"},
+            ],
+            "kitchen_corner": [
+                {"type": "home_coffee_moment", "moment": "Slow first coffee in the kitchen corner before the day starts", "focus": "coffee_cup, counter light, bag"},
+                {"type": "window_pause_moment", "moment": "A still pause in the kitchen while morning light settles in", "focus": "coffee_cup, window light"},
+                {"type": "routine_counter_moment", "moment": "A small routine moment with everything kept simple and close", "focus": "coffee_cup, bag"},
+            ],
+            "cafe_corner": [
+                {"type": "cafe_table_moment", "moment": "A quiet coffee pause at a familiar cafe corner", "focus": "coffee_cup, bag, table edge"},
+                {"type": "street_walk_moment", "moment": "An unhurried walk after leaving the cafe", "focus": "bag movement, street light"},
+                {"type": "public_pause_moment", "moment": "A still moment in public while life moves softly nearby", "focus": "coffee_cup, soft crowd blur"},
+            ],
+        }
 
-        if "airport" in location or "terminal" in location or "aircraft" in location or day_type in {"work_day", "travel_day"}:
-            pool = airport_pool + hotel_pool
-        elif "hotel" in location or day_type == "layover_day":
-            pool = hotel_pool + city_pool
-        elif "home" in location or day_type == "day_off":
-            pool = home_pool + city_pool
-        else:
-            pool = city_pool + home_pool
-
-        if phase in {"recovery_phase", "quiet_reset_phase"} or energy == "low":
-            pool = [p for p in pool if "walk" not in p["type"]]
-        if phase == "exploration_phase":
-            pool = city_pool + airport_pool + hotel_pool
-        if selected_habit == "terminal_pause" and airport_pool:
-            pool = airport_pool + pool
-        if selected_habit == "window_pause" and hotel_pool:
+        pool = list(pools.get(place_anchor, pools["kitchen_corner"]))
+        if selected_habit == "coffee_moment":
+            pool = sorted(pool, key=lambda row: 0 if "coffee" in row["type"] or "coffee" in row["moment"].lower() else 1)
+        elif selected_habit == "packing":
+            pool = sorted(pool, key=lambda row: 0 if "packing" in row["type"] or "arrival" in row["type"] else 1)
+        elif selected_habit == "slow_walk":
+            pool = sorted(pool, key=lambda row: 0 if "walk" in row["type"] else 1)
+        elif selected_habit == "window_pause":
             pool = sorted(pool, key=lambda row: 0 if "window" in row["type"] else 1)
-        if habit_family == "departure_ritual":
-            pool.insert(
-                0,
+
+        if emotional_arc == "arrival":
+            pool = sorted(pool, key=lambda row: 0 if "arrival" in row["type"] or "first" in row["moment"].lower() else 1)
+        elif emotional_arc in {"transition", "departure"}:
+            pool = sorted(pool, key=lambda row: 0 if any(token in row["type"] for token in ["packing", "gate", "walk"]) else 1)
+        elif emotional_arc == "reflection":
+            pool = [row for row in pool if "walk" not in row["type"]] or pool
+
+        if social_mode == "alone":
+            pool = [row for row in pool if "crowd" not in row["focus"]] or pool
+        elif social_mode == "light_public":
+            pool.append(
                 {
-                    "type": "departure_ritual_moment",
-                    "moment": "A quiet before-leaving check with everything already in place",
-                    "focus": "bag strap, folded layer, and a paused breath before moving",
-                },
+                    "type": "light_public_moment",
+                    "moment": "A personal pause with soft background people nearby",
+                    "focus": ", ".join(recurring_objects[:2]) or "soft background people",
+                }
             )
-        if action_family == "gentle_movement":
+
+        if action_family == "walking":
             pool.append(
                 {
                     "type": "route_familiarity_moment",
-                    "moment": "An easy route chosen almost by habit through a familiar stretch",
-                    "focus": "small movement details and a familiar corner coming into view",
+                    "moment": "An easy familiar route taken without rushing",
+                    "focus": ", ".join(recurring_objects[:2]) or "bag movement",
                 }
             )
-        if place_anchor and not any(place_anchor in p["moment"].lower() for p in pool):
-            pool.insert(
-                0,
-                {
-                    "type": f"{selected_habit or 'behavior'}_moment",
-                    "moment": f"Quiet everyday pause near the {place_label}",
-                    "focus": ", ".join(recurring_objects[:2]) or "familiar corner details",
-                },
-            )
-        if social_mode == "quiet_crowd_around":
-            pool.append(
-                {
-                    "type": "public_pause_moment",
-                    "moment": "A quiet pause while the world moves softly in the background",
-                    "focus": "subtle crowd blur behind a calm foreground gesture",
-                }
-            )
-        if social_mode == "colleague_implied_world":
-            pool.append(
-                {
-                    "type": "colleague_world_moment",
-                    "moment": "A composed in-between moment with work life implied just outside the frame",
-                    "focus": "structured posture, neat outfit, and nearby movement not centered in frame",
-                }
-            )
-        if emotional_arc == "subtle_pre_departure_melancholy":
-            pool = sorted(pool, key=lambda row: 0 if any(token in row["type"] for token in ["departure", "window", "checkout"]) else 1)
         return pool
 
     def _pick_candidate(
@@ -212,16 +187,14 @@ class SceneMomentGenerator:
         anti_repeat = set(getattr(behavior, "anti_repetition_flags", []) or [])
         pool = self._candidate_pool(context, scene)
         if arc_hint == "arrival_and_adaptation":
-            pool = sorted(pool, key=lambda row: 0 if "walk" in row["type"] or "checkout" in row["type"] else 1)
-        if "habit_recently_used" in anti_repeat:
-            pool = [row for row in pool if not row["type"].startswith(str(getattr(behavior, "selected_habit", "")))] or pool
-        if "place_recently_used" in anti_repeat:
-            familiar = str(getattr(behavior, "familiar_place_anchor", "") or "")
+            pool = sorted(pool, key=lambda row: 0 if "arrival" in row["type"] or "walk" in row["type"] else 1)
+        if "habit_varied" in anti_repeat:
+            chosen_habit = str(getattr(behavior, "habit", "") or "")
+            pool = [row for row in pool if chosen_habit.split("_")[0] not in row["type"]] or pool
+        if "place_varied" in anti_repeat:
+            familiar = str(getattr(behavior, "place_anchor", "") or "")
             pool = [row for row in pool if familiar.lower() not in row["moment"].lower()] or pool
-        if "habit_family_streak" in anti_repeat:
-            family = str(getattr(behavior, "habit_family", "") or "")
-            pool = [row for row in pool if family not in row["type"]] or pool
-        if "caption_voice_streak" in anti_repeat:
+        if "emotional_arc_varied" in anti_repeat:
             pool = [row for row in pool if "quiet" not in row["type"]] or pool
         for candidate in pool:
             sig = self._build_signature(day_type, scene, candidate["type"], candidate["moment"])
