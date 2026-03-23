@@ -174,8 +174,30 @@ class PromptComposer:
         body_anchor_shot = "full_body" if generation_mode == "full-body_mode" and shot_archetype == "friend_shot" else shot_archetype
         body_anchor = identity_manager.body_anchor(body_anchor_shot, context, identity_pack)
         scene_action = self._scene_action(scene, scene_desc, scene_loc)
-        normalized_outfit = self._normalize_outfit_summary(outfit_summary, scene, context)
-        wardrobe_block = self._wardrobe_context(normalized_outfit, shot_archetype, item_ids_text)
+        try:
+            outfit_bundle = self.outfit_generator.generate_bundle(outfit_summary=outfit_summary, scene=scene, context=context)
+        except ManualOutfitValidationError as exc:
+            raise PromptValidationError(str(exc)) from exc
+        except OutfitGenerationError:
+            fallback_outfit = self.generate_default_outfit(
+                scene,
+                str(context.get("city", "") or ""),
+                context.get("weather"),
+                day_type=str(context.get("day_type", "") or ""),
+                behavior_mode=str(
+                    getattr(context.get("behavioral_context"), "outfit_behavior_mode", "")
+                    or getattr(context.get("behavioral_context"), "self_presentation", "")
+                    or getattr(getattr(context.get("behavioral_context"), "daily_state", None), "self_presentation_mode", "")
+                    or ""
+                ),
+            )
+            outfit_bundle = self.outfit_generator.generate_bundle(
+                outfit_summary=", ".join(fallback_outfit),
+                scene=scene,
+                context=context,
+            )
+        normalized_outfit = outfit_bundle.sentence
+        wardrobe_block = self._wardrobe_context(outfit_bundle, shot_archetype, item_ids_text)
         camera_block = self._camera_context(shot_archetype, context)
         realism_block = self._realism_cues(shot_archetype, scene_loc)
         continuity_block = self._continuity_cues(context, scene)
@@ -193,6 +215,7 @@ class PromptComposer:
             "body_anchor": body_anchor,
             "scene_action": scene_action,
             "wardrobe_block": wardrobe_block,
+            "outfit_structured": outfit_bundle.to_dict(),
             "camera_block": camera_block,
             "realism_block": realism_block,
             "continuity_block": continuity_block,
@@ -272,10 +295,12 @@ class PromptComposer:
     @staticmethod
     def _prompt_mode(prompt: str) -> str:
         normalized = (prompt or "").strip()
+        blocks = [block.strip() for block in normalized.split("\n\n") if block.strip()]
+        framing_block = blocks[1].lower() if len(blocks) > 1 else ""
+        if "selfie" in framing_block and len(normalized) < 1000:
+            return "compact"
         if len(normalized) > PromptComposer.COMPACT_PROMPT_THRESHOLD:
             return "dense"
-
-        blocks = [block.strip() for block in normalized.split("\n\n") if block.strip()]
         expanded_blocks = 0
         for block in blocks:
             _, _, body = block.partition(":")
@@ -431,9 +456,10 @@ class PromptComposer:
         )
 
     @staticmethod
-    def _wardrobe_context(outfit_summary: str, shot_archetype: str, outfit_item_ids: str) -> str:
+    def _wardrobe_context(outfit_bundle: Any, shot_archetype: str, outfit_item_ids: str) -> str:
         visible_scope = "upper-body focus" if shot_archetype in {"front_selfie", "close_portrait", "mirror_selfie", "seated_table_shot", "waist_up"} else "full outfit coherence"
-        return f"outfit: {outfit_summary}; {visible_scope}; item_ids={outfit_item_ids}."
+        sentence = str(getattr(outfit_bundle, "sentence", "") or "")
+        return f"outfit: {sentence} || {visible_scope}; item_ids={outfit_item_ids}."
 
     def _camera_context(self, shot_archetype: str, context: Dict[str, Any]) -> str:
         camera_profile = self.CAMERA_ARCHETYPES.get(shot_archetype, self.CAMERA_ARCHETYPES["friend_shot"])
@@ -499,6 +525,8 @@ class PromptComposer:
             "extra fingers", "deformed hands", "duplicate person", "plastic skin", "bad anatomy", "wrong limb placement",
             "generic model photo", "fashion catalog symmetry", "sterile beauty campaign polish", "wrong phone shape",
             "identity drift", "unstable face geometry", "inconsistent body proportions",
+            "fashion catalog outfit", "perfect styling", "overly trendy outfit", "runway fashion",
+            "influencer outfit", "studio fashion look", "over-coordinated clothing", "impractical clothing for context",
         ]
         shot_specific = {
             "mirror_selfie": ["broken mirror reflection", "floating phone", "inconsistent reflection angle", "duplicated hand", "impossible reflection geometry"],
@@ -842,7 +870,7 @@ class PromptComposer:
 
     def _outfit_block(self, wardrobe_block: str) -> str:
         cleaned = wardrobe_block.replace("outfit: ", "").strip()
-        cleaned = cleaned.split(";")[0].strip().rstrip(".")
+        cleaned = cleaned.split("||")[0].strip().rstrip(".")
         items = re.split(r"\s*(?:,|\+|/|;)\s*", cleaned)
         normalized = [
             self._ensure_english_fragment(self._clean_fragment(item), "")
@@ -994,7 +1022,7 @@ class PromptComposer:
             or ""
         )
         try:
-            return self.outfit_generator.generate(outfit_summary=outfit_summary, scene=scene, context=context)
+            return self.outfit_generator.generate_bundle(outfit_summary=outfit_summary, scene=scene, context=context).sentence
         except ManualOutfitValidationError as exc:
             raise PromptValidationError(str(exc)) from exc
         except OutfitGenerationError:

@@ -171,6 +171,7 @@ class LocalStateStore:
             "life_state.json",
             "daily_calendar.json",
             "content_history.json",
+            "outfit_memory.json",
             "content_moment_memory.json",
             "behavior_memory.json",
             "habit_memory.json",
@@ -209,6 +210,12 @@ class LocalStateStore:
 
     def load_outfit_memory(self) -> List[Dict[str, Any]]:
         return self._read_json(self.base_dir / "outfit_memory.json", [])
+
+    def append_outfit_memory(self, row: Dict[str, Any]) -> None:
+        path = self.base_dir / "outfit_memory.json"
+        rows = self._read_json(path, [])
+        rows.append(row)
+        self._write_json(path, rows)
 
     def load_scene_memory(self) -> List[Dict[str, Any]]:
         return self._read_json(self.base_dir / "scene_memory.json", [])
@@ -309,6 +316,10 @@ class LocalStateStore:
                 "date": package.date.isoformat(),
                 "city": package.city,
                 "day_type": package.day_type,
+                "outfit_summary": package.outfit.prompt_sentence(),
+                "style_intensity": package.outfit.style_intensity,
+                "outfit_style": package.outfit.outfit_style,
+                "outfit_override_used": package.outfit.outfit_override_used,
                 "scenes": " | ".join(s.description for s in package.scenes),
                 "scene_moment": scene_moment,
                 "scene_source": scene_source,
@@ -635,8 +646,15 @@ class GoogleSheetsStateStore:
             ],
             "daily_calendar": ["date", "city", "day_type", "notes"],
             "content_history": [
-                "date", "city", "day_type", "outfit_ids", "scenes", "post_caption", "scene_moment", "scene_source",
-                "scene_moment_type", "moment_signature", "visual_focus", "reference_pack_type", "prompt_mode", "face_similarity", "scene_logic_score", "artifact_flags",
+                "date", "city", "day_type", "outfit_ids", "outfit_summary", "style_intensity", "outfit_style", "outfit_override_used",
+                "scenes", "post_caption", "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus",
+                "reference_pack_type", "prompt_mode", "face_similarity", "scene_logic_score", "artifact_flags",
+            ],
+            "outfit_memory": [
+                "date", "outfit_id", "item_ids", "city", "day_type", "weather", "occasion", "used_in_content", "repeat_score",
+                "outfit_summary", "top", "bottom", "outerwear", "shoes", "accessories", "fit", "fabric", "condition", "styling",
+                "place", "activity", "time_of_day", "social_presence", "energy", "habit", "style_intensity", "outfit_style",
+                "enhance_attractiveness", "outfit_override_used", "style_profile", "notes",
             ],
             "content_moment_memory": [
                 "date", "city", "day_type", "scene_moment", "scene_moment_type", "moment_signature", "visual_focus",
@@ -769,7 +787,12 @@ class GoogleSheetsStateStore:
         return self._safe_records("outfit_memory")
 
     def append_outfit_memory(self, row: Dict[str, Any]) -> None:
-        headers = ["date", "outfit_id", "item_ids", "city", "day_type", "weather", "occasion", "used_in_content", "repeat_score", "notes"]
+        headers = [
+            "date", "outfit_id", "item_ids", "city", "day_type", "weather", "occasion", "used_in_content", "repeat_score",
+            "outfit_summary", "top", "bottom", "outerwear", "shoes", "accessories", "fit", "fabric", "condition", "styling",
+            "place", "activity", "time_of_day", "social_presence", "energy", "habit", "style_intensity", "outfit_style",
+            "enhance_attractiveness", "outfit_override_used", "style_profile", "notes",
+        ]
         self._ensure_headers("outfit_memory", headers)
         self._append_dict_row("outfit_memory", headers, row)
 
@@ -1019,7 +1042,7 @@ class GoogleSheetsStateStore:
             visual_focus = getattr(last_scene, "visual_focus", "")
 
         headers = [
-            "date", "city", "day_type", "outfit_ids", "scenes", "post_caption",
+            "date", "city", "day_type", "outfit_ids", "outfit_summary", "style_intensity", "outfit_style", "outfit_override_used", "scenes", "post_caption",
             "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus",
         ]
         self._ensure_headers("content_history", headers)
@@ -1031,6 +1054,10 @@ class GoogleSheetsStateStore:
                 "city": package.city,
                 "day_type": package.day_type,
                 "outfit_ids": ", ".join(package.outfit.item_ids),
+                "outfit_summary": package.outfit.prompt_sentence(),
+                "style_intensity": package.outfit.style_intensity,
+                "outfit_style": package.outfit.outfit_style,
+                "outfit_override_used": package.outfit.outfit_override_used,
                 "scenes": " | ".join(s.description for s in package.scenes),
                 "post_caption": caption,
                 "scene_moment": scene_moment,

@@ -440,6 +440,12 @@ class DayScene:
     mood: str
     time_of_day: str
     activity: str = ""
+    social_presence: str = ""
+    style_intensity: float | str | None = None
+    outfit_style: str = ""
+    enhance_attractiveness: float | str | None = None
+    outfit_override: str = ""
+    weather_hint: str = ""
     source: str = "library"
     scene_moment: str = ""
     scene_moment_type: str = ""
@@ -459,6 +465,57 @@ class DayScene:
 class OutfitSelection:
     item_ids: List[str]
     summary: str
+    top: str = ""
+    bottom: str = ""
+    outerwear: str = ""
+    shoes: str = ""
+    accessories: str = ""
+    fit: str = ""
+    fabric: str = ""
+    condition: str = ""
+    styling: str = ""
+    sentence: str = ""
+    place: str = ""
+    activity: str = ""
+    time_of_day: str = ""
+    weather_context: str = ""
+    social_presence: str = ""
+    energy: str = ""
+    habit: str = ""
+    style_intensity: float = 0.0
+    outfit_style: str = ""
+    enhance_attractiveness: float = 0.0
+    outfit_override_used: str = ""
+    style_profile: List[str] = field(default_factory=list)
+
+    def prompt_sentence(self) -> str:
+        return self.sentence or self.summary
+
+    def structured_payload(self) -> dict:
+        return {
+            "top": self.top,
+            "bottom": self.bottom,
+            "outerwear": self.outerwear,
+            "shoes": self.shoes,
+            "accessories": self.accessories,
+            "fit": self.fit,
+            "fabric": self.fabric,
+            "condition": self.condition,
+            "styling": self.styling,
+            "sentence": self.prompt_sentence(),
+            "place": self.place,
+            "activity": self.activity,
+            "time_of_day": self.time_of_day,
+            "weather_context": self.weather_context,
+            "social_presence": self.social_presence,
+            "energy": self.energy,
+            "habit": self.habit,
+            "style_intensity": self.style_intensity,
+            "outfit_style": self.outfit_style,
+            "enhance_attractiveness": self.enhance_attractiveness,
+            "outfit_override_used": self.outfit_override_used,
+            "style_profile": list(self.style_profile),
+        }
 
 
 @dataclass

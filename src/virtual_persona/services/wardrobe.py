@@ -128,7 +128,16 @@ class OutfitBuilderEngine:
                 f"outfit_selection date={today.isoformat()} mode={mode} strict={len(strict)} soft={len(soft)} tolerant={len(tolerant)} ids={ids}",
             )
 
-        return OutfitSelection(item_ids=ids, summary=summary)
+        return OutfitSelection(
+            item_ids=ids,
+            summary=summary,
+            top=(selected.get("dress") or selected.get("top")).name if selected.get("dress") or selected.get("top") else "",
+            bottom=selected["bottom"].name if "bottom" in selected and "dress" not in selected else "",
+            outerwear=selected["outerwear"].name if "outerwear" in selected else "",
+            shoes=selected["shoes"].name if "shoes" in selected else "",
+            accessories=selected["accessory"].name if "accessory" in selected else "",
+            sentence=summary,
+        )
 
     def _eligible_items(
         self,

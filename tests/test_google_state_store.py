@@ -13,7 +13,15 @@ class FakeWS:
     def clear(self):
         self.cleared = True
 
-    def update(self, values):
+    def update(self, *args, **kwargs):
+        if "values" in kwargs:
+            values = kwargs["values"]
+        elif args and isinstance(args[0], list):
+            values = args[0]
+        elif len(args) >= 2:
+            values = args[1]
+        else:
+            values = []
         self.updated = values
 
     def append_row(self, row):
@@ -42,6 +50,7 @@ class HelperGoogleStore(GoogleSheetsStateStore):
             "life_state": FakeWS(),
             "daily_calendar": FakeWS(),
             "content_history": FakeWS(),
+            "outfit_memory": FakeWS(),
             "behavior_memory": FakeWS(),
             "habit_memory": FakeWS(),
             "place_memory": FakeWS(),
@@ -381,7 +390,7 @@ def test_google_store_history_uses_selected_publication_moment():
     store = HelperGoogleStore()
     ws = store._ws_map["content_history"]
     ws.header = [
-        "date", "city", "day_type", "outfit_ids", "scenes", "post_caption",
+        "date", "city", "day_type", "outfit_ids", "outfit_summary", "style_intensity", "outfit_style", "outfit_override_used", "scenes", "post_caption",
         "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus",
     ]
 
@@ -422,9 +431,9 @@ def test_google_store_history_uses_selected_publication_moment():
     store.append_history(package)
 
     values = ws.rows[0]
-    assert values[5] == "Selected caption"
-    assert values[6] == "selected moment"
-    assert values[7] == "selected source"
-    assert values[8] == "selected type"
-    assert values[9] == "selected-signature"
-    assert values[10] == "selected focus"
+    assert values[ws.header.index("post_caption")] == "Selected caption"
+    assert values[ws.header.index("scene_moment")] == "selected moment"
+    assert values[ws.header.index("scene_source")] == "selected source"
+    assert values[ws.header.index("scene_moment_type")] == "selected type"
+    assert values[ws.header.index("moment_signature")] == "selected-signature"
+    assert values[ws.header.index("visual_focus")] == "selected focus"

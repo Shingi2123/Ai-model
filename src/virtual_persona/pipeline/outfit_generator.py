@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, List
 
 
@@ -10,6 +11,37 @@ class OutfitGenerationError(ValueError):
 
 class ManualOutfitValidationError(OutfitGenerationError):
     pass
+
+
+@dataclass
+class OutfitBundle:
+    top: str = ""
+    bottom: str = ""
+    outerwear: str = ""
+    shoes: str = ""
+    accessories: str = ""
+    fit: str = ""
+    fabric: str = ""
+    condition: str = ""
+    styling: str = ""
+    sentence: str = ""
+    style_profile: List[str] | None = None
+    place: str = ""
+    activity: str = ""
+    time_of_day: str = ""
+    weather_context: str = ""
+    social_presence: str = ""
+    energy: str = ""
+    habit: str = ""
+    style_intensity: float = 0.0
+    outfit_style: str = ""
+    enhance_attractiveness: float = 0.0
+    outfit_override_used: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        payload = asdict(self)
+        payload["style_profile"] = list(self.style_profile or [])
+        return payload
 
 
 class OutfitGenerator:
@@ -41,19 +73,43 @@ class OutfitGenerator:
         "explicit",
         "porn",
     }
+    OVERRIDE_HINTS = {
+        "more_feminine": {"min_enhance": 0.55},
+        "slightly_sexy": {"min_enhance": 0.68},
+        "intimate_home": {"min_enhance": 0.86, "style_hint": "intimate_soft"},
+        "tight_silhouette": {"min_enhance": 0.62, "fit_hint": "tight_silhouette"},
+        "open_shoulders": {"min_enhance": 0.72, "top_hint": "open_shoulders"},
+    }
+    NEGATIVE_OUTFIT_RULES = (
+        "fashion catalog outfit",
+        "perfect styling",
+        "overly trendy outfit",
+        "runway fashion",
+        "influencer outfit",
+        "studio fashion look",
+        "over coordinated clothing",
+        "impractical clothing for context",
+    )
 
     def generate(self, *, outfit_summary: str, scene: Any, context: Dict[str, Any]) -> str:
-        manual_outfit = self._resolve_manual_override(scene, context)
-        if manual_outfit:
-            return self.validate_manual_outfit(manual_outfit)
+        return self.generate_bundle(outfit_summary=outfit_summary, scene=scene, context=context).sentence
 
-        descriptor = self._build_descriptor(scene, context, outfit_summary)
-        generated = self._compose_contextual_outfit(descriptor)
+    def generate_bundle(self, *, outfit_summary: str, scene: Any, context: Dict[str, Any]) -> OutfitBundle:
+        manual_outfit = self._resolve_manual_override(scene, context)
+        override_hint = self._override_hint_key(manual_outfit)
+        descriptor = self._build_descriptor(scene, context, outfit_summary, override_hint=override_hint)
+
+        if manual_outfit and not override_hint:
+            validated = self.validate_manual_outfit(manual_outfit)
+            bundle = self._bundle_from_manual_override(validated, descriptor)
+            return self._validate_bundle(bundle, descriptor)
+
         try:
-            return self._validate_generated_outfit(generated, descriptor)
+            bundle = self._compose_contextual_bundle(descriptor)
+            return self._validate_bundle(bundle, descriptor)
         except OutfitGenerationError:
-            fallback = self._fallback_outfit(descriptor)
-            return self._validate_generated_outfit(fallback, descriptor)
+            fallback = self._fallback_bundle(descriptor)
+            return self._validate_bundle(fallback, descriptor)
 
     def validate_manual_outfit(self, manual_outfit: str) -> str:
         cleaned = self._clean_text(manual_outfit)
@@ -67,9 +123,18 @@ class OutfitGenerator:
             raise ManualOutfitValidationError("Manual outfit override must contain English text")
         return cleaned
 
-    def _build_descriptor(self, scene: Any, context: Dict[str, Any], outfit_summary: str) -> Dict[str, Any]:
+    def _build_descriptor(
+        self,
+        scene: Any,
+        context: Dict[str, Any],
+        outfit_summary: str,
+        *,
+        override_hint: str = "",
+    ) -> Dict[str, Any]:
         weather = context.get("weather")
         behavior = context.get("behavioral_context")
+        profile = context.get("character_profile") or {}
+
         place_text = self._clean_text(
             getattr(scene, "location", "")
             or context.get("place")
@@ -89,13 +154,40 @@ class OutfitGenerator:
                 self._clean_text(getattr(scene, "scene_moment", "")).lower(),
                 self._clean_text(getattr(scene, "description", "")).lower(),
             ]
+        ).strip()
+        time_of_day = self._clean_text(getattr(scene, "time_of_day", "") or context.get("time_of_day") or "").lower() or "day"
+        social_presence = self._normalize_social_presence(
+            self._first_value(
+                getattr(scene, "social_presence", ""),
+                context.get("social_presence"),
+                getattr(behavior, "social_mode", ""),
+                getattr(getattr(behavior, "daily_state", None), "social_presence_mode", ""),
+            )
         )
-        style_intensity = self._normalize_style_intensity(
+        energy = self._normalize_energy(
+            self._first_value(
+                context.get("energy"),
+                getattr(behavior, "energy_level", ""),
+                getattr(getattr(behavior, "daily_state", None), "energy_level", ""),
+                getattr(context.get("life_state"), "energy_state", ""),
+            )
+        )
+        habit = self._clean_text(
+            self._first_value(
+                context.get("habit"),
+                getattr(behavior, "habit", ""),
+                getattr(behavior, "selected_habit", ""),
+            )
+        ).lower() or "none"
+        objects = list(getattr(behavior, "objects", getattr(behavior, "recurring_objects", [])) or [])
+        style_intensity = self._normalize_scalar(
             self._first_value(
                 getattr(scene, "style_intensity", ""),
                 context.get("style_intensity"),
                 context.get("outfit_style_intensity"),
-            )
+                profile.get("default_style_intensity"),
+            ),
+            default=0.25,
         )
         style_hint = self._normalize_style_hint(
             self._first_value(
@@ -104,153 +196,230 @@ class OutfitGenerator:
                 context.get("outfit_style"),
                 context.get("style_hint"),
                 context.get("manual_style"),
+                profile.get("default_outfit_style"),
             )
         )
-        appeal_boost = bool(
+        enhance_attractiveness = self._normalize_scalar(
             self._first_value(
-                getattr(scene, "enhance_attractiveness", False),
-                getattr(scene, "attractiveness_boost", False),
-                context.get("enhance_attractiveness", False),
-                context.get("attractiveness_boost", False),
-            )
+                getattr(scene, "enhance_attractiveness", ""),
+                getattr(scene, "attractiveness_boost", ""),
+                context.get("enhance_attractiveness"),
+                context.get("attractiveness_boost"),
+            ),
+            default=0.0,
         )
+
+        override_cfg = self.OVERRIDE_HINTS.get(override_hint, {})
+        style_hint = str(override_cfg.get("style_hint") or style_hint or "")
+        enhance_attractiveness = max(enhance_attractiveness, float(override_cfg.get("min_enhance") or 0.0))
         temp_c = getattr(weather, "temp_c", 18)
+        if not isinstance(temp_c, (int, float)):
+            temp_c = 18
         condition = self._clean_text(getattr(weather, "condition", "")).lower() or "clear"
-        time_of_day = self._clean_text(getattr(scene, "time_of_day", "") or context.get("time_of_day") or "").lower()
-        social_presence = self._clean_text(
-            context.get("social_presence")
-            or getattr(behavior, "social_mode", "")
-            or getattr(getattr(behavior, "daily_state", None), "social_presence_mode", "")
-        ).lower()
-        objects = list(getattr(behavior, "objects", getattr(behavior, "recurring_objects", [])) or [])
+        place_type = self._place_type(scene_text)
+        if place_type not in {"home", "hotel"} and enhance_attractiveness > 0.8:
+            enhance_attractiveness = 0.78
 
         return {
             "scene": scene,
             "context": context,
             "source_items": self._parse_source_items(outfit_summary),
-            "city": self._clean_text(context.get("city", "")),
-            "day_type": self._clean_text(context.get("day_type", "")).lower(),
-            "place_text": place_text,
-            "place_type": self._place_type(scene_text),
-            "activity_text": activity_text,
+            "recent_outfit_memory": list(context.get("recent_outfit_memory") or [])[-20:],
+            "place": place_text,
+            "place_type": place_type,
+            "activity": activity_text,
             "time_of_day": time_of_day,
             "weather_condition": condition,
-            "temp_c": temp_c if isinstance(temp_c, (int, float)) else 18,
-            "is_cold": float(temp_c if isinstance(temp_c, (int, float)) else 18) <= 10,
-            "is_cool": float(temp_c if isinstance(temp_c, (int, float)) else 18) <= 18,
-            "is_warm": float(temp_c if isinstance(temp_c, (int, float)) else 18) >= 24,
+            "weather_context": f"{condition}, {temp_c}C",
+            "temp_c": float(temp_c),
+            "is_cold": float(temp_c) <= 10,
+            "is_cool": float(temp_c) <= 18,
+            "is_warm": float(temp_c) >= 24,
             "is_evening": time_of_day in {"evening", "night"},
             "is_morning": "morning" in time_of_day,
             "is_rainy": condition in {"rain", "drizzle", "snow"},
-            "style_intensity": style_intensity,
+            "style_intensity": max(0.0, min(style_intensity, 1.0)),
             "style_hint": style_hint,
-            "appeal_boost": appeal_boost,
+            "enhance_attractiveness": max(0.0, min(enhance_attractiveness, 1.0)),
             "mood": self._clean_text(getattr(scene, "mood", "") or context.get("mood") or "").lower(),
+            "social_presence": social_presence,
+            "energy": energy,
+            "habit": habit,
             "behavior_mode": self._clean_text(
                 getattr(behavior, "self_presentation", "")
                 or getattr(behavior, "outfit_behavior_mode", "")
                 or getattr(getattr(behavior, "daily_state", None), "self_presentation_mode", "")
             ).lower(),
-            "social_presence": social_presence,
             "objects": [self._natural_object_term(obj) for obj in objects if self._natural_object_term(obj)],
+            "style_profile": self._style_profile(context),
+            "override_hint": override_hint,
+            "override_fit_hint": str(override_cfg.get("fit_hint") or ""),
+            "override_top_hint": str(override_cfg.get("top_hint") or ""),
+            "outfit_override_used": "",
+            "outfit_style": style_hint,
         }
 
-    def _compose_contextual_outfit(self, descriptor: Dict[str, Any]) -> str:
+    def _compose_contextual_bundle(self, descriptor: Dict[str, Any]) -> OutfitBundle:
         source_map = self._source_map(descriptor["source_items"])
+        memory_map = self._memory_map(descriptor["recent_outfit_memory"], descriptor["place_type"])
         use_dress = self._should_use_dress(descriptor, source_map)
 
         if use_dress:
-            fragments = [
-                self._choose_dress(descriptor, source_map),
-                self._choose_layer(descriptor, source_map),
-                self._choose_shoes(descriptor, source_map),
-                self._choose_accessory(descriptor),
-            ]
-            if descriptor["style_intensity"] == "bold":
-                fragments.append("soft fabric following natural body lines without looking overstyled")
-            else:
-                fragments.append("natural fabric drape with a few soft wrinkles from real movement")
+            top = self._choose_dress(descriptor, source_map, memory_map)
+            bottom = ""
         else:
-            fragments = [
-                self._choose_top(descriptor, source_map),
-                self._choose_layer(descriptor, source_map),
-                self._choose_bottom(descriptor, source_map),
-                self._choose_shoes(descriptor, source_map),
-                self._choose_accessory(descriptor),
-            ]
-        fragments = [fragment for fragment in fragments if fragment]
-        return self._join_fragments(fragments)
+            top = self._choose_top(descriptor, source_map, memory_map)
+            bottom = self._choose_bottom(descriptor, source_map, memory_map)
 
-    def _fallback_outfit(self, descriptor: Dict[str, Any]) -> str:
-        place_type = descriptor["place_type"]
-        if place_type == "airport":
-            return self._join_fragments(
-                [
-                    "neutral travel outfit with a soft knit top",
-                    "light jacket worn open with natural sleeve creases",
-                    "straight trousers with easy fabric folds",
-                    "comfortable sneakers",
-                    "minimal crossbody bag and compact carry on kept close",
-                ]
-            )
-        if place_type == "cafe":
-            return self._join_fragments(
-                [
-                    "relaxed casual outfit with a soft cotton top",
-                    "light cardigan with slight wrinkles at the elbows",
-                    "straight jeans with natural creasing from sitting",
-                    "clean low sneakers",
-                    "small shoulder bag kept near the table",
-                ]
-            )
-        if place_type == "hotel":
-            return self._join_fragments(
-                [
-                    "soft indoor outfit with a ribbed top",
-                    "light cardigan sitting loosely on the shoulders",
-                    "easy lounge trousers with gentle rumpling",
-                    "flat slides near the bed",
-                    "small overnight bag nearby",
-                ]
-            )
-        if place_type == "street":
-            return self._join_fragments(
-                [
-                    "urban casual outfit with a light knit top",
-                    "easy jacket with subtle wear at the cuffs",
-                    "straight denim with natural movement in the fabric",
-                    "walkable sneakers",
-                    "crossbody bag resting close to the body",
-                ]
-            )
-        return self._join_fragments(
-            [
-                "everyday outfit with a soft knit top",
-                "light outer layer with slight creases",
-                "straight trousers with natural fabric folds",
-                "simple sneakers",
-                "minimal bag kept nearby",
-            ]
+        outerwear = self._choose_outerwear(descriptor, source_map, memory_map)
+        shoes = self._choose_shoes(descriptor, source_map, memory_map)
+        accessories = self._choose_accessories(descriptor, memory_map)
+        fit = self._choose_fit(descriptor)
+        fabric = self._choose_fabric(descriptor)
+        condition = self._choose_condition(descriptor)
+        styling = self._choose_styling(descriptor)
+        sentence = self._sentence_from_structure(
+            top=top,
+            bottom=bottom,
+            outerwear=outerwear,
+            shoes=shoes,
+            accessories=accessories,
+            fit=fit,
+            fabric=fabric,
+            condition=condition,
+            styling=styling,
         )
 
-    def _validate_generated_outfit(self, outfit: str, descriptor: Dict[str, Any]) -> str:
-        cleaned = self._clean_text(outfit)
-        if self._is_invalid_value(cleaned):
-            raise OutfitGenerationError("Generated outfit is empty")
-        if self.CYRILLIC_RE.search(cleaned):
-            raise OutfitGenerationError("Generated outfit contains Cyrillic")
-        if "." in cleaned:
-            raise OutfitGenerationError("Generated outfit must not contain periods")
+        return OutfitBundle(
+            top=top,
+            bottom=bottom,
+            outerwear=outerwear,
+            shoes=shoes,
+            accessories=accessories,
+            fit=fit,
+            fabric=fabric,
+            condition=condition,
+            styling=styling,
+            sentence=sentence,
+            style_profile=list(descriptor["style_profile"]),
+            place=str(descriptor["place"]),
+            activity=str(descriptor["activity"]),
+            time_of_day=str(descriptor["time_of_day"]),
+            weather_context=str(descriptor["weather_context"]),
+            social_presence=str(descriptor["social_presence"]),
+            energy=str(descriptor["energy"]),
+            habit=str(descriptor["habit"]),
+            style_intensity=float(descriptor["style_intensity"]),
+            outfit_style=str(descriptor["outfit_style"]),
+            enhance_attractiveness=float(descriptor["enhance_attractiveness"]),
+            outfit_override_used="",
+        )
 
-        parts = [self._clean_text(part) for part in cleaned.split(",") if self._clean_text(part)]
-        if len(parts) < 4:
-            raise OutfitGenerationError("Generated outfit must contain at least four contextual elements")
-        if not re.search(r"[A-Za-z]", cleaned):
-            raise OutfitGenerationError("Generated outfit must contain English text")
-        lowered = cleaned.lower()
+    def _fallback_bundle(self, descriptor: Dict[str, Any]) -> OutfitBundle:
+        top = "soft fitted knit dress" if self._should_use_dress(descriptor, {}) else "soft knit top"
+        bottom = "" if "dress" in top else ("relaxed straight trousers" if descriptor["place_type"] == "airport" else "straight trousers")
+        outerwear = ""
+        if descriptor["place_type"] == "airport" or descriptor["is_cold"] or descriptor["is_rainy"]:
+            outerwear = "light neutral coat" if descriptor["place_type"] == "airport" else "soft light jacket"
+        shoes = "comfortable sneakers" if descriptor["place_type"] != "hotel" else "flat slides"
+        accessories = self._choose_accessories(descriptor, {})
+        fit = self._choose_fit(descriptor)
+        fabric = self._choose_fabric(descriptor)
+        condition = self._choose_condition(descriptor)
+        styling = self._choose_styling(descriptor)
+        return OutfitBundle(
+            top=top,
+            bottom=bottom,
+            outerwear=outerwear,
+            shoes=shoes,
+            accessories=accessories,
+            fit=fit,
+            fabric=fabric,
+            condition=condition,
+            styling=styling,
+            sentence=self._sentence_from_structure(
+                top=top,
+                bottom=bottom,
+                outerwear=outerwear,
+                shoes=shoes,
+                accessories=accessories,
+                fit=fit,
+                fabric=fabric,
+                condition=condition,
+                styling=styling,
+            ),
+            style_profile=list(descriptor["style_profile"]),
+            place=str(descriptor["place"]),
+            activity=str(descriptor["activity"]),
+            time_of_day=str(descriptor["time_of_day"]),
+            weather_context=str(descriptor["weather_context"]),
+            social_presence=str(descriptor["social_presence"]),
+            energy=str(descriptor["energy"]),
+            habit=str(descriptor["habit"]),
+            style_intensity=float(descriptor["style_intensity"]),
+            outfit_style=str(descriptor["outfit_style"]),
+            enhance_attractiveness=float(descriptor["enhance_attractiveness"]),
+            outfit_override_used="",
+        )
+
+    def _bundle_from_manual_override(self, manual_outfit: str, descriptor: Dict[str, Any]) -> OutfitBundle:
+        mapped = {"top": "", "bottom": "", "outerwear": "", "shoes": "", "accessories": ""}
+        for item in self._parse_source_items(manual_outfit):
+            category = self._outfit_category(item)
+            if category == "dress":
+                mapped["top"] = mapped["top"] or item
+                continue
+            if category == "accessories":
+                mapped["accessories"] = mapped["accessories"] or item
+            elif category == "outerwear":
+                mapped["outerwear"] = mapped["outerwear"] or item
+            elif category in mapped:
+                mapped[category] = mapped[category] or item
+
+        return OutfitBundle(
+            top=mapped["top"],
+            bottom=mapped["bottom"],
+            outerwear=mapped["outerwear"],
+            shoes=mapped["shoes"],
+            accessories=mapped["accessories"],
+            sentence=manual_outfit,
+            style_profile=list(descriptor["style_profile"]),
+            place=str(descriptor["place"]),
+            activity=str(descriptor["activity"]),
+            time_of_day=str(descriptor["time_of_day"]),
+            weather_context=str(descriptor["weather_context"]),
+            social_presence=str(descriptor["social_presence"]),
+            energy=str(descriptor["energy"]),
+            habit=str(descriptor["habit"]),
+            style_intensity=float(descriptor["style_intensity"]),
+            outfit_style=str(descriptor["outfit_style"]),
+            enhance_attractiveness=float(descriptor["enhance_attractiveness"]),
+            outfit_override_used=manual_outfit,
+        )
+
+    def _validate_bundle(self, bundle: OutfitBundle, descriptor: Dict[str, Any]) -> OutfitBundle:
+        sentence = self._clean_text(bundle.sentence)
+        if self._is_invalid_value(sentence):
+            raise OutfitGenerationError("Generated outfit is empty")
+        if self.CYRILLIC_RE.search(sentence):
+            raise OutfitGenerationError("Generated outfit contains Cyrillic")
+        if "." in sentence:
+            raise OutfitGenerationError("Generated outfit must not contain periods")
+        lowered = sentence.lower()
         if any(token in lowered for token in self.EXPLICIT_TOKENS):
             raise OutfitGenerationError("Generated outfit became too explicit")
-        if descriptor["place_type"] == "airport" and not any(token in lowered for token in ["bag", "carry on", "sneakers", "jacket", "coat", "layer"]):
+        if any(rule in lowered for rule in self.NEGATIVE_OUTFIT_RULES):
+            raise OutfitGenerationError("Generated outfit leaked negative-rule phrasing")
+
+        clothing_present = [bundle.top, bundle.bottom, bundle.outerwear, bundle.shoes, bundle.accessories]
+        if len([item for item in clothing_present if self._clean_text(item)]) < 3:
+            raise OutfitGenerationError("Generated outfit must contain enough contextual elements")
+        if not bundle.shoes:
+            raise OutfitGenerationError("Generated outfit must include shoes")
+        if not (bundle.top and bundle.bottom) and "dress" not in bundle.top.lower():
+            raise OutfitGenerationError("Generated outfit must include a top and bottom or a dress")
+
+        if descriptor["place_type"] == "airport" and not any(token in lowered for token in ["bag", "carry on", "sneakers", "coat", "jacket", "travel"]):
             raise OutfitGenerationError("Airport outfit is missing travel-ready context")
         if descriptor["place_type"] == "hotel" and any(token in lowered for token in ["boarding pass", "runway", "gate seating"]):
             raise OutfitGenerationError("Hotel outfit conflicts with the scene")
@@ -260,159 +429,171 @@ class OutfitGenerator:
             raise OutfitGenerationError("Cold-weather outfit is missing layering")
         if "carry on" in descriptor["objects"] and "carry on" not in lowered and descriptor["place_type"] == "airport":
             raise OutfitGenerationError("Outfit is not aligned with airport objects")
-        return cleaned
 
-    def _choose_top(self, descriptor: Dict[str, Any], source_map: Dict[str, str]) -> str:
-        hinted = source_map.get("top")
+        bundle.sentence = sentence
+        return bundle
+
+    def _choose_top(self, descriptor: Dict[str, Any], source_map: Dict[str, str], memory_map: Dict[str, str]) -> str:
+        hinted = source_map.get("top") or memory_map.get("top")
         if hinted:
             return self._enrich_source_piece(hinted, "top", descriptor)
+        place_type = descriptor["place_type"]
+        enhance = descriptor["enhance_attractiveness"]
+        style_intensity = descriptor["style_intensity"]
         style_hint = descriptor["style_hint"]
-        intensity = descriptor["style_intensity"]
+        if descriptor["override_top_hint"] == "open_shoulders" and place_type in {"home", "hotel", "cafe"}:
+            return "soft knit top slipping slightly off the shoulders"
         if style_hint == "sporty":
             return "clean performance zip top with a relaxed real-life fit"
-        if descriptor["place_type"] == "work":
+        if place_type == "airport":
+            return "soft fitted knit top"
+        if place_type == "work":
             return "clean knit top with a neat natural fit"
-        if intensity == "bold" and (descriptor["is_warm"] or descriptor["place_type"] in {"hotel", "cafe"}):
-            return "soft fitted knit top with an open neckline and slight creasing at the waist"
-        if style_hint == "elegant":
-            return "light blouse with a soft drape and a few natural folds"
-        if style_hint == "intimate_soft":
-            return "soft ribbed top sitting close to the body with gentle rumpling"
+        if style_hint == "intimate_soft" or (enhance >= 0.8 and place_type in {"home", "hotel"}):
+            return "soft ribbed top sitting close to the body"
+        if (enhance >= 0.6 or style_intensity >= 0.65 or style_hint == "bold_minimal") and place_type in {"cafe", "street", "hotel"}:
+            return "soft fitted knit top with an open neckline"
         if descriptor["is_warm"]:
-            return "light cotton top with an easy fit and a little fabric movement"
-        if descriptor["is_morning"]:
-            return "soft knit top with a relaxed fit and slight sleeve wrinkles"
-        return "soft knit top with a natural fit and subtle fabric folds"
+            return "light cotton top with an easy fit"
+        return "soft knit top with a natural fit"
 
-    def _choose_bottom(self, descriptor: Dict[str, Any], source_map: Dict[str, str]) -> str:
-        hinted = source_map.get("bottom")
+    def _choose_bottom(self, descriptor: Dict[str, Any], source_map: Dict[str, str], memory_map: Dict[str, str]) -> str:
+        hinted = source_map.get("bottom") or memory_map.get("bottom")
         if hinted:
             return self._enrich_source_piece(hinted, "bottom", descriptor)
+        place_type = descriptor["place_type"]
+        enhance = descriptor["enhance_attractiveness"]
         style_hint = descriptor["style_hint"]
         if style_hint == "sporty":
             return "tapered joggers with natural bunching at the ankles"
-        if descriptor["place_type"] == "work":
-            return "tailored trousers with soft creases from sitting and moving"
-        if descriptor["style_intensity"] == "bold" and descriptor["is_warm"] and style_hint in {"bold_minimal", "elegant", ""}:
-            return "high waisted straight trousers following the silhouette in a natural way"
+        if place_type == "airport":
+            return "relaxed straight trousers"
+        if place_type == "work":
+            return "tailored trousers with soft creases from sitting"
         if style_hint == "intimate_soft":
             return "easy lounge trousers with gentle wrinkles through the legs"
+        if (enhance >= 0.6 or descriptor["style_intensity"] >= 0.65 or style_hint == "bold_minimal") and descriptor["is_warm"] and place_type in {"cafe", "street", "hotel"}:
+            return "high waisted straight trousers"
         if descriptor["is_warm"]:
-            return "light straight trousers with natural fabric folds"
-        return "straight jeans with natural creasing through the knees"
+            return "light straight trousers"
+        return "straight trousers"
 
-    def _choose_layer(self, descriptor: Dict[str, Any], source_map: Dict[str, str]) -> str:
-        hinted = source_map.get("layer")
+    def _choose_outerwear(self, descriptor: Dict[str, Any], source_map: Dict[str, str], memory_map: Dict[str, str]) -> str:
+        hinted = source_map.get("outerwear") or memory_map.get("outerwear")
         if hinted:
-            return self._enrich_source_piece(hinted, "layer", descriptor)
+            return self._enrich_source_piece(hinted, "outerwear", descriptor)
         if not self._needs_layer(descriptor):
             return ""
-        style_hint = descriptor["style_hint"]
         place_type = descriptor["place_type"]
+        style_hint = descriptor["style_hint"]
         if descriptor["is_rainy"]:
-            return "light weatherproof jacket with lived-in sleeve creases"
+            return "light weatherproof jacket"
         if place_type == "airport":
-            return "light jacket worn open with slight wrinkles at the elbows"
+            return "light neutral coat"
         if place_type == "work":
-            return "easy blazer sitting naturally rather than perfectly pressed"
+            return "easy blazer sitting naturally"
         if style_hint == "intimate_soft":
             return "light cardigan slipping loosely over the shoulders"
-        if descriptor["style_intensity"] == "bold" and descriptor["is_warm"]:
-            return "thin layer left open for shape and movement"
         if descriptor["is_cold"]:
             return "soft cardigan with natural bunching at the sleeves"
-        return "light layer worn casually with a few natural folds"
+        return "light layer worn casually"
 
-    def _choose_dress(self, descriptor: Dict[str, Any], source_map: Dict[str, str]) -> str:
-        hinted = source_map.get("dress")
+    def _choose_dress(self, descriptor: Dict[str, Any], source_map: Dict[str, str], memory_map: Dict[str, str]) -> str:
+        hinted = source_map.get("dress") or memory_map.get("dress")
         if hinted:
             return self._enrich_source_piece(hinted, "dress", descriptor)
-        style_hint = descriptor["style_hint"]
-        if descriptor["style_intensity"] == "bold":
-            return "soft fitted knit dress with a gentle drape and slight rumpling where the fabric settles"
-        if style_hint == "elegant":
-            return "simple midi dress with a clean line and natural fabric movement"
-        return "soft knit dress with a relaxed fall and lived-in wrinkles"
+        enhance = descriptor["enhance_attractiveness"]
+        if enhance >= 0.8:
+            return "soft fitted knit dress with a gentle drape"
+        if enhance >= 0.6:
+            return "simple midi dress with an open neckline"
+        return "soft knit dress with a relaxed fall"
 
-    def _choose_shoes(self, descriptor: Dict[str, Any], source_map: Dict[str, str]) -> str:
-        hinted = source_map.get("shoes")
+    def _choose_shoes(self, descriptor: Dict[str, Any], source_map: Dict[str, str], memory_map: Dict[str, str]) -> str:
+        hinted = source_map.get("shoes") or memory_map.get("shoes")
         if hinted:
             return self._enrich_source_piece(hinted, "shoes", descriptor)
         place_type = descriptor["place_type"]
         style_hint = descriptor["style_hint"]
-        if place_type == "hotel":
+        if place_type == "hotel" and descriptor["enhance_attractiveness"] >= 0.8:
             return "flat slides"
         if style_hint == "sporty":
             return "clean trainers"
         if descriptor["is_rainy"] or descriptor["is_cold"]:
             return "comfortable ankle boots"
-        if descriptor["style_intensity"] == "bold" and descriptor["is_warm"]:
+        if descriptor["enhance_attractiveness"] >= 0.65 and descriptor["is_warm"] and place_type in {"home", "hotel"}:
             return "minimal sandals"
-        if place_type == "work" or style_hint == "elegant":
+        if place_type == "work":
             return "sleek loafers"
         return "comfortable sneakers"
 
-    def _choose_accessory(self, descriptor: Dict[str, Any]) -> str:
+    def _choose_accessories(self, descriptor: Dict[str, Any], memory_map: Dict[str, str]) -> str:
+        remembered = memory_map.get("accessories")
+        if remembered and descriptor["place_type"] != "airport":
+            return remembered
         objects = descriptor["objects"]
         place_type = descriptor["place_type"]
-        style_hint = descriptor["style_hint"]
+        social_presence = descriptor["social_presence"]
+        enhance = descriptor["enhance_attractiveness"]
         if "carry on" in objects or place_type == "airport":
-            return "crossbody bag and compact carry on kept close"
+            return "small crossbody bag and compact carry on"
         if place_type == "hotel":
+            if enhance >= 0.8:
+                return "small overnight bag set aside naturally"
             return "small overnight bag nearby"
         if "coffee cup" in objects or place_type == "cafe":
-            if descriptor["social_presence"] == "light_public":
-                return "small shoulder bag with sunglasses set aside naturally"
-            return "small shoulder bag kept near the table"
-        if style_hint == "sporty":
-            return "simple cap and crossbody pouch"
-        if descriptor["style_intensity"] == "bold":
-            return "minimal shoulder bag and one understated piece of jewelry"
-        if descriptor["is_evening"]:
-            return "small shoulder bag kept close"
-        return "minimal bag kept nearby"
+            if social_presence == "light_public":
+                return "small everyday bag and coffee cup"
+            return "small shoulder bag and coffee cup"
+        if enhance >= 0.6:
+            return "small everyday bag and one understated piece of jewelry"
+        return "small everyday bag"
 
-    def _enrich_source_piece(self, piece: str, category: str, descriptor: Dict[str, Any]) -> str:
-        cleaned = self._clean_text(piece).lower()
-        if category == "top":
-            if "blouse" in cleaned:
-                return "light blouse with a soft drape and a few natural folds"
-            if any(token in cleaned for token in ["tank", "camisole"]):
-                if descriptor["style_intensity"] == "bold":
-                    return "soft fitted tank with clean lines and slight creasing at the waist"
-                return "soft tank top with a natural fit and light fabric movement"
-            if any(token in cleaned for token in ["shirt", "button"]):
-                return "easy shirt worn naturally with relaxed sleeve creases"
-            return f"{cleaned} with a natural fit and soft fabric folds"
-        if category == "bottom":
-            if "jeans" in cleaned or "denim" in cleaned:
-                return "straight denim with natural creasing through the knees"
-            if "skirt" in cleaned:
-                return "simple skirt with soft movement and a slightly lived-in fall"
-            if any(token in cleaned for token in ["trousers", "pants"]):
-                return "straight trousers with natural fabric folds and a relaxed break at the hem"
-            return f"{cleaned} with natural movement in the fabric"
-        if category == "layer":
-            if any(token in cleaned for token in ["trench", "coat"]):
-                return "light coat worn open with slight creases at the sleeves"
-            if any(token in cleaned for token in ["cardigan", "hoodie"]):
-                return "soft layer worn casually with natural sleeve wrinkles"
-            if any(token in cleaned for token in ["blazer", "jacket"]):
-                return "easy jacket sitting naturally instead of looking too sharp"
-            return f"{cleaned} with a few lived-in creases"
-        if category == "dress":
-            if descriptor["style_intensity"] == "bold":
-                return "soft fitted dress with a gentle drape and slight rumpling where it settles"
-            return f"{cleaned} with natural fabric movement and a few real-life wrinkles"
-        if category == "shoes":
-            if any(token in cleaned for token in ["sneakers", "trainers"]):
-                return "comfortable sneakers"
-            if any(token in cleaned for token in ["boots", "boot"]):
-                return "comfortable ankle boots"
-            if any(token in cleaned for token in ["sandals", "heels", "slides", "loafers", "shoes"]):
-                return cleaned
-            return cleaned
-        return cleaned
+    def _choose_fit(self, descriptor: Dict[str, Any]) -> str:
+        enhance = descriptor["enhance_attractiveness"]
+        energy = descriptor["energy"]
+        fit_hint = descriptor["override_fit_hint"]
+        style_intensity = descriptor["style_intensity"]
+        if fit_hint == "tight_silhouette":
+            return "gently body-skimming silhouette that still feels self-chosen"
+        if enhance >= 0.8:
+            return "soft close fit with natural drape"
+        if enhance >= 0.6 or style_intensity >= 0.65:
+            return "more feminine silhouette with easy movement"
+        if enhance >= 0.35:
+            return "slightly defined silhouette with natural drape"
+        if energy == "low":
+            return "slightly relaxed fit with a lived-in fall"
+        return "slightly relaxed fit with natural drape"
+
+    def _choose_fabric(self, descriptor: Dict[str, Any]) -> str:
+        style_profile = " ".join(descriptor["style_profile"]).lower()
+        enhance = descriptor["enhance_attractiveness"]
+        if enhance >= 0.75:
+            return "soft matte fabric with gentle movement"
+        if "soft" in style_profile:
+            return "soft matte everyday textures"
+        if descriptor["is_warm"]:
+            return "light breathable everyday fabrics"
+        return "soft matte everyday fabrics"
+
+    def _choose_condition(self, descriptor: Dict[str, Any]) -> str:
+        place_type = descriptor["place_type"]
+        if place_type == "airport":
+            return "lightly worn, natural folds from sitting and moving"
+        if descriptor["energy"] == "low":
+            return "slightly rumpled in a believable way"
+        return "lightly worn, natural folds"
+
+    def _choose_styling(self, descriptor: Dict[str, Any]) -> str:
+        enhance = descriptor["enhance_attractiveness"]
+        if enhance >= 0.8:
+            return "effortless and private, softly attractive without looking staged"
+        if enhance >= 0.6:
+            return "effortless, slightly feminine, not styled for attention"
+        if enhance >= 0.35:
+            return "effortless, just a little more put together than usual"
+        return "effortless, slightly imperfect"
 
     def _should_use_dress(self, descriptor: Dict[str, Any], source_map: Dict[str, str]) -> bool:
         if source_map.get("dress"):
@@ -423,9 +604,7 @@ class OutfitGenerator:
             return False
         if descriptor["style_hint"] == "intimate_soft" and descriptor["place_type"] in {"hotel", "home"}:
             return descriptor["temp_c"] >= 16
-        if descriptor["style_hint"] in {"elegant", "bold_minimal"} and not descriptor["is_cold"]:
-            return True
-        return descriptor["style_intensity"] == "bold" and descriptor["place_type"] in {"hotel", "cafe"} and not descriptor["is_cold"]
+        return descriptor["enhance_attractiveness"] >= 0.62 and descriptor["place_type"] in {"hotel", "home", "cafe"} and not descriptor["is_cold"]
 
     def _needs_layer(self, descriptor: Dict[str, Any]) -> bool:
         if descriptor["place_type"] == "airport":
@@ -434,16 +613,66 @@ class OutfitGenerator:
             return True
         if descriptor["place_type"] in {"work", "street"} and descriptor["is_cool"]:
             return True
-        if descriptor["style_hint"] == "intimate_soft" and descriptor["place_type"] == "hotel":
-            return True
         return descriptor["is_evening"] and not descriptor["is_warm"]
+
+    def _sentence_from_structure(
+        self,
+        *,
+        top: str,
+        bottom: str,
+        outerwear: str,
+        shoes: str,
+        accessories: str,
+        fit: str,
+        fabric: str,
+        condition: str,
+        styling: str,
+    ) -> str:
+        clothing = [piece for piece in [top, bottom, outerwear, shoes, accessories] if self._clean_text(piece)]
+        if not clothing:
+            return ""
+        phrased: List[str] = []
+        for index, piece in enumerate(clothing):
+            normalized = self._clean_text(piece)
+            if index == 0 and not normalized.lower().startswith(("a ", "an ")):
+                phrased.append(f"a {normalized}")
+            else:
+                phrased.append(normalized)
+        base = self._human_join(phrased)
+        details = [detail for detail in [fit, fabric, condition, styling] if self._clean_text(detail)]
+        if details:
+            return f"{base}; {', '.join(self._dedupe_phrases(details))}"
+        return base
+
+    def _memory_map(self, recent_memory: List[Dict[str, Any]], place_type: str) -> Dict[str, str]:
+        for row in reversed(recent_memory[-10:]):
+            row_place = self._place_type(
+                " ".join(
+                    [
+                        str(row.get("place") or ""),
+                        str(row.get("occasion") or ""),
+                        str(row.get("notes") or ""),
+                    ]
+                )
+            )
+            if row_place and row_place not in {place_type, "daily"}:
+                continue
+            mapped = {
+                "top": self._clean_text(row.get("top")),
+                "bottom": self._clean_text(row.get("bottom")),
+                "outerwear": self._clean_text(row.get("outerwear")),
+                "dress": self._clean_text(row.get("dress")),
+                "shoes": self._clean_text(row.get("shoes")),
+                "accessories": self._clean_text(row.get("accessories")),
+            }
+            if any(mapped.values()):
+                return {key: value for key, value in mapped.items() if value}
+        return {}
 
     def _source_map(self, source_items: List[str]) -> Dict[str, str]:
         mapped: Dict[str, str] = {}
         for item in source_items:
             category = self._outfit_category(item)
-            if category == "outerwear":
-                category = "layer"
             mapped.setdefault(category, item)
         return mapped
 
@@ -451,15 +680,19 @@ class OutfitGenerator:
         cleaned = self._clean_text(outfit_summary)
         if self._is_invalid_value(cleaned):
             return []
-        parts = re.split(r"\s*(?:,|\+|/|;)\s*", cleaned)
+        items_part = cleaned.split("||")[0].strip()
+        parts = re.split(r"\s*(?:,|\+|/)\s*", items_part)
         normalized: List[str] = []
+        seen: set[str] = set()
         for part in parts:
             candidate = self._clean_text(part)
             if not candidate or self._is_invalid_value(candidate) or self.CYRILLIC_RE.search(candidate):
                 continue
-            key = candidate.lower()
-            if key not in {item.lower() for item in normalized}:
-                normalized.append(candidate)
+            lowered = candidate.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(candidate)
         return normalized
 
     def _resolve_manual_override(self, scene: Any, context: Dict[str, Any]) -> str:
@@ -469,25 +702,86 @@ class OutfitGenerator:
                 getattr(scene, "manual_outfit", ""),
                 context.get("outfit_override"),
                 context.get("manual_outfit"),
-                context.get("outfit"),
                 "",
             )
         )
 
-    def _normalize_style_intensity(self, value: Any) -> str:
-        token = self._clean_text(value).lower()
-        if token in {"expressive", "bold"}:
-            return token
-        return "normal"
+    def _override_hint_key(self, value: str) -> str:
+        key = self._clean_text(value).lower().replace(" ", "_")
+        return key if key in self.OVERRIDE_HINTS else ""
 
     def _normalize_style_hint(self, value: Any) -> str:
         token = self._clean_text(value).lower().replace(" ", "_")
-        allowed = {"casual", "elegant", "sporty", "intimate_soft", "bold_minimal"}
+        allowed = {"casual", "elegant", "sporty", "intimate_soft", "bold_minimal", "travel_soft", "minimal"}
         return token if token in allowed else ""
+
+    def _normalize_scalar(self, value: Any, *, default: float = 0.0) -> float:
+        if isinstance(value, bool):
+            return 0.65 if value else 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        token = self._clean_text(value).lower()
+        mapping = {
+            "none": 0.0,
+            "low": 0.2,
+            "medium": 0.5,
+            "normal": 0.35,
+            "soft": 0.35,
+            "high": 0.8,
+            "bold": 0.72,
+            "expressive": 0.78,
+        }
+        if token in mapping:
+            return mapping[token]
+        try:
+            return float(token)
+        except Exception:
+            return default
+
+    def _normalize_social_presence(self, value: Any) -> str:
+        token = self._clean_text(value).lower().replace(" ", "_")
+        mapping = {
+            "alone_but_in_public": "light_public",
+            "quiet_public": "light_public",
+            "light_public": "light_public",
+            "public": "social",
+            "social_public": "social",
+            "social": "social",
+            "alone": "alone",
+            "private": "alone",
+        }
+        return mapping.get(token, "light_public" if "public" in token else (token or "alone"))
+
+    def _normalize_energy(self, value: Any) -> str:
+        if isinstance(value, (int, float)):
+            if float(value) < 0.35:
+                return "low"
+            if float(value) > 0.68:
+                return "high"
+            return "medium"
+        token = self._clean_text(value).lower()
+        return token if token in {"low", "medium", "high"} else "medium"
+
+    def _style_profile(self, context: Dict[str, Any]) -> List[str]:
+        profile = context.get("character_profile") or {}
+        raw = (
+            profile.get("style_profile")
+            or profile.get("favorite_clothing_styles")
+            or ",".join(context.get("persona_voice", {}).get("style_identity", []) or [])
+            or "minimalism, soft fabrics, neutral colors, natural ease"
+        )
+        values = [self._clean_text(part).lower() for part in str(raw).split(",") if self._clean_text(part)]
+        if not values:
+            return ["minimalism", "soft fabrics", "neutral colors", "natural ease"]
+        deduped: List[str] = []
+        for value in values:
+            if value not in deduped:
+                deduped.append(value)
+        return deduped[:4]
 
     def _place_type(self, scene_text: str) -> str:
         lowered = scene_text.lower()
-        if any(token in lowered for token in ["airport", "terminal", "boarding", "gate", "flight"]):
+        if any(token in lowered for token in ["airport", "terminal", "boarding", "gate", "flight", "layover"]):
             return "airport"
         if any(token in lowered for token in ["hotel", "room", "suite"]):
             return "hotel"
@@ -511,21 +805,63 @@ class OutfitGenerator:
             return "bottom"
         if any(token in lowered for token in ["sneakers", "trainers", "boots", "heels", "loafers", "sandals", "slides", "shoes"]):
             return "shoes"
-        if any(token in lowered for token in ["bag", "tote", "scarf", "watch", "glasses", "sunglasses", "jewelry", "necklace", "earrings", "cap", "belt"]):
-            return "accessory"
+        if any(token in lowered for token in ["bag", "tote", "scarf", "watch", "glasses", "sunglasses", "jewelry", "necklace", "earrings", "cap", "belt", "carry on"]):
+            return "accessories"
         return "top"
 
-    def _join_fragments(self, fragments: List[str]) -> str:
-        deduped: List[str] = []
+    def _enrich_source_piece(self, piece: str, category: str, descriptor: Dict[str, Any]) -> str:
+        cleaned = self._clean_text(piece).lower()
+        if category == "top":
+            if any(token in cleaned for token in ["tank", "camisole"]):
+                return "soft fitted tank" if descriptor["enhance_attractiveness"] >= 0.6 else "soft tank top"
+            if any(token in cleaned for token in ["shirt", "button"]):
+                return "easy shirt worn naturally"
+            return cleaned
+        if category == "bottom":
+            if "jeans" in cleaned or "denim" in cleaned:
+                return "straight denim"
+            if "skirt" in cleaned:
+                return "simple skirt with soft movement"
+            return cleaned
+        if category in {"outerwear", "layer"}:
+            if any(token in cleaned for token in ["trench", "coat"]):
+                return "light neutral coat"
+            if any(token in cleaned for token in ["cardigan", "hoodie"]):
+                return "soft cardigan"
+            return cleaned
+        if category == "dress":
+            return cleaned
+        if category == "shoes":
+            if any(token in cleaned for token in ["sneakers", "trainers"]):
+                return "comfortable sneakers"
+            if any(token in cleaned for token in ["boots", "boot"]):
+                return "comfortable ankle boots"
+            return cleaned
+        if category == "accessories":
+            return cleaned
+        return cleaned
+
+    def _human_join(self, parts: List[str]) -> str:
+        cleaned = [self._clean_text(part) for part in parts if self._clean_text(part)]
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        if len(cleaned) == 2:
+            return f"{cleaned[0]} and {cleaned[1]}"
+        return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
+
+    def _dedupe_phrases(self, phrases: List[str]) -> List[str]:
+        result: List[str] = []
         seen: set[str] = set()
-        for fragment in fragments:
-            cleaned = self._clean_text(fragment)
+        for phrase in phrases:
+            cleaned = self._clean_text(phrase)
             key = cleaned.lower()
             if not cleaned or key in seen:
                 continue
             seen.add(key)
-            deduped.append(cleaned)
-        return ", ".join(deduped)
+            result.append(cleaned)
+        return result
 
     def _is_invalid_value(self, value: str) -> bool:
         cleaned = self._clean_text(value).lower()
