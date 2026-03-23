@@ -19,6 +19,7 @@ from virtual_persona.delivery.telegram_navigation import (
     ui_label,
 )
 from virtual_persona.models.domain import PublishingPlanItem
+from virtual_persona.pipeline.prompt_composer import PromptComposer
 
 
 def _item(index: int = 1, publication_id: str | None = None) -> PublishingPlanItem:
@@ -145,6 +146,16 @@ def test_parse_callback_back_compat():
     assert parse_callback("pv:1:prompt").view == "prompt"
     assert parse_callback("back:post:0").view == "post"
     assert parse_callback("back:plan").view == "plan"
+
+
+def test_prompt_screen_derives_prompt_mode_from_canonical_prompt():
+    item = _item()
+    item.prompt_mode = "dense"
+
+    text = format_prompt_screen(item, 0)
+    expected_mode = PromptComposer._prompt_mode(json.loads(item.prompt_package_json)["final_prompt"])
+
+    assert f"- {ui_label('Prompt mode')}: {expected_mode}" in text
 
 
 def test_format_plan_and_post_card_contains_localized_ui_and_raw_behavior_values():

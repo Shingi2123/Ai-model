@@ -16,7 +16,29 @@ class PromptComposer:
     state_store: Any
     CANONICAL_PROMPT_VERSION = "v6"
     COMPACT_PROMPT_THRESHOLD = 740
+    DENSE_PROMPT_MIN_LENGTH = 728
+    DENSE_PROMPT_EXPANDED_BLOCKS = 4
+    EXPANDED_BLOCK_BODY_THRESHOLD = 28
     CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
+    PLACEHOLDER_TOKENS: tuple[str, ...] = (
+        "n/a",
+        "na",
+        "none",
+        "null",
+        "nil",
+        "tbd",
+        "todo",
+        "placeholder",
+        "unknown",
+        "same",
+        "same outfit",
+        "default",
+    )
+    INVALID_OUTFIT_TOKENS: tuple[str, ...] = PLACEHOLDER_TOKENS + (
+        "outfit",
+        "look",
+        "look here",
+    )
     FORBIDDEN_POSITIVE_PHRASES: tuple[str, ...] = (
         "no plastic skin",
         "no identity drift",
@@ -150,8 +172,7 @@ class PromptComposer:
         body_anchor_shot = "full_body" if generation_mode == "full-body_mode" and shot_archetype == "friend_shot" else shot_archetype
         body_anchor = identity_manager.body_anchor(body_anchor_shot, context, identity_pack)
         scene_action = self._scene_action(scene, scene_desc, scene_loc)
-        weather = context.get("weather")
-        normalized_outfit = self._normalize_outfit_summary(outfit_summary, scene, context.get("city", ""), weather)
+        normalized_outfit = self._normalize_outfit_summary(outfit_summary, scene, context)
         wardrobe_block = self._wardrobe_context(normalized_outfit, shot_archetype, item_ids_text)
         camera_block = self._camera_context(shot_archetype, context)
         realism_block = self._realism_cues(shot_archetype, scene_loc)
@@ -248,7 +269,25 @@ class PromptComposer:
 
     @staticmethod
     def _prompt_mode(prompt: str) -> str:
-        return "dense" if len((prompt or "").strip()) > PromptComposer.COMPACT_PROMPT_THRESHOLD else "compact"
+        normalized = (prompt or "").strip()
+        if len(normalized) > PromptComposer.COMPACT_PROMPT_THRESHOLD:
+            return "dense"
+
+        blocks = [block.strip() for block in normalized.split("\n\n") if block.strip()]
+        expanded_blocks = 0
+        for block in blocks:
+            _, _, body = block.partition(":")
+            body_text = body.strip() or block
+            if (
+                len(body_text) >= PromptComposer.EXPANDED_BLOCK_BODY_THRESHOLD
+                or body_text.count(",") >= 2
+                or body_text.count(";") >= 2
+            ):
+                expanded_blocks += 1
+
+        if len(normalized) >= PromptComposer.DENSE_PROMPT_MIN_LENGTH and expanded_blocks >= PromptComposer.DENSE_PROMPT_EXPANDED_BLOCKS:
+            return "dense"
+        return "compact"
 
     def _resolve_generation_mode(self, scene: Any, shot_archetype: str) -> str:
         explicit = getattr(scene, "generation_mode", "")
@@ -803,7 +842,11 @@ class PromptComposer:
         cleaned = wardrobe_block.replace("outfit: ", "").strip()
         cleaned = cleaned.split(";")[0].strip().rstrip(".")
         items = re.split(r"\s*(?:,|\+|/|;)\s*", cleaned)
-        normalized = [self._ensure_english_fragment(self._clean_fragment(item), "") for item in items if self._clean_fragment(item)]
+        normalized = [
+            self._ensure_english_fragment(self._clean_fragment(item), "")
+            for item in items
+            if self._clean_fragment(item) and not self._is_invalid_outfit_value(item)
+        ]
         normalized = [item for item in normalized if item]
         if not normalized:
             raise PromptValidationError("Outfit block is empty")
@@ -937,14 +980,40 @@ class PromptComposer:
                 seen.add(key)
         return False
 
-    def _normalize_outfit_summary(self, outfit_summary: str, scene: Any, city: str, weather: Any) -> str:
+    def _normalize_outfit_summary(self, outfit_summary: str, scene: Any, context: Dict[str, Any]) -> str:
+        city = str(context.get("city", "") or "")
+        weather = context.get("weather")
+        day_type = str(context.get("day_type", "") or "")
+        behavior = context.get("behavioral_context")
+        behavior_mode = str(
+            getattr(behavior, "outfit_behavior_mode", "")
+            or getattr(behavior, "self_presentation", "")
+            or getattr(getattr(behavior, "daily_state", None), "self_presentation_mode", "")
+            or ""
+        )
+        default_items = self.generate_default_outfit(
+            scene,
+            city,
+            weather,
+            day_type=day_type,
+            behavior_mode=behavior_mode,
+        )
         raw = self._clean_fragment(outfit_summary)
-        default_items = self.generate_default_outfit(scene, city, weather)
-        if not raw or raw == ".":
+        if self._is_invalid_outfit_value(raw):
             return ", ".join(default_items)
 
-        items = [self._ensure_english_fragment(self._clean_fragment(item), "") for item in re.split(r"\s*(?:,|\+|/|;)\s*", raw)]
-        items = [item for item in self._dedupe_phrases(items) if item]
+        items = [
+            self._ensure_english_fragment(self._clean_fragment(item), "")
+            for item in re.split(r"\s*(?:,|\+|/|;)\s*", raw)
+        ]
+        items = [
+            item
+            for item in self._dedupe_phrases(items)
+            if item and not self._is_invalid_outfit_value(item)
+        ]
+        if not items:
+            return ", ".join(default_items)
+
         normalized = list(items)
         categories = {self._outfit_category(item) for item in normalized}
 
@@ -957,26 +1026,81 @@ class PromptComposer:
             normalized = [item for item in normalized if self._outfit_category(item) != "bottom"] + [item for item in normalized if self._outfit_category(item) == "bottom"]
         if "shoes" not in {self._outfit_category(item) for item in normalized}:
             normalized.append(next((item for item in default_items if self._outfit_category(item) == "shoes"), default_items[2]))
-        return ", ".join(self._dedupe_phrases(normalized))
+        normalized = [item for item in self._dedupe_phrases(normalized) if not self._is_invalid_outfit_value(item)]
+        if not normalized:
+            return ", ".join(default_items)
+        return ", ".join(normalized)
 
-    def generate_default_outfit(self, scene: Any, city: str, weather: Any) -> List[str]:
+    def generate_default_outfit(
+        self,
+        scene: Any,
+        city: str,
+        weather: Any,
+        *,
+        day_type: str = "",
+        behavior_mode: str = "",
+    ) -> List[str]:
         del city
         temp_c = getattr(weather, "temp_c", None)
         lowered = self._scene_text(scene).lower()
-        is_travel = any(token in lowered for token in ["airport", "terminal", "flight", "boarding", "travel"])
+        lowered_day_type = str(day_type or "").lower()
+        lowered_behavior_mode = str(behavior_mode or "").lower().replace("-", "_")
+        is_travel = lowered_day_type == "travel_day" or any(token in lowered for token in ["airport", "terminal", "flight", "boarding", "travel"])
+        is_work = lowered_day_type == "work_day" or any(token in lowered_behavior_mode for token in ["work", "uniform", "structured"])
+        is_day_off = lowered_day_type in {"day_off", "weekend_day", "layover_day"}
         is_evening = str(getattr(scene, "time_of_day", "") or "").lower() in {"evening", "night"}
         if temp_c is None:
             temp_c = 18
 
-        if temp_c <= 8:
+        if is_travel:
+            if temp_c <= 8:
+                outfit = ["soft travel sweater", "straight trousers", "leather ankle boots"]
+            elif temp_c <= 18:
+                outfit = ["light knit top", "straight jeans", "white sneakers"]
+            else:
+                outfit = ["breathable travel top", "relaxed straight trousers", "white sneakers"]
+        elif is_work:
+            if temp_c <= 8:
+                outfit = ["fine-knit top", "tailored trousers", "leather ankle boots"]
+            elif temp_c <= 18:
+                outfit = ["clean knit top", "tailored trousers", "sleek loafers"]
+            else:
+                outfit = ["light blouse", "tailored trousers", "sleek loafers"]
+        elif is_day_off:
+            if temp_c <= 8:
+                outfit = ["soft wool sweater", "straight jeans", "leather ankle boots"]
+            elif temp_c <= 18:
+                outfit = ["soft knit top", "straight jeans", "white sneakers"]
+            else:
+                outfit = ["easy tank top", "linen trousers", "low-profile sandals"]
+        elif temp_c <= 8:
             outfit = ["wool coat", "straight trousers", "leather ankle boots"]
         elif temp_c <= 18:
             outfit = ["light knit top", "straight jeans", "white sneakers"]
         else:
             outfit = ["sleeveless top", "linen trousers", "low-profile sandals"]
 
-        accessory = "crossbody bag" if is_travel else ("simple shoulder bag" if is_evening else "minimal tote bag")
+        if is_travel or "travel" in lowered_behavior_mode:
+            accessory = "crossbody bag"
+        elif is_work:
+            accessory = "structured shoulder bag"
+        elif is_evening:
+            accessory = "simple shoulder bag"
+        else:
+            accessory = "minimal tote bag"
         return outfit + [accessory]
+
+    def _is_invalid_outfit_value(self, text: str) -> bool:
+        cleaned = self._clean_fragment(text).lower()
+        if not cleaned:
+            return True
+        if cleaned in self.INVALID_OUTFIT_TOKENS:
+            return True
+        if re.fullmatch(r"[.\-_/]+", cleaned):
+            return True
+        if all(char in ".-_/" for char in cleaned):
+            return True
+        return False
 
     @staticmethod
     def _outfit_category(item: str) -> str:
@@ -1066,9 +1190,10 @@ class PromptComposer:
         return mapping.get(object_term, f"{object_term} visible in the scene")
 
     def _validate_canonical_prompt(self, prompt: str, scene: Any, context: Dict[str, Any]) -> None:
-        blocks = [block.strip() for block in prompt.split("\n\n") if block.strip()]
-        if len(blocks) != 6:
-            raise PromptValidationError("Canonical prompt must contain exactly six blocks.")
+        raw_blocks = [block.strip() for block in prompt.split("\n\n")]
+        if len(raw_blocks) != 6 or any(not block for block in raw_blocks):
+            raise PromptValidationError("Canonical prompt must contain exactly six non-empty blocks.")
+        blocks = raw_blocks
         if not blocks[0].startswith("Identity: "):
             raise PromptValidationError("Canonical prompt must start with the identity block.")
         if not blocks[2].startswith("Scene: "):
@@ -1081,9 +1206,16 @@ class PromptComposer:
             raise PromptValidationError("Canonical prompt must contain a mood block in sixth position.")
         if self.CYRILLIC_RE.search(prompt):
             raise PromptValidationError("Cyrillic detected in prompt")
+        for index, block in enumerate(blocks):
+            _, _, body = block.partition(":")
+            body_text = body.strip() or block.strip()
+            if index != 1 and not body.strip():
+                raise PromptValidationError("Canonical prompt contains an empty block body")
+            if self._is_placeholder_body(body_text):
+                raise PromptValidationError("Canonical prompt contains a placeholder block body")
 
         outfit_body = blocks[3].replace("Outfit: ", "").strip().rstrip(".")
-        if not outfit_body or outfit_body == ".":
+        if not outfit_body or self._is_invalid_outfit_value(outfit_body):
             raise PromptValidationError("Outfit block is empty")
         outfit_categories = {self._outfit_category(item) for item in outfit_body.split(",")}
         if "dress" not in outfit_categories and ("top" not in outfit_categories or "bottom" not in outfit_categories):
@@ -1112,14 +1244,23 @@ class PromptComposer:
                 if token in block.lower() and token not in framing_block:
                     raise PromptValidationError("Conflicting framing detected outside framing block")
 
-        scene_block = blocks[2].lower()
         required_objects = self._behavior_object_terms(context)
         for object_term in required_objects:
-            if object_term and object_term.lower() not in scene_block:
-                raise PromptValidationError(f"Required object missing from scene block: {object_term}")
+            if object_term and object_term.lower() not in lowered:
+                raise PromptValidationError(f"Required object missing from prompt: {object_term}")
 
         if re.search(r"\b([a-z]+)(?:\s+\1\b)+", lowered):
             raise PromptValidationError("Duplicate word sequence detected in canonical prompt.")
+
+    def _is_placeholder_body(self, text: str) -> bool:
+        cleaned = self._clean_fragment(text).lower()
+        if not cleaned:
+            return True
+        if cleaned in self.PLACEHOLDER_TOKENS:
+            return True
+        if re.fullmatch(r"[.\-_/]+", cleaned):
+            return True
+        return False
 
     @staticmethod
     def _extract_continuity_hint(continuity_block: str) -> str:

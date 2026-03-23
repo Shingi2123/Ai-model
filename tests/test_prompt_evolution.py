@@ -249,7 +249,7 @@ def test_positive_prompt_has_no_duplicate_blocks_or_repeated_words():
 def test_prompt_mode_reflects_actual_prompt_length():
     package = _compose()
 
-    expected = "dense" if len(package["final_prompt"]) > PromptComposer.COMPACT_PROMPT_THRESHOLD else "compact"
+    expected = PromptComposer._prompt_mode(package["final_prompt"])
     assert package["prompt_mode"] == expected
 
 
@@ -268,6 +268,17 @@ def test_empty_outfit_uses_default_outfit_instead_of_blank_block():
 
     assert outfit_block.startswith("Outfit: ")
     assert outfit_block != "Outfit: ."
+
+
+@pytest.mark.parametrize("placeholder", ["placeholder", "outfit", "same outfit", "n/a"])
+def test_placeholder_outfit_uses_safe_fallback(placeholder: str):
+    package = _compose(outfit_summary=placeholder)
+    outfit_block = package["final_prompt"].split("\n\n")[3].lower()
+
+    assert outfit_block.startswith("outfit: ")
+    assert outfit_block != "outfit: ."
+    assert "placeholder" not in outfit_block
+    assert "same outfit" not in outfit_block
 
 
 def test_validate_prompt_rejects_cyrillic():

@@ -8,6 +8,7 @@ from datetime import date
 from typing import Any, Mapping
 
 from virtual_persona.models.domain import PublishingPlanItem
+from virtual_persona.pipeline.prompt_composer import PromptComposer
 
 
 logger = logging.getLogger(__name__)
@@ -205,6 +206,10 @@ def _is_invalid_identity_mode(value: str) -> bool:
     return bool(NUMBER_RE.match(value.strip()))
 
 
+def _is_invalid_prompt_mode(value: str) -> bool:
+    return value.strip().lower() not in {"compact", "dense"}
+
+
 def _warn_invalid_field(row: Mapping[str, Any], field_name: str, bad_value: str, fallback_value: str) -> None:
     logger.warning(
         "publishing_plan_normalizer invalid_field publication_id=%s field=%s bad_value=%r fallback=%r",
@@ -274,6 +279,40 @@ def resolve_canonical_prompt(
         resolved_prompt = default
 
     return resolved_prompt, prompt_source, meta_legacy, meta_version or ("v6" if resolved_prompt == meta_prompt and resolved_prompt else "")
+
+
+def resolve_prompt_mode(
+    source: Mapping[str, Any] | PublishingPlanItem | Any,
+    *,
+    resolved_prompt: str | None = None,
+    prompt_meta: Mapping[str, Any] | None = None,
+) -> str:
+    row = _to_mapping(source)
+    meta = dict(prompt_meta or load_prompt_meta(row))
+    canonical_prompt = (resolved_prompt or "").strip()
+    if not canonical_prompt:
+        canonical_prompt, _, _, _ = resolve_canonical_prompt(row, default=_extract_value(row, "prompt_text"))
+
+    derived_mode = PromptComposer._prompt_mode(canonical_prompt) if canonical_prompt else ""
+    stored_mode = _resolve_field(
+        row,
+        meta,
+        field_name="prompt_mode",
+        row_keys=("prompt_mode",),
+        meta_keys=("prompt_mode",),
+        invalid_predicate=_is_invalid_prompt_mode,
+    )
+
+    if derived_mode:
+        if stored_mode and stored_mode != derived_mode:
+            logger.warning(
+                "publishing_plan_normalizer prompt_mode_mismatch publication_id=%s stored=%s derived=%s",
+                _extract_value(row, "publication_id") or "<missing>",
+                stored_mode,
+                derived_mode,
+            )
+        return derived_mode
+    return stored_mode or "compact"
 
 
 def _resolve_field(
@@ -371,6 +410,7 @@ def normalize_publishing_plan_payload(
     )
 
     resolved_prompt, _, _, _ = resolve_canonical_prompt(row)
+    prompt_mode = resolve_prompt_mode(row, resolved_prompt=resolved_prompt, prompt_meta=prompt_meta)
 
     return {
         "publication_id": _extract_value(row, "publication_id"),
@@ -408,7 +448,7 @@ def normalize_publishing_plan_payload(
             invalid_predicate=_is_invalid_generation_mode,
         ),
         "framing_mode": _resolve_field(row, prompt_meta, field_name="framing_mode", row_keys=("framing_mode",)),
-        "prompt_mode": _resolve_field(row, prompt_meta, field_name="prompt_mode", row_keys=("prompt_mode",)),
+        "prompt_mode": prompt_mode,
         "reference_type": _resolve_field(
             row,
             prompt_meta,

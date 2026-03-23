@@ -10,6 +10,7 @@ from virtual_persona.delivery.publishing_plan_normalizer import (
     item_from_payload,
     load_prompt_meta,
     resolve_canonical_prompt,
+    resolve_prompt_mode,
 )
 from virtual_persona.models.domain import PublishingPlanItem
 
@@ -292,6 +293,7 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
     primary_anchors = _display_value(format_reference_aliases(item.primary_anchors), "Нет основных референсов")
     secondary_anchors = _display_value(format_reference_aliases(item.secondary_anchors), "Нет дополнительных референсов")
     manual_generation_step = _format_manual_generation_step(item.manual_generation_step)
+    prompt_mode = _display_value(resolve_prompt_mode(item, resolved_prompt=prompt_value or prompt), prompt_mode)
 
     logger.info(
         "telegram_detail_render publication_id=%s prompt_source=%s prompt_format_version=%s legacy_prompt_detected=%s",
