@@ -13,6 +13,8 @@ Requires optional deps: gspread google-auth
 """
 
 import os
+import time
+from typing import Any, Callable, Dict, Iterable, List, Tuple
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -260,47 +262,316 @@ SHEETS = {
 }
 
 
+RETRY_BACKOFF_SECONDS: Tuple[int, ...] = (5, 10, 20, 40, 60)
+LOOP_THROTTLE_SECONDS = 0.5
+STAGE_THROTTLE_SECONDS = 0.75
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    if not isinstance(exc, gspread.exceptions.APIError):
+        return False
+    if getattr(exc, "code", None) == 429:
+        return True
+    message = str(exc).lower()
+    return "quota" in message or "read requests per minute per user" in message or "[429]" in message
+
+
+def with_gspread_retry(
+    operation: Callable[[], Any],
+    operation_name: str,
+    *,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    print_fn: Callable[[str], None] = print,
+    max_attempts: int = 5,
+    backoff_seconds: Iterable[int] = RETRY_BACKOFF_SECONDS,
+) -> Any:
+    waits = list(backoff_seconds) or list(RETRY_BACKOFF_SECONDS)
+    last_quota_error: gspread.exceptions.APIError | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return operation()
+        except gspread.exceptions.APIError as exc:
+            if not _is_quota_error(exc):
+                raise
+            last_quota_error = exc
+            if attempt >= max_attempts:
+                break
+            wait_seconds = waits[min(attempt - 1, len(waits) - 1)]
+            print_fn(
+                f"Retry after 429: {operation_name} "
+                f"(attempt {attempt}/{max_attempts}, waiting {wait_seconds}s)"
+            )
+            sleep_fn(wait_seconds)
+
+    raise RuntimeError(
+        f"Google Sheets API quota limit persisted during '{operation_name}' after {max_attempts} attempts. "
+        "Bootstrap stopped because of Google Sheets API limits, not because of project logic."
+    ) from last_quota_error
+
+
+def _throttle(sleep_fn: Callable[[float], None], seconds: float) -> None:
+    if seconds > 0:
+        sleep_fn(seconds)
+
+
+def _quote_sheet_title(title: str) -> str:
+    return "'" + title.replace("'", "''") + "'"
+
+
+def _fetch_header_cache(
+    spreadsheet: Any,
+    worksheets_by_title: Dict[str, Any],
+    *,
+    sleep_fn: Callable[[float], None],
+    print_fn: Callable[[str], None],
+) -> Dict[str, List[str]]:
+    if not worksheets_by_title:
+        return {}
+
+    titles = list(worksheets_by_title.keys())
+    ranges = [f"{_quote_sheet_title(title)}!1:1" for title in titles]
+    response = with_gspread_retry(
+        lambda: spreadsheet.values_batch_get(ranges),
+        "batch read worksheet headers",
+        sleep_fn=sleep_fn,
+        print_fn=print_fn,
+    )
+
+    value_ranges = response.get("valueRanges", []) if isinstance(response, dict) else []
+    header_cache: Dict[str, List[str]] = {}
+    for index, title in enumerate(titles):
+        values = []
+        if index < len(value_ranges):
+            values = value_ranges[index].get("values", []) or []
+        header_cache[title] = list(values[0]) if values else []
+    return header_cache
+
+
+def _load_worksheet_cache(
+    spreadsheet: Any,
+    *,
+    sleep_fn: Callable[[float], None],
+    print_fn: Callable[[str], None],
+) -> tuple[Dict[str, Any], Dict[str, List[str]]]:
+    worksheets = with_gspread_retry(
+        lambda: spreadsheet.worksheets(),
+        "load worksheet metadata",
+        sleep_fn=sleep_fn,
+        print_fn=print_fn,
+    )
+    worksheets_by_title = {ws.title: ws for ws in worksheets}
+    header_cache = _fetch_header_cache(
+        spreadsheet,
+        worksheets_by_title,
+        sleep_fn=sleep_fn,
+        print_fn=print_fn,
+    )
+    return worksheets_by_title, header_cache
+
+
+def _create_missing_sheets(
+    spreadsheet: Any,
+    worksheets_by_title: Dict[str, Any],
+    header_cache: Dict[str, List[str]],
+    *,
+    sleep_fn: Callable[[float], None],
+    print_fn: Callable[[str], None],
+) -> List[str]:
+    created: List[str] = []
+    for title, headers in SHEETS.items():
+        if title in worksheets_by_title:
+            print_fn(f"Exists: {title}")
+            continue
+        worksheet = with_gspread_retry(
+            lambda title=title, headers=headers: spreadsheet.add_worksheet(
+                title=title,
+                rows=1000,
+                cols=max(20, len(headers) + 3),
+            ),
+            f"create worksheet '{title}'",
+            sleep_fn=sleep_fn,
+            print_fn=print_fn,
+        )
+        worksheets_by_title[title] = worksheet
+        with_gspread_retry(
+            lambda worksheet=worksheet, headers=headers: worksheet.update(
+                values=[headers],
+                range_name="1:1",
+            ),
+            f"initialize headers for '{title}'",
+            sleep_fn=sleep_fn,
+            print_fn=print_fn,
+        )
+        header_cache[title] = list(headers)
+        created.append(title)
+        print_fn(f"Created: {title}")
+        _throttle(sleep_fn, LOOP_THROTTLE_SECONDS)
+    return created
+
+
+def _update_headers(
+    worksheets_by_title: Dict[str, Any],
+    header_cache: Dict[str, List[str]],
+    *,
+    sleep_fn: Callable[[float], None],
+    print_fn: Callable[[str], None],
+) -> tuple[List[str], List[str], List[str]]:
+    initialized: List[str] = []
+    updated: List[str] = []
+    skipped: List[str] = []
+
+    for title, expected_headers in SHEETS.items():
+        worksheet = worksheets_by_title[title]
+        current_headers = list(header_cache.get(title, []))
+        if not current_headers:
+            with_gspread_retry(
+                lambda worksheet=worksheet, headers=expected_headers: worksheet.update(
+                    values=[headers],
+                    range_name="1:1",
+                ),
+                f"initialize missing headers for '{title}'",
+                sleep_fn=sleep_fn,
+                print_fn=print_fn,
+            )
+            header_cache[title] = list(expected_headers)
+            initialized.append(title)
+            print_fn(f"Updated headers: {title} (initialized empty row)")
+            _throttle(sleep_fn, LOOP_THROTTLE_SECONDS)
+            continue
+
+        missing = [header for header in expected_headers if header not in current_headers]
+        if missing:
+            next_headers = current_headers + missing
+            with_gspread_retry(
+                lambda worksheet=worksheet, values=next_headers: worksheet.update(
+                    values=[values],
+                    range_name="1:1",
+                ),
+                f"update headers for '{title}'",
+                sleep_fn=sleep_fn,
+                print_fn=print_fn,
+            )
+            header_cache[title] = next_headers
+            updated.append(title)
+            print_fn(f"Updated headers: {title} (+{', '.join(missing)})")
+            _throttle(sleep_fn, LOOP_THROTTLE_SECONDS)
+        else:
+            skipped.append(title)
+            print_fn(f"Skipped headers: {title}")
+    return initialized, updated, skipped
+
+
+def _validate_structure(
+    spreadsheet: Any,
+    worksheets_by_title: Dict[str, Any],
+    header_cache: Dict[str, List[str]],
+    *,
+    sleep_fn: Callable[[float], None],
+    print_fn: Callable[[str], None],
+) -> None:
+    missing_titles = [title for title in SHEETS if title not in worksheets_by_title]
+    if missing_titles:
+        raise RuntimeError(f"Bootstrap validation failed: missing worksheets {', '.join(missing_titles)}")
+
+    invalid_titles = [
+        title
+        for title, expected_headers in SHEETS.items()
+        if any(header not in header_cache.get(title, []) for header in expected_headers)
+    ]
+    if invalid_titles:
+        refreshed = _fetch_header_cache(
+            spreadsheet,
+            {title: worksheets_by_title[title] for title in invalid_titles},
+            sleep_fn=sleep_fn,
+            print_fn=print_fn,
+        )
+        header_cache.update(refreshed)
+        still_invalid = [
+            title
+            for title, expected_headers in SHEETS.items()
+            if any(header not in header_cache.get(title, []) for header in expected_headers)
+        ]
+        if still_invalid:
+            raise RuntimeError(
+                "Bootstrap validation failed after retries: some worksheets still miss required headers: "
+                + ", ".join(still_invalid)
+            )
+
+
+def bootstrap_spreadsheet(
+    spreadsheet: Any,
+    *,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    print_fn: Callable[[str], None] = print,
+) -> Dict[str, List[str]]:
+    print_fn("Stage 1/4: loading worksheet metadata and caches")
+    worksheets_by_title, header_cache = _load_worksheet_cache(
+        spreadsheet,
+        sleep_fn=sleep_fn,
+        print_fn=print_fn,
+    )
+    _throttle(sleep_fn, STAGE_THROTTLE_SECONDS)
+
+    print_fn("Stage 2/4: creating missing worksheets")
+    created = _create_missing_sheets(
+        spreadsheet,
+        worksheets_by_title,
+        header_cache,
+        sleep_fn=sleep_fn,
+        print_fn=print_fn,
+    )
+    _throttle(sleep_fn, STAGE_THROTTLE_SECONDS)
+
+    print_fn("Stage 3/4: updating worksheet headers")
+    initialized, updated, skipped = _update_headers(
+        worksheets_by_title,
+        header_cache,
+        sleep_fn=sleep_fn,
+        print_fn=print_fn,
+    )
+    _throttle(sleep_fn, STAGE_THROTTLE_SECONDS)
+
+    print_fn("Stage 4/4: validating final worksheet structure")
+    _validate_structure(
+        spreadsheet,
+        worksheets_by_title,
+        header_cache,
+        sleep_fn=sleep_fn,
+        print_fn=print_fn,
+    )
+
+    print_fn("\nBootstrap summary:")
+    print_fn(f"- Created sheets: {len(created)}")
+    print_fn(f"- Initialized headers: {len(initialized)}")
+    print_fn(f"- Updated headers: {len(updated)}")
+    print_fn(f"- Skipped headers: {len(skipped)}")
+    if created:
+        print_fn(f"  Created -> {', '.join(created)}")
+    if initialized:
+        print_fn(f"  Initialized -> {', '.join(initialized)}")
+    if updated:
+        print_fn(f"  Updated -> {', '.join(updated)}")
+    print_fn("Bootstrap completed successfully.")
+    return {
+        "created": created,
+        "initialized": initialized,
+        "updated": updated,
+        "skipped": skipped,
+    }
+
+
 def main() -> None:
     creds_path = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_PATH"]
     sheet_id = os.environ["GOOGLE_SHEET_ID"]
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
     gc = gspread.authorize(creds)
-    sh = gc.open_by_key(sheet_id)
-
-    existing = {ws.title for ws in sh.worksheets()}
-    created = []
-    updated = []
-
-    for title, headers in SHEETS.items():
-        if title not in existing:
-            ws = sh.add_worksheet(title=title, rows=1000, cols=max(20, len(headers) + 3))
-            ws.append_row(headers)
-            created.append(title)
-            print(f"Created: {title}")
-        else:
-            ws = sh.worksheet(title)
-            current_headers = ws.row_values(1)
-            if not current_headers:
-                ws.append_row(headers)
-                print(f"Initialized headers: {title}")
-                continue
-
-            missing = [h for h in headers if h not in current_headers]
-            if missing:
-                ws.update("1:1", [current_headers + missing])
-                updated.append(title)
-                print(f"Updated headers: {title} (+{', '.join(missing)})")
-            else:
-                print(f"Exists: {title}")
-
-    print("\nBootstrap summary:")
-    print(f"- Created sheets: {len(created)}")
-    print(f"- Updated headers: {len(updated)}")
-    if created:
-        print(f"  Created -> {', '.join(created)}")
-    if updated:
-        print(f"  Updated -> {', '.join(updated)}")
+    sh = with_gspread_retry(
+        lambda: gc.open_by_key(sheet_id),
+        "open spreadsheet by key",
+    )
+    bootstrap_spreadsheet(sh)
 
     print("\nCharacter profile Prompt System v3 recommended keys:")
     print("- " + ", ".join(CHARACTER_PROFILE_V3_FIELDS))
