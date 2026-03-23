@@ -7,6 +7,7 @@ from virtual_persona.delivery.telegram_navigation import (
     build_post_keyboard,
     deserialize_context,
     format_caption_screen,
+    format_moment_screen,
     format_plan_screen,
     format_post_screen,
     format_prompt_screen,
@@ -14,6 +15,7 @@ from virtual_persona.delivery.telegram_navigation import (
     normalize_plan_items,
     parse_callback,
     serialize_context,
+    ui_label,
 )
 from virtual_persona.models.domain import PublishingPlanItem
 
@@ -81,13 +83,30 @@ def _item(index: int = 1, publication_id: str | None = None) -> PublishingPlanIt
     )
 
 
-def test_build_plan_keyboard_uses_publication_ids():
+def _context() -> PlanScreenContext:
+    return PlanScreenContext(
+        target_date=date(2026, 3, 12),
+        city="Paris",
+        day_type="work_day",
+        narrative_phase="recovery_phase",
+        persona_timezone="Europe/Paris",
+        user_timezone="Asia/Pavlodar",
+    )
+
+
+def test_ui_label_translates_known_keys_and_preserves_unknown():
+    assert ui_label("Prompt") == "🖼 Промпт"
+    assert ui_label("Behavior") == "🧠 Поведение"
+    assert ui_label("unknown-key") == "unknown-key"
+
+
+def test_build_plan_keyboard_uses_publication_ids_and_russian_labels():
     items = [_item(1), _item(2)]
     keyboard = build_plan_keyboard(items, date(2026, 3, 12))
 
-    assert [row[0][0] for row in keyboard[:2]] == ["Post 1", "Post 2"]
+    assert [row[0][0] for row in keyboard[:2]] == ["Пост 1", "Пост 2"]
     assert keyboard[0][0][1] == "p:2026-03-12:pub-1"
-    assert keyboard[-1][0] == ("Refresh", "plan:2026-03-12")
+    assert keyboard[-1][0] == ("🔄 Обновить", "plan:2026-03-12")
 
 
 def test_parse_callback_for_post_and_detail_views():
@@ -110,28 +129,36 @@ def test_parse_callback_back_compat():
     assert parse_callback("back:plan").view == "plan"
 
 
-def test_format_plan_and_post_card_contains_core_fields():
-    context = PlanScreenContext(
-        target_date=date(2026, 3, 12),
-        city="Paris",
-        day_type="work_day",
-        narrative_phase="recovery_phase",
-        persona_timezone="Europe/Paris",
-        user_timezone="Asia/Pavlodar",
-    )
-    plan_text = format_plan_screen(context, [_item()])
-    post_text = format_post_screen(context, _item(), 0)
-    post_text = f"{post_text}\nрџ§  Behavior:"
+def test_format_plan_and_post_card_contains_localized_ui_and_raw_behavior_values():
+    plan_text = format_plan_screen(_context(), [_item()])
+    post_text = format_post_screen(_context(), _item(), 0)
 
-    assert "POST #1" in plan_text
-    assert "Instagram" in plan_text
-    assert "Instagram" in post_text
-    assert "13:30 (Asia/Pavlodar)" in post_text
-    assert "transition" in post_text
-    assert "window_pause" in post_text
-    assert "🧠 Behavior:" in post_text
-    assert "Energy: low" in post_text
-    assert "Social: alone_but_in_public" in post_text
+    assert "📅 План на 12 марта" in plan_text
+    assert "📍 Город: Paris" in plan_text
+    assert "🕒 Часовой пояс персонажа: Europe/Paris" in plan_text
+    assert "🕒 Ваш часовой пояс: Asia/Pavlodar" in plan_text
+    assert "📆 Тип дня: work_day" in plan_text
+    assert "📊 Фаза: recovery_phase" in plan_text
+    assert "📸 ПОСТ #1" in plan_text
+    assert "Платформа: Instagram • Фото" in plan_text
+    assert "🎯 Момент: Final room check with luggage ready by the door" in plan_text
+    assert "✍️ Подпись: Last quiet moments before heading out..." in plan_text
+
+    assert "📸 ПОСТ #1 — Instagram / Фото" in post_text
+    assert "🕒 Вы: 13:30 (Asia/Pavlodar)" in post_text
+    assert "🎯 Генерация" in post_text
+    assert "- Тип кадра: mirror_selfie" in post_text
+    assert "- Фрейминг: mirror selfie, head-and-shoulders" in post_text
+    assert "- Тип референсов: selfie" in post_text
+    assert "- Режим генерации: mirror_selfie_mode" in post_text
+    assert "🧠 Поведение:" in post_text
+    assert "Энергия: low" in post_text
+    assert "Социальность: alone" in post_text
+    assert "🎭 Эмоциональная фаза:\ntransition" in post_text
+    assert "🔁 Привычка:\nwindow_pause" in post_text
+    assert "📍 Место:\nhotel_window" in post_text
+    assert "🎒 Объекты:\nmug, phone" in post_text
+    assert "👤 Подача:\nsoft" in post_text
 
 
 def test_detail_views_have_fallback_for_empty_prompt_and_caption():
@@ -144,9 +171,9 @@ def test_detail_views_have_fallback_for_empty_prompt_and_caption():
     prompt_text = format_prompt_screen(empty, 0)
     caption_text = format_caption_screen(empty, 0)
 
-    assert "Prompt" in prompt_text
+    assert "🖼 Промпт для ПОСТ #1" in prompt_text
     assert "No negative prompt" in prompt_text
-    assert "Caption" in caption_text
+    assert "✍️ Подпись" in caption_text
 
 
 def test_prompt_screen_falls_back_to_final_prompt_from_prompt_package_json():
@@ -159,36 +186,30 @@ def test_prompt_screen_falls_back_to_final_prompt_from_prompt_package_json():
     assert "A realistic candid friend-shot walking through the terminal." in prompt_text
 
 
-def test_prompt_screen_uses_behavior_detail_fields():
+def test_prompt_screen_localizes_ui_and_keeps_generation_blocks_english():
     text = format_prompt_screen(_item(), 0)
 
-    assert "Behavior: energy=low; social=alone" in text
-    assert "Habit: window_pause" in text
-    assert "Place anchor: hotel_window" in text
-    assert "Objects: mug, phone" in text
-    assert "Self-presentation: soft" in text
-    assert "Habit family: quiet_pause" in text
-    assert "Habit memory: quiet_pause: last used 2d ago" in text
-    assert "Place label: familiar quiet window" in text
-    assert "Place family: window_corner" in text
-    assert "Action family: quiet_pause" in text
-    assert "Social context: quiet_people_exist_around_her_but_not_center_frame" in text
+    assert "🖼 Промпт для ПОСТ #1" in text
+    assert "📸 ПОСТ #1 — Instagram / Фото" in text
+    assert "🎯 Генерация" in text
+    assert "🧷 Референсы" in text
+    assert "- Как использовать: Прикрепите 2-3 основных референса." in text
+    assert "Prompt\n```" in text
+    assert "Negative prompt\n```" in text
+    assert "Caption\n```" in text
+    assert "Короткая подпись\n```" in text
+    assert "⚙️ Дополнительно:" in text
+    assert "- Платформа: Instagram" in text
+    assert "- Режим промпта: compact" in text
+    assert "- Режим идентичности: reference_manifest" in text
 
 
 def test_plan_screen_with_zero_posts_and_keyboard_refresh_only():
-    context = PlanScreenContext(
-        target_date=date(2026, 3, 12),
-        city="Paris",
-        day_type="work_day",
-        narrative_phase="recovery_phase",
-        persona_timezone="Europe/Paris",
-        user_timezone="Asia/Pavlodar",
-    )
-    plan_text = format_plan_screen(context, [])
+    plan_text = format_plan_screen(_context(), [])
     keyboard = build_plan_keyboard([], date(2026, 3, 12))
 
-    assert "No planned posts" in plan_text
-    assert keyboard == [[("Refresh", "plan:2026-03-12")]]
+    assert "В этот день пока нет запланированных постов." in plan_text
+    assert keyboard == [[("🔄 Обновить", "plan:2026-03-12")]]
 
 
 def test_plan_screen_hides_unknown_city():
@@ -227,16 +248,16 @@ def test_normalize_plan_items_stable_fallback_key_when_publication_id_missing():
     assert normalized[0].publication_id.startswith("2026-03-12|Instagram|photo")
 
 
-def test_post_and_detail_keyboards_keep_same_post_identity():
+def test_post_and_detail_keyboards_keep_same_post_identity_and_russian_labels():
     post_keyboard = build_post_keyboard(date(2026, 3, 12), "pub-1")
     detail_keyboard = build_detail_keyboard(date(2026, 3, 12), "pub-1")
 
-    assert post_keyboard[0][0][0] == "Prompt"
-    assert post_keyboard[0][1][0] == "Caption"
-    assert post_keyboard[1][0][0] == "Moment"
-    assert post_keyboard[2][0][0] == "Back to plan"
-    assert detail_keyboard[0][0][0] == "Back to post"
-    assert detail_keyboard[0][1][0] == "Back to plan"
+    assert post_keyboard[0][0][0] == "🖼 Промпт"
+    assert post_keyboard[0][1][0] == "✍️ Подпись"
+    assert post_keyboard[1][0][0] == "🎯 Момент"
+    assert post_keyboard[2][0][0] == "⬅️ К плану"
+    assert detail_keyboard[0][0][0] == "⬅️ К посту"
+    assert detail_keyboard[0][1][0] == "⬅️ К плану"
     assert post_keyboard[0][0][1] == "pv:2026-03-12:pub-1:prompt"
     assert post_keyboard[2][0][1] == "back:plan:2026-03-12"
     assert detail_keyboard[0][0][1] == "back:post:2026-03-12:pub-1"
@@ -253,14 +274,7 @@ def test_prompt_screen_is_copy_ready_and_does_not_leak_prompt_package_json():
 
 
 def test_serialize_context_preserves_detail_screen_metadata():
-    context = PlanScreenContext(
-        target_date=date(2026, 3, 12),
-        city="Paris",
-        day_type="work_day",
-        narrative_phase="recovery_phase",
-        persona_timezone="Europe/Paris",
-        user_timezone="Asia/Pavlodar",
-    )
+    context = _context()
     item = _item()
     raw = serialize_context(context, [item])
     _, items = deserialize_context(raw)
@@ -395,47 +409,11 @@ def test_prompt_screen_does_not_render_legacy_prompt_when_canonical_prompt_exist
     assert "3/4 body walking shot" in text
 
 
-def test_format_plan_and_post_card_contains_core_fields():
-    context = PlanScreenContext(
-        target_date=date(2026, 3, 12),
-        city="Paris",
-        day_type="work_day",
-        narrative_phase="recovery_phase",
-        persona_timezone="Europe/Paris",
-        user_timezone="Asia/Pavlodar",
-    )
-    plan_text = format_plan_screen(context, [_item()])
-    post_text = format_post_screen(context, _item(), 0)
+def test_caption_and_moment_screens_localize_only_ui_layer():
+    caption_text = format_caption_screen(_item(), 0)
+    moment_text = format_moment_screen(_item(), 0)
 
-    assert "POST #1" in plan_text
-    assert "Instagram" in plan_text
-    assert "Instagram" in post_text
-    assert "13:30 (Asia/Pavlodar)" in post_text
-    assert "transition" in post_text
-    assert "window_pause" in post_text
-    assert "🧠 Behavior:" in post_text
-    assert "Energy: low" in post_text
-    assert "Social: alone" in post_text
-
-
-def test_format_plan_and_post_card_contains_core_fields():
-    context = PlanScreenContext(
-        target_date=date(2026, 3, 12),
-        city="Paris",
-        day_type="work_day",
-        narrative_phase="recovery_phase",
-        persona_timezone="Europe/Paris",
-        user_timezone="Asia/Pavlodar",
-    )
-    plan_text = format_plan_screen(context, [_item()])
-    post_text = format_post_screen(context, _item(), 0)
-
-    assert "POST #1" in plan_text
-    assert "Instagram" in plan_text
-    assert "Instagram" in post_text
-    assert "13:30 (Asia/Pavlodar)" in post_text
-    assert "transition" in post_text
-    assert "window_pause" in post_text
-    assert "🧠 Behavior:" in post_text
-    assert "Energy: low" in post_text
-    assert "Social: alone" in post_text
+    assert "📸 ПОСТ #1 — Instagram / Фото" in caption_text
+    assert "✍️ Подпись:\nLast quiet moments before heading out..." in caption_text
+    assert "📸 ПОСТ #1 — Instagram / Фото" in moment_text
+    assert "🎯 Момент:\nFinal room check with luggage ready by the door" in moment_text
