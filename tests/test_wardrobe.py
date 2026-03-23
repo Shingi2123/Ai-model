@@ -1,5 +1,6 @@
 from datetime import date
 
+from virtual_persona.models.domain import BehaviorState
 from virtual_persona.services.wardrobe import WardrobeManager
 
 
@@ -106,3 +107,35 @@ def test_soft_degradation_works_before_fallback():
     )
 
     assert set(outfit.item_ids) == {"top_1", "bottom_1", "shoes_1"}
+
+
+def test_behavior_influences_outfit_ranking_for_transitional_state():
+    rows = [
+        {"item_id": "top_soft", "name": "Soft knit top", "category": "top", "style_tags": "soft minimal", "season_tags": "spring", "weather_tags": "cloudy", "temp_min_c": 8, "temp_max_c": 24, "status": "active"},
+        {"item_id": "top_travel", "name": "Travel layered top", "category": "top", "style_tags": "soft minimal, travel practical layered", "season_tags": "spring", "weather_tags": "cloudy", "temp_min_c": 8, "temp_max_c": 24, "status": "active"},
+        {"item_id": "bottom_1", "name": "Straight trousers", "category": "bottom", "style_tags": "soft minimal", "season_tags": "spring", "weather_tags": "cloudy", "temp_min_c": 8, "temp_max_c": 24, "status": "active"},
+        {"item_id": "shoes_1", "name": "Comfort sneakers", "category": "shoes", "style_tags": "travel practical", "season_tags": "spring", "weather_tags": "cloudy", "temp_min_c": 8, "temp_max_c": 24, "status": "active"},
+    ]
+    state = DummyWardrobeState(rows)
+    manager = WardrobeManager(state)
+    behavior = BehaviorState(
+        energy_level="medium",
+        social_mode="light_public",
+        emotional_arc="transition",
+        habit="packing",
+        place_anchor="terminal_gate",
+        objects=["carry_on", "bag"],
+        self_presentation="transitional",
+    )
+
+    outfit = manager.select_outfit(
+        temp_c=16,
+        condition="cloudy",
+        preferred_style="soft minimal",
+        today=date(2026, 4, 15),
+        day_type="travel_day",
+        city="Paris",
+        behavior=behavior,
+    )
+
+    assert "top_travel" in outfit.item_ids

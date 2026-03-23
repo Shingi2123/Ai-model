@@ -203,7 +203,14 @@ class ContentGenerator:
     def _build_behavior_caption(self, context: Dict[str, Any], scenes: List[DayScene], city: str, day_type: str) -> str:
         behavior = context.get("behavioral_context")
         if behavior is None:
-            return "A quiet daily moment."
+            final_scene = scenes[-1] if scenes else None
+            if final_scene is None:
+                return "A quiet daily moment."
+            moment = str(getattr(final_scene, "scene_moment", "") or getattr(final_scene, "description", "") or "A quiet daily moment.").strip()
+            visual_focus = str(getattr(final_scene, "visual_focus", "") or "").strip()
+            if visual_focus:
+                return f"{moment}. {visual_focus}."
+            return moment
 
         emotional_arc = str(getattr(behavior, "emotional_arc", "routine") or "routine")
         habit = str(getattr(behavior, "habit", getattr(behavior, "selected_habit", "none")) or "none")

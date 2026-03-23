@@ -101,15 +101,70 @@ class SceneMomentGenerator:
             rows.append({"date": row.get("date"), "moment_signature": sig})
         return rows
 
+    @staticmethod
+    def _infer_behavior_fallback(context: Dict[str, Any], scene: DayScene) -> Dict[str, Any]:
+        lowered = " ".join(
+            [
+                str(getattr(scene, "location", "") or ""),
+                str(getattr(scene, "description", "") or ""),
+                str(getattr(scene, "activity", "") or ""),
+            ]
+        ).lower()
+        day_type = str(context.get("day_type") or "")
+
+        if any(token in lowered for token in ["airport", "terminal", "gate", "flight", "boarding"]):
+            place_anchor = "terminal_gate"
+        elif any(token in lowered for token in ["hotel", "room", "window"]):
+            place_anchor = "hotel_window"
+        elif any(token in lowered for token in ["kitchen", "home", "counter"]):
+            place_anchor = "kitchen_corner"
+        elif any(token in lowered for token in ["cafe", "street", "park", "city"]):
+            place_anchor = "cafe_corner"
+        else:
+            place_anchor = "terminal_gate" if day_type in {"travel_day", "work_day"} else "kitchen_corner"
+
+        if any(token in lowered for token in ["coffee", "espresso", "tea"]):
+            habit = "coffee_moment"
+        elif any(token in lowered for token in ["pack", "luggage", "suitcase", "bag"]):
+            habit = "packing"
+        elif any(token in lowered for token in ["walk", "stroll", "route", "street"]):
+            habit = "slow_walk"
+        elif any(token in lowered for token in ["window", "pause"]):
+            habit = "window_pause"
+        else:
+            habit = "none"
+
+        action_family = "walking" if habit == "slow_walk" else ""
+        emotional_arc = "transition" if day_type in {"travel_day", "work_day", "airport_transfer"} else "routine"
+        social_mode = "light_public" if place_anchor in {"terminal_gate", "cafe_corner"} else "alone"
+        objects = []
+        if place_anchor == "terminal_gate":
+            objects = ["carry_on", "bag"]
+        elif place_anchor == "hotel_window":
+            objects = ["bag"]
+        elif place_anchor == "kitchen_corner":
+            objects = ["coffee_cup"]
+        elif place_anchor == "cafe_corner":
+            objects = ["bag"]
+        return {
+            "habit": habit,
+            "place_anchor": place_anchor,
+            "objects": objects,
+            "action_family": action_family,
+            "emotional_arc": emotional_arc,
+            "social_mode": social_mode,
+        }
+
     def _candidate_pool(self, context: Dict[str, Any], scene: DayScene) -> List[Dict[str, str]]:
         day_type = str(context.get("day_type") or "")
         behavior = context.get("behavioral_context")
-        selected_habit = str(getattr(behavior, "habit", "") or "")
-        place_anchor = str(getattr(behavior, "place_anchor", "") or "")
-        recurring_objects = list(getattr(behavior, "objects", []) or [])
-        action_family = str(getattr(behavior, "action_family", "") or "")
-        emotional_arc = str(getattr(behavior, "emotional_arc", "") or "")
-        social_mode = str(getattr(behavior, "social_mode", "alone") or "alone")
+        inferred = self._infer_behavior_fallback(context, scene) if behavior is None else {}
+        selected_habit = str(getattr(behavior, "habit", "") or inferred.get("habit", ""))
+        place_anchor = str(getattr(behavior, "place_anchor", "") or inferred.get("place_anchor", ""))
+        recurring_objects = list(getattr(behavior, "objects", []) or inferred.get("objects", []))
+        action_family = str(getattr(behavior, "action_family", "") or inferred.get("action_family", ""))
+        emotional_arc = str(getattr(behavior, "emotional_arc", "") or inferred.get("emotional_arc", ""))
+        social_mode = str(getattr(behavior, "social_mode", "alone") or inferred.get("social_mode", "alone"))
 
         pools = {
             "terminal_gate": [

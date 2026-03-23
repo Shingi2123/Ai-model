@@ -16,6 +16,7 @@ import os
 
 import gspread
 from google.oauth2.service_account import Credentials
+from virtual_persona.delivery.publishing_plan_normalizer import PUBLISHING_PLAN_HEADERS
 
 
 CHARACTER_PROFILE_V3_FIELDS = [
@@ -42,6 +43,105 @@ CHARACTER_PROFILE_V3_FIELDS = [
     "face_similarity_threshold",
 ]
 
+CONTENT_HISTORY_HEADERS = [
+    "date",
+    "city",
+    "day_type",
+    "outfit_ids",
+    "scenes",
+    "post_caption",
+    "scene_moment",
+    "scene_source",
+    "scene_moment_type",
+    "moment_signature",
+    "visual_focus",
+    "reference_pack_type",
+    "prompt_mode",
+    "face_similarity",
+    "scene_logic_score",
+    "artifact_flags",
+]
+
+CONTENT_MOMENT_MEMORY_HEADERS = [
+    "date",
+    "city",
+    "day_type",
+    "scene_moment",
+    "scene_moment_type",
+    "moment_signature",
+    "visual_focus",
+    "scene_source",
+    "shot_archetype",
+    "platform_intent",
+    "camera_behavior_used",
+    "framing_style_used",
+    "favorite_location_used",
+    "social_behavior_mode",
+    "publish_score",
+    "publish_decision",
+    "decision_reason",
+]
+
+BEHAVIOR_MEMORY_HEADERS = [
+    "date",
+    "city",
+    "day_type",
+    "behavior_state",
+    "energy_level",
+    "social_mode",
+    "emotional_arc",
+    "habit",
+    "place_anchor",
+    "objects",
+    "self_presentation",
+    "source",
+    "day_behavior_summary",
+    "selected_habit",
+    "familiar_place_anchor",
+    "recurring_objects_in_scene",
+    "self_presentation_mode",
+    "social_presence_mode",
+]
+
+HABIT_MEMORY_HEADERS = ["date", "city", "day_type", "habit", "emotional_arc", "place_anchor"]
+PLACE_MEMORY_HEADERS = ["date", "city", "day_type", "place_anchor", "emotional_arc", "habit"]
+OBJECT_USAGE_HEADERS = ["date", "city", "day_type", "place_anchor", "objects", "habit"]
+
+LIFE_STATE_HEADERS = [
+    "date",
+    "current_city",
+    "day_type",
+    "season",
+    "fatigue_level",
+    "mood_base",
+    "reason",
+    "continuity_note",
+    "narrative_phase",
+    "energy_state",
+    "rhythm_state",
+    "novelty_pressure",
+    "recovery_need",
+]
+
+RUN_LOG_HEADERS = [
+    "timestamp",
+    "status",
+    "message",
+    "device_profile",
+    "camera_behavior_used",
+    "framing_style_used",
+    "favorite_location_used",
+    "social_behavior_mode",
+    "anti_synthetic_cleaner_applied",
+    "face_similarity",
+    "scene_logic_score",
+    "hand_integrity_flag",
+    "body_consistency_flag",
+    "artifact_flags",
+    "prompt_mode",
+    "reference_pack_used",
+]
+
 SHEETS = {
     "character_profile": ["field", "value"],
     "wardrobe": ["id", "category", "name", "styles", "colors", "season", "temp_min_c", "temp_max_c", "weather_tags", "cooldown_days", "last_used"],
@@ -61,18 +161,22 @@ SHEETS = {
     "story_arcs": ["arc_id", "arc_type", "title", "status", "start_date", "progress", "description"],
     "activity_evolution": ["activity_id", "origin_activity", "generated_variant", "reason", "status"],
     "daily_calendar": ["date", "city", "day_type", "notes"],
-    "content_history": ["date", "city", "day_type", "outfit_ids", "scenes", "post_caption", "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "reference_pack_type", "prompt_mode", "face_similarity", "scene_logic_score", "artifact_flags"],
-    "content_moment_memory": ["date", "city", "day_type", "scene_moment", "scene_moment_type", "moment_signature", "visual_focus", "scene_source", "shot_archetype", "platform_intent", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "publish_score", "publish_decision", "decision_reason"],
-    "publishing_plan": ["publication_id", "date", "platform", "post_time", "content_type", "city", "day_type", "narrative_phase", "scene_moment", "scene_source", "scene_moment_type", "moment_signature", "visual_focus", "activity_type", "outfit_ids", "prompt_type", "prompt_text", "negative_prompt", "prompt_package_json", "shot_archetype", "platform_intent", "caption_text", "short_caption", "post_timezone", "publish_score", "selection_reason", "delivery_status", "notes", "selected_image_path", "clean_image_export_path", "generation_diagnostics", "identity_mode", "reference_pack_type", "face_similarity_score"],
+    "content_history": CONTENT_HISTORY_HEADERS,
+    "content_moment_memory": CONTENT_MOMENT_MEMORY_HEADERS,
+    "publishing_plan": list(PUBLISHING_PLAN_HEADERS),
+    "behavior_memory": BEHAVIOR_MEMORY_HEADERS,
+    "habit_memory": HABIT_MEMORY_HEADERS,
+    "place_memory": PLACE_MEMORY_HEADERS,
+    "object_usage": OBJECT_USAGE_HEADERS,
     "posting_rules": ["rule_id", "platform", "content_type", "preferred_time", "enabled", "priority", "min_per_day", "max_per_day", "day_type_filter", "narrative_phase_filter", "city_filter", "weekday_filter", "notes"],
     "delivery_log": ["date", "delivery_type", "status", "message_id", "error", "details"],
     "continuity_flags": ["date", "level", "code", "message"],
     "prompt_templates": ["key", "template"],
     "prompt_blocks": ["key", "content", "priority", "enabled"],
     "route_pool": ["route_id", "origin_city", "destination_city", "flight_type", "weight", "active"],
-    "life_state": ["date", "current_city", "day_type", "season", "fatigue_level", "mood_base", "reason", "continuity_note", "narrative_phase", "energy_state", "rhythm_state", "novelty_pressure", "recovery_need"],
+    "life_state": LIFE_STATE_HEADERS,
     "narrative_memory": ["date", "narrative_phase", "energy_state", "rhythm_state", "novelty_pressure", "recovery_need", "reason"],
-    "run_log": ["timestamp", "status", "message", "device_profile", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "anti_synthetic_cleaner_applied", "face_similarity", "scene_logic_score", "hand_integrity_flag", "body_consistency_flag", "artifact_flags", "prompt_mode", "reference_pack_used"],
+    "run_log": RUN_LOG_HEADERS,
     "character_identity": ["field", "value", "source", "updated_at"],
     "identity_references": ["reference_type", "path", "status", "notes"],
     "asset_quality": ["asset_id", "date", "face_similarity", "scene_logic_score", "hand_integrity_flag", "body_consistency_flag", "artifact_flags", "prompt_mode", "reference_pack_used", "rank"],

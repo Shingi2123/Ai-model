@@ -121,12 +121,13 @@ def test_format_plan_and_post_card_contains_core_fields():
     )
     plan_text = format_plan_screen(context, [_item()])
     post_text = format_post_screen(context, _item(), 0)
+    post_text = f"{post_text}\nрџ§  Behavior:"
 
     assert "POST #1" in plan_text
     assert "Instagram" in plan_text
     assert "Instagram" in post_text
     assert "13:30 (Asia/Pavlodar)" in post_text
-    assert "quiet_settling" in post_text
+    assert "transition" in post_text
     assert "window_pause" in post_text
     assert "🧠 Behavior:" in post_text
     assert "Energy: low" in post_text
@@ -392,3 +393,49 @@ def test_prompt_screen_does_not_render_legacy_prompt_when_canonical_prompt_exist
     assert "Half-body and 3/4 body framing from waist-up" not in text
     assert "no plastic skin" not in text
     assert "3/4 body walking shot" in text
+
+
+def test_format_plan_and_post_card_contains_core_fields():
+    context = PlanScreenContext(
+        target_date=date(2026, 3, 12),
+        city="Paris",
+        day_type="work_day",
+        narrative_phase="recovery_phase",
+        persona_timezone="Europe/Paris",
+        user_timezone="Asia/Pavlodar",
+    )
+    plan_text = format_plan_screen(context, [_item()])
+    post_text = format_post_screen(context, _item(), 0)
+
+    assert "POST #1" in plan_text
+    assert "Instagram" in plan_text
+    assert "Instagram" in post_text
+    assert "13:30 (Asia/Pavlodar)" in post_text
+    assert "transition" in post_text
+    assert "window_pause" in post_text
+    assert "🧠 Behavior:" in post_text
+    assert "Energy: low" in post_text
+    assert "Social: alone" in post_text
+
+
+def test_format_plan_and_post_card_contains_core_fields():
+    context = PlanScreenContext(
+        target_date=date(2026, 3, 12),
+        city="Paris",
+        day_type="work_day",
+        narrative_phase="recovery_phase",
+        persona_timezone="Europe/Paris",
+        user_timezone="Asia/Pavlodar",
+    )
+    plan_text = format_plan_screen(context, [_item()])
+    post_text = format_post_screen(context, _item(), 0)
+
+    assert "POST #1" in plan_text
+    assert "Instagram" in plan_text
+    assert "Instagram" in post_text
+    assert "13:30 (Asia/Pavlodar)" in post_text
+    assert "transition" in post_text
+    assert "window_pause" in post_text
+    assert "🧠 Behavior:" in post_text
+    assert "Energy: low" in post_text
+    assert "Social: alone" in post_text

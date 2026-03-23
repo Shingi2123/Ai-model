@@ -30,6 +30,7 @@ class OutfitBuilderEngine:
         day_type: str,
         city: str,
         occasion: str,
+        behavior: Any = None,
     ) -> OutfitSelection:
         strict = self._eligible_items(
             temp_c=temp_c,
@@ -84,27 +85,27 @@ class OutfitBuilderEngine:
         )
 
         selected: Dict[str, WardrobeItem] = {}
-        dress = self._pick_best(eligible, "dress")
+        dress = self._pick_best(eligible, "dress", behavior=behavior)
         if dress:
             selected["dress"] = dress
         else:
-            top = self._pick_best(eligible, "top")
-            bottom = self._pick_best(eligible, "bottom")
+            top = self._pick_best(eligible, "top", behavior=behavior)
+            bottom = self._pick_best(eligible, "bottom", behavior=behavior)
             if top:
                 selected["top"] = top
             if bottom:
                 selected["bottom"] = bottom
 
-        shoes = self._pick_best(eligible, "shoes")
+        shoes = self._pick_best(eligible, "shoes", behavior=behavior)
         if shoes:
             selected["shoes"] = shoes
 
         if temp_c < self.OUTERWEAR_THRESHOLD_C:
-            outerwear = self._pick_best(eligible, "outerwear")
+            outerwear = self._pick_best(eligible, "outerwear", behavior=behavior)
             if outerwear:
                 selected["outerwear"] = outerwear
 
-        accessory = self._pick_best(eligible, "accessory")
+        accessory = self._pick_best(eligible, "accessory", behavior=behavior)
         if accessory:
             selected["accessory"] = accessory
 
@@ -186,13 +187,77 @@ class OutfitBuilderEngine:
         normalized = {occasion.strip().lower(), day_type.strip().lower(), "all"}
         return bool(occasions & normalized)
 
-    def _pick_best(self, eligible: List[WardrobeItem], category: str) -> WardrobeItem | None:
+    def _behavior_tokens(self, behavior: Any) -> set[str]:
+        if behavior is None:
+            return set()
+        tokens: set[str] = set()
+        self_presentation = str(getattr(behavior, "self_presentation", "") or "")
+        habit = str(getattr(behavior, "habit", "") or "")
+        emotional_arc = str(getattr(behavior, "emotional_arc", "") or "")
+        social_mode = str(getattr(behavior, "social_mode", "") or "")
+
+        mapping = {
+            "relaxed": {"relaxed", "soft", "casual", "cozy", "comfort", "minimal", "knit"},
+            "soft": {"soft", "cozy", "comfort", "minimal", "casual"},
+            "composed": {"composed", "clean", "classic", "tailored", "structured", "elegant"},
+            "focused": {"focused", "clean", "uniform", "structured", "practical", "minimal"},
+            "transitional": {"transitional", "travel", "layered", "practical", "soft", "minimal"},
+            "coffee_moment": {"coffee", "cozy", "soft", "comfort", "casual"},
+            "window_pause": {"quiet", "soft", "minimal", "cozy"},
+            "packing": {"travel", "practical", "layered", "clean"},
+            "slow_walk": {"walk", "street", "casual", "comfortable", "active"},
+            "arrival": {"fresh", "soft", "clean"},
+            "transition": {"travel", "layered", "practical"},
+            "departure": {"clean", "practical", "structured"},
+            "social": {"social", "elegant", "composed"},
+            "light_public": {"clean", "minimal", "practical"},
+        }
+        for key in [self_presentation, habit, emotional_arc, social_mode]:
+            tokens.update(mapping.get(key, set()))
+        return tokens
+
+    def _behavior_affinity(self, item: WardrobeItem, category: str, behavior: Any) -> int:
+        if behavior is None:
+            return 0
+
+        item_tokens = {
+            self.manager._normalize_token(item.name),
+            self.manager._normalize_token(item.category),
+        }
+        item_tokens.update(self.manager._normalize_token(style) for style in item.styles)
+        behavior_tokens = self._behavior_tokens(behavior)
+
+        score = 0
+        score += sum(1 for token in behavior_tokens if any(token in item_token for item_token in item_tokens))
+
+        self_presentation = str(getattr(behavior, "self_presentation", "") or "")
+        habit = str(getattr(behavior, "habit", "") or "")
+        place_anchor = str(getattr(behavior, "place_anchor", "") or "")
+        if category == "outerwear" and self_presentation in {"composed", "focused", "transitional"}:
+            score += 2
+        if category == "accessory" and self_presentation in {"composed", "soft"}:
+            score += 1
+        if category == "shoes" and habit == "slow_walk":
+            score += 2
+        if category in {"top", "dress"} and habit in {"coffee_moment", "window_pause"}:
+            score += 1
+        if category in {"top", "bottom", "outerwear"} and place_anchor == "terminal_gate":
+            score += 1
+        return score
+
+    def _pick_best(self, eligible: List[WardrobeItem], category: str, *, behavior: Any = None) -> WardrobeItem | None:
         candidates = [i for i in eligible if i.category == category]
         if not candidates:
             return None
 
         repeats = self._recent_repeats()
-        candidates.sort(key=lambda i: (repeats.get(i.id, 0), self.manager._days_since_used(i, date.today())))
+        candidates.sort(
+            key=lambda i: (
+                -self._behavior_affinity(i, category, behavior),
+                repeats.get(i.id, 0),
+                self.manager._days_since_used(i, date.today()),
+            )
+        )
         return candidates[0]
 
     def _recent_repeats(self) -> Counter:
@@ -537,6 +602,7 @@ class WardrobeManager:
         day_type: str = "day_off",
         city: str = "",
         occasion: str | None = None,
+        behavior: Any = None,
     ) -> OutfitSelection:
         season_now = current_season(today.month)
         return self.outfit_builder.build(
@@ -548,6 +614,7 @@ class WardrobeManager:
             day_type=day_type,
             city=city,
             occasion=occasion or day_type,
+            behavior=behavior,
         )
 
     def persist(self, wardrobe_path: str = "data/state/wardrobe_state.json") -> None:

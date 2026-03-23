@@ -22,6 +22,23 @@ class DummyState:
         return self.behavior_memory
 
 
+class DummyAuxState(DummyState):
+    def __init__(self, behavior_memory=None, habit_memory=None, place_memory=None, object_usage=None):
+        super().__init__(behavior_memory=behavior_memory)
+        self.habit_memory = habit_memory or []
+        self.place_memory = place_memory or []
+        self.object_usage = object_usage or []
+
+    def load_habit_memory(self):
+        return self.habit_memory
+
+    def load_place_memory(self):
+        return self.place_memory
+
+    def load_object_usage(self):
+        return self.object_usage
+
+
 def _context(day_type="travel_day", city="Paris", phase="travel_phase", energy="medium"):
     return {
         "date": date(2026, 3, 20),
@@ -87,3 +104,26 @@ def test_engine_memory_rows_include_new_behavior_fields():
     assert row["place_anchor"] == behavior.place_anchor
     assert row["objects"] == ", ".join(behavior.objects)
     assert row["self_presentation"] == behavior.self_presentation
+
+
+def test_behavior_engine_uses_auxiliary_memory_sheets_for_anti_repeat():
+    state = DummyAuxState(
+        behavior_memory=[],
+        habit_memory=[
+            {"date": "2026-03-18", "city": "Paris", "day_type": "travel_day", "habit": "coffee_moment", "emotional_arc": "transition", "place_anchor": "terminal_gate"},
+            {"date": "2026-03-19", "city": "Paris", "day_type": "travel_day", "habit": "coffee_moment", "emotional_arc": "transition", "place_anchor": "terminal_gate"},
+        ],
+        place_memory=[
+            {"date": "2026-03-18", "city": "Paris", "day_type": "travel_day", "place_anchor": "terminal_gate", "emotional_arc": "transition", "habit": "coffee_moment"},
+            {"date": "2026-03-19", "city": "Paris", "day_type": "travel_day", "place_anchor": "terminal_gate", "emotional_arc": "transition", "habit": "coffee_moment"},
+        ],
+        object_usage=[
+            {"date": "2026-03-19", "city": "Paris", "day_type": "travel_day", "place_anchor": "terminal_gate", "objects": "coffee_cup, carry_on", "habit": "coffee_moment"},
+        ],
+    )
+
+    behavior = BehaviorEngine(state).build(_context(day_type="travel_day", phase="transition_phase", energy="medium"))
+
+    assert behavior.habit != "coffee_moment"
+    assert behavior.place_anchor != "terminal_gate"
+    assert behavior.emotional_arc != "transition"

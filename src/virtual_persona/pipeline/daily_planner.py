@@ -171,10 +171,14 @@ class DailyPlanner:
             DayScene(block=b, location=l, description=d, mood=m, time_of_day=b, activity="", source="template")
             for b, l, d, m in template
         ]
-        scenes = self._apply_behavioral_bias(scenes, context, daily_behavior)
+        scenes = self.apply_behavioral_bias(scenes, context)
         if energy_state == "low":
             return scenes[:2]
         return scenes
+
+    def apply_behavioral_bias(self, scenes: List[DayScene], context: Dict[str, Any]) -> List[DayScene]:
+        behavior = context.get("behavioral_context")
+        return self._apply_behavioral_bias(scenes, context, getattr(behavior, "daily_state", None))
 
     def _apply_behavioral_bias(self, scenes: List[DayScene], context: Dict[str, Any], daily_behavior: Any) -> List[DayScene]:
         behavior = context.get("behavioral_context")

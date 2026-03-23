@@ -67,6 +67,24 @@ class PipelineOrchestrator:
             llm = TemplateFallbackProvider()
         self.content_generator = ContentGenerator(llm, self.state)
 
+    @staticmethod
+    def _behavior_style_hint(context: dict) -> str:
+        behavior = context.get("behavioral_context")
+        base_style = context["character"].style.preferred[0]
+        if behavior is None:
+            return base_style
+        style_tokens = [base_style]
+        style_tokens.extend(
+            token
+            for token in [
+                str(getattr(behavior, "self_presentation", "") or "").replace("_", " "),
+                str(getattr(behavior, "habit", "") or "").replace("_", " "),
+                str(getattr(behavior, "emotional_arc", "") or "").replace("_", " "),
+            ]
+            if token
+        )
+        return ", ".join(dict.fromkeys(style_tokens))
+
     def _load_frozen_day(self, target_date: date) -> DailyPackage | None:
         if not hasattr(self.state, "load_publishing_plan"):
             return None
@@ -125,6 +143,10 @@ class PipelineOrchestrator:
         context["narrative_context"] = narrative_context
         context["behavioral_context"] = self.behavior_engine.build(context)
         context["behavior_profile"] = {}
+        if hasattr(self.state, "save_run_log") and context.get("behavioral_context") is not None:
+            behavior = context["behavioral_context"]
+            self.state.save_run_log("debug", f"[BEHAVIOR] generated: {behavior.debug_summary}")
+            self.state.save_run_log("debug", f"[BEHAVIOR] source: {behavior.source}")
         if context.get("life_state"):
             context["life_state"].narrative_phase = narrative_context.narrative_phase
             context["life_state"].energy_state = narrative_context.energy_state
@@ -141,7 +163,7 @@ class PipelineOrchestrator:
         generated_scenes, _ = self.scene_activity_engine.ensure_candidates(context)
         scenes = self.planner.build_day(context)
         if not scenes and generated_scenes:
-            scenes = generated_scenes
+            scenes = self.planner.apply_behavioral_bias(generated_scenes, context)
 
         scene_memory = self.state.load_scene_memory() if hasattr(self.state, "load_scene_memory") else []
         activity_memory = self.state.load_activity_memory() if hasattr(self.state, "load_activity_memory") else []
@@ -160,11 +182,12 @@ class PipelineOrchestrator:
         outfit = self.wardrobe.select_outfit(
             temp_c=context["weather"].temp_c,
             condition=context["weather"].condition,
-            preferred_style=context["character"].style.preferred[0],
+            preferred_style=self._behavior_style_hint(context),
             today=context["date"],
             day_type=context["day_type"],
             city=context["city"],
             occasion=context["day_type"],
+            behavior=context.get("behavioral_context"),
         )
         scenes = self.scene_moment_engine.generate(context, scenes)
         content = self.content_generator.generate(context, scenes, outfit.summary, outfit.item_ids)

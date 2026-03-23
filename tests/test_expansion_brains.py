@@ -1,5 +1,6 @@
 from datetime import date
 
+from virtual_persona.models.domain import BehaviorState
 from virtual_persona.pipeline.scene_activity_engine import SceneActivityExpansionEngine
 from virtual_persona.pipeline.wardrobe_brain import WardrobeBrain
 
@@ -62,6 +63,34 @@ def test_scene_activity_engine_generates_candidates():
     assert notes
     assert state.scene_candidates
     assert state.activity_candidates
+
+
+def test_scene_activity_engine_applies_behavior_to_generated_candidates():
+    state = DummyState()
+    engine = SceneActivityExpansionEngine(state)
+
+    context = {
+        "date": date(2026, 1, 18),
+        "day_type": "travel_day",
+        "city": "Prague",
+        "life_state": type("LS", (), {"season": "winter", "fatigue_level": 6})(),
+        "behavioral_context": BehaviorState(
+            energy_level="low",
+            social_mode="alone",
+            emotional_arc="transition",
+            habit="packing",
+            place_anchor="terminal_gate",
+            objects=["carry_on", "bag"],
+            self_presentation="transitional",
+        ),
+    }
+
+    scenes, _ = engine.ensure_candidates(context)
+
+    assert scenes
+    assert scenes[0].location == "airport terminal"
+    assert "handling luggage" in scenes[0].description
+    assert "no people nearby" in scenes[0].description
 
 
 def test_wardrobe_brain_adds_balance_candidate():

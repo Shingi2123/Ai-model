@@ -39,14 +39,36 @@ def _load_memory_rows(memory: Any) -> List[Dict[str, Any]]:
     if hasattr(memory, "load_behavior_memory"):
         try:
             rows = memory.load_behavior_memory() or []
-            return [_normalize_memory_row(dict(row)) for row in rows if isinstance(row, dict)]
+            return _merge_auxiliary_memory(
+                [_normalize_memory_row(dict(row)) for row in rows if isinstance(row, dict)],
+                memory,
+            )
         except Exception:
             return []
+    if any(hasattr(memory, name) for name in ("load_habit_memory", "load_place_memory", "load_object_usage")):
+        return _merge_auxiliary_memory([], memory)
     return []
 
 
 def _normalize_memory_row(row: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(row)
+    behavior_state = normalized.get("behavior_state")
+    if behavior_state and isinstance(behavior_state, str):
+        try:
+            parsed = json.loads(behavior_state)
+        except Exception:
+            parsed = {}
+        if isinstance(parsed, dict):
+            for key in [
+                "energy_level",
+                "social_mode",
+                "emotional_arc",
+                "habit",
+                "place_anchor",
+                "objects",
+                "self_presentation",
+            ]:
+                normalized.setdefault(key, parsed.get(key, ""))
     if not normalized.get("habit"):
         normalized["habit"] = normalized.get("selected_habit", "")
     if not normalized.get("place_anchor"):
@@ -57,7 +79,58 @@ def _normalize_memory_row(row: Dict[str, Any]) -> Dict[str, Any]:
         normalized["self_presentation"] = normalized.get("self_presentation_mode", "")
     if not normalized.get("social_mode"):
         normalized["social_mode"] = normalized.get("social_presence_mode", "")
+    normalized["objects"] = _split_csv(normalized.get("objects"))
     return normalized
+
+
+def _memory_key(row: Dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(row.get("date") or "").strip(),
+        str(row.get("city") or "").strip(),
+        str(row.get("day_type") or "").strip(),
+    )
+
+
+def _upsert_memory_row(rows_by_key: Dict[tuple[str, str, str], Dict[str, Any]], row: Dict[str, Any]) -> None:
+    normalized = _normalize_memory_row(row)
+    key = _memory_key(normalized)
+    if not any(key):
+        return
+    existing = rows_by_key.get(key, {})
+    merged = dict(existing)
+    for field, value in normalized.items():
+        if field == "objects":
+            current = _split_csv(merged.get("objects"))
+            merged["objects"] = list(dict.fromkeys(current + _split_csv(value)))
+            continue
+        if value not in (None, "", []):
+            merged[field] = value
+        else:
+            merged.setdefault(field, value)
+    rows_by_key[key] = merged
+
+
+def _merge_auxiliary_memory(rows: List[Dict[str, Any]], memory: Any) -> List[Dict[str, Any]]:
+    rows_by_key: Dict[tuple[str, str, str], Dict[str, Any]] = {}
+    for row in rows:
+        _upsert_memory_row(rows_by_key, row)
+
+    auxiliary_loaders = {
+        "load_habit_memory": ("habit", "emotional_arc", "place_anchor"),
+        "load_place_memory": ("place_anchor", "emotional_arc", "habit"),
+        "load_object_usage": ("place_anchor", "objects", "habit"),
+    }
+    for loader_name in auxiliary_loaders:
+        if not hasattr(memory, loader_name):
+            continue
+        try:
+            extra_rows = getattr(memory, loader_name)() or []
+        except Exception:
+            continue
+        for row in extra_rows:
+            if isinstance(row, dict):
+                _upsert_memory_row(rows_by_key, row)
+    return list(rows_by_key.values())
 
 
 def _sort_memory(memory: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:

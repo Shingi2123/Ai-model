@@ -60,6 +60,18 @@ def _format_compact_meta(context: PlanScreenContext) -> list[str]:
     return lines
 
 
+def _parse_behavior_state(value: str | None) -> dict[str, str]:
+    parsed = {"energy": "", "social": "", "arc": "", "habit": "", "place": "", "objects": "", "self": ""}
+    for chunk in str(value or "").split(";"):
+        if "=" not in chunk:
+            continue
+        key, raw = chunk.split("=", 1)
+        normalized = key.strip().lower()
+        if normalized in parsed:
+            parsed[normalized] = raw.strip()
+    return parsed
+
+
 def format_plan_screen(context: PlanScreenContext, items: list[PublishingPlanItem]) -> str:
     header_lines = [f"Plan for {context.target_date.strftime('%d %B')}"]
     header_lines.extend(_format_compact_meta(context))
@@ -120,6 +132,45 @@ def format_post_screen(context: PlanScreenContext, item: PublishingPlanItem, pos
 
 def _format_detail_header(item: PublishingPlanItem, post_index: int) -> str:
     return f"POST #{post_index + 1} - {item.platform} / {item.content_type.title()}"
+
+
+def format_post_screen(context: PlanScreenContext, item: PublishingPlanItem, post_index: int) -> str:
+    source_tz = item.post_timezone or context.persona_timezone
+    user_time = _convert_time_for_user(context.target_date, item.post_time, source_tz, context.user_timezone)
+    emoji = _post_header_emoji(item.content_type)
+    behavior = _parse_behavior_state(item.behavior_state)
+    energy = behavior["energy"] or "medium"
+    social = behavior["social"] or item.social_presence_mode or "alone"
+    emotional_arc = behavior["arc"] or item.emotional_arc or "routine"
+    habit = behavior["habit"] or item.habit or item.habit_used or "none"
+    place = behavior["place"] or item.place_anchor or item.familiar_place_anchor or "kitchen_corner"
+    objects = behavior["objects"] or item.objects or item.recurring_objects_in_scene or "none"
+    self_presentation = behavior["self"] or item.self_presentation or item.self_presentation_mode or "relaxed"
+    behavior_line = (
+        "\n\n🧠 Behavior:"
+        f"\nEnergy: {energy}"
+        f"\nSocial: {social}"
+        "\n\n🎭 Emotional arc:"
+        f"\n{emotional_arc}"
+        "\n\n🔁 Habit:"
+        f"\n{habit}"
+        "\n\n📍 Place:"
+        f"\n{place}"
+        "\n\n🎒 Objects:"
+        f"\n{short_text(objects, 80)}"
+        "\n\n👤 Self:"
+        f"\n{self_presentation}"
+    )
+    return (
+        f"{emoji} POST #{post_index + 1}\n\n"
+        f"Platform: {item.platform}\n"
+        f"Format: {item.content_type.title()}\n"
+        f"Persona: {item.post_time} ({source_tz})\n"
+        f"You: {user_time} ({context.user_timezone})\n\n"
+        f"Moment: {short_text(item.scene_moment, 220)}\n"
+        f"Caption: {short_text(item.short_caption or item.caption_text, 220)}"
+        f"{behavior_line}"
+    )
 
 
 def _display_value(value: str | None, fallback: str) -> str:

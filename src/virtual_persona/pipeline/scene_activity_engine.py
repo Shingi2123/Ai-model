@@ -47,6 +47,70 @@ class SceneActivityExpansionEngine:
             )
         return out
 
+    @staticmethod
+    def _anchor_location(place_anchor: str, fallback: str) -> str:
+        return {
+            "hotel_window": "hotel room",
+            "kitchen_corner": "home kitchen",
+            "terminal_gate": "airport terminal",
+            "cafe_corner": "cafe corner",
+        }.get(place_anchor, fallback)
+
+    def _apply_behavior_seed_bias(self, context: Dict[str, Any], scenes: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        behavior = context.get("behavioral_context")
+        if behavior is None:
+            return scenes
+
+        energy = str(getattr(behavior, "energy_level", "medium") or "medium")
+        social_mode = str(getattr(behavior, "social_mode", "alone") or "alone")
+        habit = str(getattr(behavior, "habit", "none") or "none")
+        place_anchor = str(getattr(behavior, "place_anchor", "") or "")
+        emotional_arc = str(getattr(behavior, "emotional_arc", "routine") or "routine")
+        objects = [str(obj).replace("_", " ") for obj in list(getattr(behavior, "objects", []) or [])]
+
+        movement_hint = {
+            "low": "still posture",
+            "medium": "natural pause moment",
+            "high": "slow relaxed movement",
+        }.get(energy, "natural pause moment")
+        interaction_hint = {
+            "window_pause": "touching the window lightly",
+            "coffee_moment": "holding coffee close",
+            "packing": "handling luggage",
+            "slow_walk": "walking with a bag",
+            "none": "resting hands naturally",
+        }.get(habit, "resting hands naturally")
+        social_hint = {
+            "alone": "no people nearby",
+            "light_public": "soft background people nearby",
+            "social": "public life moving nearby",
+        }.get(social_mode, "no people nearby")
+
+        adjusted: List[Dict[str, str]] = []
+        for index, row in enumerate(scenes):
+            updated = dict(row)
+            if index == 0 and place_anchor:
+                updated["location"] = self._anchor_location(place_anchor, updated.get("location", "city"))
+            if energy == "low" and index == len(scenes) - 1:
+                updated["location"] = self._anchor_location(place_anchor, updated.get("location", "home"))
+                updated["mood"] = "reflective" if emotional_arc == "transition" else "calm"
+            elif energy == "high" and index == 1:
+                updated["location"] = "city street" if place_anchor != "terminal_gate" else "airport terminal"
+                updated["mood"] = "curious" if emotional_arc == "arrival" else "focused"
+
+            description_parts = [updated.get("description", "Lifestyle moment"), movement_hint, interaction_hint, social_hint]
+            if emotional_arc == "arrival":
+                description_parts.append("with the feeling of a new place")
+            elif emotional_arc == "transition":
+                description_parts.append("before moving on again")
+            elif emotional_arc == "reflection":
+                description_parts.append("in a quieter reflective rhythm")
+            if objects:
+                description_parts.append(f"with {' and '.join(objects[:2])} nearby")
+            updated["description"] = ", ".join(part for part in description_parts if part)
+            adjusted.append(updated)
+        return adjusted
+
     def _scene_seed_pool(self, context: Dict[str, Any]) -> List[Dict[str, str]]:
         day_type = context.get("day_type", "day_off")
         city = context.get("city", "")
@@ -124,7 +188,7 @@ class SceneActivityExpansionEngine:
             row["day_type"] = day_type
             row["city"] = city
             row["season"] = season
-        return scenes
+        return self._apply_behavior_seed_bias(context, scenes)
 
     def _activity_seed_pool(self, context: Dict[str, Any], scenes: List[Dict[str, str]]) -> List[Dict[str, Any]]:
         life_state = context.get("life_state")
