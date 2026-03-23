@@ -271,12 +271,7 @@ def resolve_canonical_prompt(
         resolved_prompt = meta_prompt
         prompt_source = "prompt_package_json.final_prompt"
     else:
-        row_prompt = _extract_value(row, "prompt_text", "prompt")
-        if row_prompt and not is_legacy_prompt(row_prompt, row=row, prompt_meta=prompt_meta):
-            resolved_prompt = row_prompt
-            prompt_source = "row.prompt_text"
-        else:
-            resolved_prompt = default
+        resolved_prompt = default
 
     return resolved_prompt, prompt_source, meta_legacy, meta_version or ("v6" if resolved_prompt == meta_prompt and resolved_prompt else "")
 

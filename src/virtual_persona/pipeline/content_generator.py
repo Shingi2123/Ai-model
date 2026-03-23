@@ -157,11 +157,7 @@ class ContentGenerator:
             story_package = self.prompt_composer.compose_package(context, scene, outfit_summary, 'story', outfit_item_ids)
 
             photo_prompt_text = photo_package["final_prompt"]
-            if scene_description and scene_description not in photo_prompt_text:
-                photo_prompt_text = f"{scene_description}. {photo_prompt_text}"
             video_prompt_text = video_package["final_prompt"]
-            if scene_description and scene_description not in video_prompt_text:
-                video_prompt_text = f"{scene_description}. {video_prompt_text}"
             story_text = f"{story_package['final_prompt']} {self._safe_format(story_template, mapping)}"
 
             photo_prompts.append(photo_prompt_text)

@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime
 
 from virtual_persona.delivery.publishing_formatter import format_command_message, format_plan_message
@@ -46,6 +47,19 @@ def _item(post_time: str = "09:30", content_type: str = "photo") -> PublishingPl
         outfit_ids=["look_1"],
         prompt_type=content_type,
         prompt_text="very long detailed prompt text",
+        prompt_package_json=json.dumps(
+            {
+                "final_prompt": "very long detailed prompt text",
+                "negative_prompt": "bad anatomy",
+                "shot_archetype": "friend_shot",
+                "platform_intent": "instagram_feed",
+                "generation_mode": "dense_mode",
+                "framing_mode": "candid 3/4 body shot",
+                "prompt_mode": "dense",
+                "identity_mode": "reference_manifest",
+                "reference_pack_type": "lifestyle",
+            }
+        ),
         caption_text="caption text",
         short_caption="short caption",
         post_timezone="Europe/Paris",
@@ -70,11 +84,11 @@ def test_command_views_for_captions_moments_photo_video():
 
     photo_text = format_command_message(package, items, "/photo", "Europe/Paris", "Asia/Pavlodar")
     assert "very long detailed prompt text" in photo_text
-    assert "Video" not in photo_text
+    assert "Видео" not in photo_text
 
     video_text = format_command_message(package, items, "/video", "Europe/Paris", "Asia/Pavlodar")
     assert "very long detailed prompt text" in video_text
-    assert "Photo" not in video_text
+    assert "Фото" not in video_text
 
 
 def test_command_views_use_canonical_prompt_instead_of_legacy_item_prompt():

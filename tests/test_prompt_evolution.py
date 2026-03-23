@@ -1,4 +1,6 @@
-from virtual_persona.pipeline.prompt_composer import PromptComposer
+import pytest
+
+from virtual_persona.pipeline.prompt_composer import PromptComposer, PromptValidationError
 from virtual_persona.models.domain import BehaviorState
 
 
@@ -244,6 +246,40 @@ def test_positive_prompt_has_no_duplicate_blocks_or_repeated_words():
     assert "walking walking" not in prompt.lower()
 
 
+def test_prompt_mode_reflects_actual_prompt_length():
+    package = _compose()
+
+    expected = "dense" if len(package["final_prompt"]) > PromptComposer.COMPACT_PROMPT_THRESHOLD else "compact"
+    assert package["prompt_mode"] == expected
+
+
+def test_outfit_fallback_adds_missing_shoes_when_summary_is_incomplete():
+    package = _compose(outfit_summary="cream cardigan, denim")
+    outfit_block = package["final_prompt"].split("\n\n")[3].lower()
+
+    assert "cream cardigan" in outfit_block
+    assert "denim" in outfit_block
+    assert "sneakers" in outfit_block or "boots" in outfit_block or "sandals" in outfit_block or "shoes" in outfit_block
+
+
+def test_empty_outfit_uses_default_outfit_instead_of_blank_block():
+    package = _compose(outfit_summary=".")
+    outfit_block = package["final_prompt"].split("\n\n")[3]
+
+    assert outfit_block.startswith("Outfit: ")
+    assert outfit_block != "Outfit: ."
+
+
+def test_validate_prompt_rejects_cyrillic():
+    composer = PromptComposer(DummyState())
+    with pytest.raises(PromptValidationError, match="Cyrillic detected in prompt"):
+        composer._validate_canonical_prompt(
+            "Identity: Овальная face.\n\nmirror selfie head-and-shoulders shot\n\nScene: morning routine.\n\nOutfit: knit top, jeans, white sneakers.\n\nEnvironment: photorealistic room; accurate perspective.\n\nMood: calm ease.",
+            Scene(),
+            BASE_CONTEXT,
+        )
+
+
 def test_behavior_influences_prompt_with_movement_mood_and_objects():
     composer = PromptComposer(DummyState())
     context = dict(BASE_CONTEXT)
@@ -270,5 +306,6 @@ def test_behavior_influences_prompt_with_movement_mood_and_objects():
     assert "coffee cup" in prompt
     assert "carry on" in prompt
     assert "bag" in prompt
+    assert "checking the boarding screen occasionally" in prompt
     assert "transitional mood" in prompt
     assert "soft background people only" in prompt

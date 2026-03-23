@@ -45,6 +45,20 @@ def _post_header_emoji(content_type: str) -> str:
     return CONTENT_EMOJI.get(content_type.lower(), "✍️")
 
 
+def _content_type_label(content_type: str) -> str:
+    normalized = (content_type or "").strip().lower()
+    labels = {
+        "photo": "Фото",
+        "carousel": "Карусель",
+        "video": "Видео",
+        "reel": "Рилс",
+        "stories": "Сторис",
+        "story": "Сторис",
+        "text": "Текст",
+    }
+    return labels.get(normalized, content_type or "Пост")
+
+
 def _short_text(text: str, limit: int) -> str:
     compact = " ".join((text or "").split())
     if len(compact) <= limit:
@@ -100,10 +114,10 @@ def format_plan_items(items: Iterable[PublishingPlanItem], package: DailyPackage
         emoji = _post_header_emoji(item.content_type)
         rows.append(
             f"{SECTION_DIVIDER}\n\n"
-            f"{emoji} POST #{i}\n"
+            f"{emoji} ПОСТ #{i}\n"
             f"🕒 Персонаж: {item.post_time} ({source_timezone})\n"
             f"🕒 Вы: {user_time} ({user_timezone})\n"
-            f"🌐 Платформа: {item.platform} • {item.content_type.title()}\n"
+            f"🌐 Платформа: {item.platform} • {_content_type_label(item.content_type)}\n"
             f"🎯 Момент: {_short_text(item.scene_moment, 120)}\n"
             f"✍️ Подпись: {_short_text(item.short_caption or item.caption_text, 140)}"
         )
@@ -134,25 +148,25 @@ def _format_detailed_prompt(items: list[PublishingPlanItem], content_filter: set
     def _render(item: PublishingPlanItem, idx: int) -> str:
         prompt_text, _, _, _ = resolve_canonical_prompt(item)
         base = (
-            f"🧠 #{idx} {item.platform} / {item.content_type.title()}\n"
+            f"🧠 #{idx} {item.platform} / {_content_type_label(item.content_type)}\n"
             f"🎯 {item.scene_moment}\n\n"
-            f"✍️ Caption:\n{item.caption_text}\n\n"
-            f"📝 Short caption:\n{item.short_caption or item.caption_text}\n\n"
-            f"🖼 Prompt:\n{prompt_text}"
+            f"✍️ Подпись:\n{item.caption_text}\n\n"
+            f"📝 Короткая подпись:\n{item.short_caption or item.caption_text}\n\n"
+            f"🖼 Промпт:\n{prompt_text}"
         )
         details = [base]
         if getattr(item, "negative_prompt", ""):
-            details.append(f"🚫 Negative prompt:\n{item.negative_prompt}")
+            details.append(f"🚫 Негативный промпт:\n{item.negative_prompt}")
         if getattr(item, "shot_archetype", ""):
-            details.append(f"📷 Shot archetype: {item.shot_archetype}")
+            details.append(f"📷 Тип кадра: {item.shot_archetype}")
         if getattr(item, "platform_intent", ""):
-            details.append(f"🎯 Platform intent: {item.platform_intent}")
+            details.append(f"🎯 Назначение платформы: {item.platform_intent}")
         if getattr(item, "identity_mode", ""):
-            details.append(f"🧬 Identity mode: {item.identity_mode}")
+            details.append(f"🧬 Режим идентичности: {item.identity_mode}")
         if getattr(item, "reference_pack_type", ""):
-            details.append(f"🧩 Reference pack: {item.reference_pack_type}")
+            details.append(f"🧩 Пак референсов: {item.reference_pack_type}")
         if getattr(item, "face_similarity_score", None) is not None:
-            details.append(f"🪞 Face similarity: {item.face_similarity_score}")
+            details.append(f"🪞 Сходство лица: {item.face_similarity_score}")
         return "\n\n".join(details)
 
     return "\n\n".join(_render(item, idx) for idx, item in enumerate(filtered, start=1))
@@ -171,7 +185,7 @@ def format_command_message(package: DailyPackage, items: list[PublishingPlanItem
             f"📝 #{idx}\n{item.short_caption or item.caption_text}" for idx, item in enumerate(items, start=1)
         ) or "Нет подписей."
     if cmd == "/moments":
-        return "\n\n".join(f"🎯 #{idx}\n{item.scene_moment}" for idx, item in enumerate(items, start=1)) or "Нет scene moments."
+        return "\n\n".join(f"🎯 #{idx}\n{item.scene_moment}" for idx, item in enumerate(items, start=1)) or "Нет моментов."
     if cmd == "/debug":
         first = items[0] if items else None
         life_state = package.life_state

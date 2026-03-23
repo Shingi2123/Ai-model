@@ -7,10 +7,15 @@ from typing import Any, Dict, List
 from virtual_persona.pipeline.identity import CharacterIdentityManager
 
 
+class PromptValidationError(ValueError):
+    pass
+
+
 @dataclass
 class PromptComposer:
     state_store: Any
     CANONICAL_PROMPT_VERSION = "v6"
+    COMPACT_PROMPT_THRESHOLD = 740
     CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
     FORBIDDEN_POSITIVE_PHRASES: tuple[str, ...] = (
         "no plastic skin",
@@ -22,6 +27,16 @@ class PromptComposer:
         "no editorial fashion look",
         "no overproduced campaign lighting",
         "half-body and 3/4 body framing from waist-up",
+    )
+    FRAMING_TOKENS: tuple[str, ...] = (
+        "3/4 body",
+        "waist-up",
+        "head-and-shoulders",
+        "full body",
+        "head-to-toe",
+        "mirror selfie",
+        "front selfie",
+        "portrait shot",
     )
 
     CAMERA_ARCHETYPES: Dict[str, Dict[str, str]] = None  # type: ignore[assignment]
@@ -122,7 +137,7 @@ class PromptComposer:
         platform_behavior = self._platform_behavior_intent(content_type, platform_intent)
         identity_manager = CharacterIdentityManager()
         identity_pack = identity_manager.load_pack()
-        prompt_mode = self._prompt_mode(shot_archetype, content_type, getattr(scene, "scene_moment", ""))
+        prompt_mode = "dense"
         framing_mode = str(scene_alignment["framing_mode"])
 
         scene_loc = getattr(scene, "location", context.get("city", "city"))
@@ -135,7 +150,9 @@ class PromptComposer:
         body_anchor_shot = "full_body" if generation_mode == "full-body_mode" and shot_archetype == "friend_shot" else shot_archetype
         body_anchor = identity_manager.body_anchor(body_anchor_shot, context, identity_pack)
         scene_action = self._scene_action(scene, scene_desc, scene_loc)
-        wardrobe_block = self._wardrobe_context(outfit_summary, shot_archetype, item_ids_text)
+        weather = context.get("weather")
+        normalized_outfit = self._normalize_outfit_summary(outfit_summary, scene, context.get("city", ""), weather)
+        wardrobe_block = self._wardrobe_context(normalized_outfit, shot_archetype, item_ids_text)
         camera_block = self._camera_context(shot_archetype, context)
         realism_block = self._realism_cues(shot_archetype, scene_loc)
         continuity_block = self._continuity_cues(context, scene)
@@ -215,6 +232,7 @@ class PromptComposer:
             social_behavior=ordered_blocks["social_behavior"],
             scene_tags=scene_alignment.get("scene_tags", []),
         )
+        prompt_mode = self._prompt_mode(final_prompt)
         ordered_blocks["final_prompt"] = final_prompt
         ordered_blocks["prompt_format_version"] = self.CANONICAL_PROMPT_VERSION
         ordered_blocks["shot_archetype"] = shot_archetype
@@ -225,17 +243,12 @@ class PromptComposer:
         ordered_blocks["primary_anchors"] = primary_anchors
         ordered_blocks["secondary_anchors"] = secondary_anchors
         ordered_blocks["manual_generation_step"] = manual_step
+        ordered_blocks["prompt_mode"] = prompt_mode
         return ordered_blocks
 
     @staticmethod
-    def _prompt_mode(shot_archetype: str, content_type: str, scene_text: str) -> str:
-        simple_shots = {"front_selfie", "mirror_selfie", "close_portrait", "waist_up", "seated_table_shot"}
-        simple_tokens = {"selfie", "portrait", "coffee", "airport", "seated", "waiting"}
-        lowered = str(scene_text or "").lower()
-        is_simple_scene = len(lowered.split()) < 14 or any(token in lowered for token in simple_tokens)
-        if shot_archetype in simple_shots and content_type in {"photo", "story", "stories"} and is_simple_scene:
-            return "compact"
-        return "dense"
+    def _prompt_mode(prompt: str) -> str:
+        return "dense" if len((prompt or "").strip()) > PromptComposer.COMPACT_PROMPT_THRESHOLD else "compact"
 
     def _resolve_generation_mode(self, scene: Any, shot_archetype: str) -> str:
         explicit = getattr(scene, "generation_mode", "")
@@ -672,7 +685,7 @@ class PromptComposer:
             mood_block,
         ]
         prompt = "\n\n".join(block.strip() for block in blocks if block.strip())
-        self._validate_canonical_prompt(prompt, scene)
+        self._validate_canonical_prompt(prompt, scene, context)
         return prompt
 
     @staticmethod
@@ -691,25 +704,25 @@ class PromptComposer:
     def _identity_block(self, identity_anchor: str, body_anchor: str) -> str:
         identity_values = self._parse_anchor_values(identity_anchor, "stable identity anchor: ")
         body_values = self._parse_anchor_values(body_anchor, "body consistency anchor: ")
-        age = identity_values.get("age", "22")
+        age = self._ensure_english_fragment(identity_values.get("age", "22"), "22")
         if age.isdigit():
             age = f"{age}-year-old"
         phrases = [
             age,
             "woman",
-            identity_values.get("face", "soft oval face"),
-            identity_values.get("jawline", "gentle defined jawline"),
-            identity_values.get("nose", "straight natural nose"),
-            identity_values.get("eyes", "green almond eyes"),
-            identity_values.get("lips", "natural medium lips"),
-            identity_values.get("skin", "natural skin texture"),
-            identity_values.get("freckles", "subtle freckles"),
-            identity_values.get("hair", "light chestnut medium-length hair"),
-            identity_values.get("makeup", "soft everyday makeup"),
-            body_values.get("body_type", "slim natural build"),
-            body_values.get("estimated_height", "average height"),
-            body_values.get("shoulder_set", "relaxed shoulders"),
-            body_values.get("posture", "natural upright posture"),
+            self._ensure_english_fragment(identity_values.get("face", "soft oval face"), "soft oval face"),
+            self._ensure_english_fragment(identity_values.get("jawline", "gentle defined jawline"), "gentle defined jawline"),
+            self._ensure_english_fragment(identity_values.get("nose", "straight natural nose"), "straight natural nose"),
+            self._ensure_english_fragment(identity_values.get("eyes", "green almond eyes"), "green almond eyes"),
+            self._ensure_english_fragment(identity_values.get("lips", "natural medium lips"), "natural medium lips"),
+            self._ensure_english_fragment(identity_values.get("skin", "natural skin texture"), "natural skin texture"),
+            self._ensure_english_fragment(identity_values.get("freckles", "subtle freckles"), "subtle freckles"),
+            self._ensure_english_fragment(identity_values.get("hair", "light chestnut medium-length hair"), "light chestnut medium-length hair"),
+            self._ensure_english_fragment(identity_values.get("makeup", "soft everyday makeup"), "soft everyday makeup"),
+            self._ensure_english_fragment(body_values.get("body_type", "slim natural build"), "slim natural build"),
+            self._ensure_english_fragment(body_values.get("estimated_height", "average height"), "average height"),
+            self._ensure_english_fragment(body_values.get("shoulder_set", "relaxed shoulders"), "relaxed shoulders"),
+            self._ensure_english_fragment(body_values.get("posture", "natural upright posture"), "natural upright posture"),
         ]
         return f"Identity: {'; '.join(self._dedupe_phrases(phrases))}."
 
@@ -736,23 +749,9 @@ class PromptComposer:
         visual_focus = self._strip_scene_noise(str(getattr(scene, "visual_focus", "") or "").strip())
         tag_prefix = self._scene_tag_prefix(scene_tags)
         behavior = context.get("behavioral_context")
-        movement = ""
-        interaction = ""
-        objects = ""
-        if behavior is not None:
-            movement = {
-                "low": "still posture",
-                "medium": "natural pause moment",
-                "high": "slow relaxed movement",
-            }.get(str(getattr(behavior, "energy_level", "medium") or "medium"), "")
-            interaction = {
-                "window_pause": "touching window lightly",
-                "coffee_moment": "holding cup naturally",
-                "packing": "handling luggage",
-                "slow_walk": "walking with a bag",
-                "none": "resting hands naturally",
-            }.get(str(getattr(behavior, "habit", "none") or "none"), "")
-            objects = ", ".join(getattr(behavior, "objects", []) or [])
+        object_terms = self._behavior_object_terms(context)
+        movement, interaction, expression = self._behavior_scene_cues(context, scene)
+        micro_detail = self._scene_micro_detail(scene, behavior, object_terms, visual_focus)
         if self._is_travel_walk(lowered):
             pieces = [f"{tag_prefix} walking through the airport terminal before boarding" if tag_prefix else "Walking through the airport terminal before boarding"]
             luggage_phrase = self._travel_luggage_phrase(lowered, visual_focus).lstrip(", ").strip()
@@ -762,11 +761,18 @@ class PromptComposer:
                 pieces.append(movement)
             if interaction:
                 pieces.append(interaction)
+            if expression:
+                pieces.append(expression)
+            if micro_detail:
+                pieces.append(micro_detail)
+            for object_term in object_terms:
+                if object_term.lower() not in " ".join(pieces).lower():
+                    pieces.append(self._object_scene_phrase(object_term, scene))
             return f"Scene: {', '.join(self._dedupe_phrases(pieces))}."
 
         activity = str(getattr(scene, "activity", "") or "").strip().replace("_", " ")
-        base_scene = self._strip_scene_noise(scene_desc)
-        location = self._clean_fragment(scene_loc)
+        base_scene = self._ensure_english_fragment(self._strip_scene_noise(scene_desc), "")
+        location = self._ensure_english_fragment(self._clean_fragment(scene_loc), self._scene_location_fallback(scene))
         pieces: List[str] = []
         if base_scene:
             pieces.append(base_scene)
@@ -784,15 +790,23 @@ class PromptComposer:
             pieces.append(movement)
         if interaction and interaction.lower() not in " ".join(pieces).lower():
             pieces.append(interaction)
-        if objects and objects.lower() not in " ".join(pieces).lower():
-            pieces.append(f"objects visible: {objects}")
+        if expression and expression.lower() not in " ".join(pieces).lower():
+            pieces.append(expression)
+        if micro_detail and micro_detail.lower() not in " ".join(pieces).lower():
+            pieces.append(micro_detail)
+        for object_term in object_terms:
+            if object_term.lower() not in " ".join(pieces).lower():
+                pieces.append(self._object_scene_phrase(object_term, scene))
         return f"Scene: {', '.join(self._dedupe_phrases(pieces))}."
 
     def _outfit_block(self, wardrobe_block: str) -> str:
         cleaned = wardrobe_block.replace("outfit: ", "").strip()
         cleaned = cleaned.split(";")[0].strip().rstrip(".")
         items = re.split(r"\s*(?:,|\+|/|;)\s*", cleaned)
-        normalized = [self._clean_fragment(item) for item in items if self._clean_fragment(item)]
+        normalized = [self._ensure_english_fragment(self._clean_fragment(item), "") for item in items if self._clean_fragment(item)]
+        normalized = [item for item in normalized if item]
+        if not normalized:
+            raise PromptValidationError("Outfit block is empty")
         return f"Outfit: {', '.join(self._dedupe_phrases(normalized))}."
 
     def _environment_block(self, context: Dict[str, Any], scene: Any, scene_loc: str, scene_tags: List[str], continuity_block: str) -> str:
@@ -854,6 +868,17 @@ class PromptComposer:
         return f"Mood: {base}."
 
     @staticmethod
+    def _scene_location_fallback(scene: Any) -> str:
+        lowered = PromptComposer._scene_text(scene).lower()
+        if any(token in lowered for token in ["airport", "terminal", "boarding", "gate"]):
+            return "airport terminal"
+        if "cafe" in lowered:
+            return "cafe interior"
+        if any(token in lowered for token in ["home", "kitchen"]):
+            return "home interior"
+        return "everyday location"
+
+    @staticmethod
     def _clean_fragment(text: str) -> str:
         cleaned = " ".join(str(text or "").replace("_", " ").split())
         return cleaned.strip(" ,;:.")
@@ -875,10 +900,10 @@ class PromptComposer:
             "sad",
             "soft light",
         ]
-        lowered = cleaned.lower()
+        result = cleaned
         for token in banned:
-            lowered = lowered.replace(token, " ")
-        return self._clean_fragment(lowered)
+            result = re.sub(re.escape(token), " ", result, flags=re.IGNORECASE)
+        return self._clean_fragment(result)
 
     @staticmethod
     def _normalize_phrase_key(text: str) -> str:
@@ -898,37 +923,203 @@ class PromptComposer:
             result.append(cleaned)
         return result
 
-    def _validate_canonical_prompt(self, prompt: str, scene: Any) -> None:
+    def _has_duplicate_clauses(self, prompt: str) -> bool:
+        seen: set[str] = set()
+        for block in [block.strip() for block in prompt.split("\n\n") if block.strip()]:
+            _, _, body = block.partition(":")
+            chunks = re.split(r"\s*[;,]\s*", body or block)
+            for chunk in chunks:
+                key = self._normalize_phrase_key(chunk)
+                if not key:
+                    continue
+                if key in seen:
+                    return True
+                seen.add(key)
+        return False
+
+    def _normalize_outfit_summary(self, outfit_summary: str, scene: Any, city: str, weather: Any) -> str:
+        raw = self._clean_fragment(outfit_summary)
+        default_items = self.generate_default_outfit(scene, city, weather)
+        if not raw or raw == ".":
+            return ", ".join(default_items)
+
+        items = [self._ensure_english_fragment(self._clean_fragment(item), "") for item in re.split(r"\s*(?:,|\+|/|;)\s*", raw)]
+        items = [item for item in self._dedupe_phrases(items) if item]
+        normalized = list(items)
+        categories = {self._outfit_category(item) for item in normalized}
+
+        if "dress" not in categories:
+            if "top" not in categories:
+                normalized.append(next((item for item in default_items if self._outfit_category(item) == "top"), default_items[0]))
+            if "bottom" not in categories:
+                normalized.append(next((item for item in default_items if self._outfit_category(item) == "bottom"), default_items[1]))
+        if "dress" in categories:
+            normalized = [item for item in normalized if self._outfit_category(item) != "bottom"] + [item for item in normalized if self._outfit_category(item) == "bottom"]
+        if "shoes" not in {self._outfit_category(item) for item in normalized}:
+            normalized.append(next((item for item in default_items if self._outfit_category(item) == "shoes"), default_items[2]))
+        return ", ".join(self._dedupe_phrases(normalized))
+
+    def generate_default_outfit(self, scene: Any, city: str, weather: Any) -> List[str]:
+        del city
+        temp_c = getattr(weather, "temp_c", None)
+        lowered = self._scene_text(scene).lower()
+        is_travel = any(token in lowered for token in ["airport", "terminal", "flight", "boarding", "travel"])
+        is_evening = str(getattr(scene, "time_of_day", "") or "").lower() in {"evening", "night"}
+        if temp_c is None:
+            temp_c = 18
+
+        if temp_c <= 8:
+            outfit = ["wool coat", "straight trousers", "leather ankle boots"]
+        elif temp_c <= 18:
+            outfit = ["light knit top", "straight jeans", "white sneakers"]
+        else:
+            outfit = ["sleeveless top", "linen trousers", "low-profile sandals"]
+
+        accessory = "crossbody bag" if is_travel else ("simple shoulder bag" if is_evening else "minimal tote bag")
+        return outfit + [accessory]
+
+    @staticmethod
+    def _outfit_category(item: str) -> str:
+        lowered = str(item or "").lower()
+        if any(token in lowered for token in ["dress"]):
+            return "dress"
+        if any(token in lowered for token in ["jeans", "trousers", "pants", "skirt", "shorts", "denim"]):
+            return "bottom"
+        if any(token in lowered for token in ["sneakers", "boots", "heels", "loafers", "sandals", "shoes"]):
+            return "shoes"
+        if any(token in lowered for token in ["bag", "tote", "scarf", "watch", "glasses", "jewelry", "necklace", "earrings", "cap", "belt"]):
+            return "accessory"
+        return "top"
+
+    def _ensure_english_fragment(self, text: str, fallback: str) -> str:
+        cleaned = self._clean_fragment(text)
+        if not cleaned:
+            return self._clean_fragment(fallback)
+        if self.CYRILLIC_RE.search(cleaned):
+            return self._clean_fragment(fallback)
+        return cleaned
+
+    @staticmethod
+    def _natural_object_term(obj: str) -> str:
+        return {"carry_on": "carry on", "coffee_cup": "coffee cup"}.get(str(obj or "").strip().lower(), str(obj or "").replace("_", " ").strip())
+
+    def _behavior_object_terms(self, context: Dict[str, Any]) -> List[str]:
+        behavior = context.get("behavioral_context")
+        if behavior is None:
+            return []
+        objects = getattr(behavior, "objects", getattr(behavior, "recurring_objects", [])) or []
+        return [self._natural_object_term(obj) for obj in objects if self._natural_object_term(obj)]
+
+    def _behavior_scene_cues(self, context: Dict[str, Any], scene: Any) -> tuple[str, str, str]:
+        behavior = context.get("behavioral_context")
+        if behavior is None:
+            return "", "", ""
+        energy = str(getattr(behavior, "energy_level", "medium") or "medium")
+        habit = str(getattr(behavior, "habit", getattr(behavior, "selected_habit", "none")) or "none")
+        self_presentation = str(getattr(behavior, "self_presentation", "") or "").lower()
+        movement = {
+            "low": "still posture",
+            "medium": "natural pause moment",
+            "high": "slow relaxed movement",
+        }.get(energy, "")
+        interaction = {
+            "window_pause": "touching the window lightly",
+            "coffee_moment": "holding cup naturally",
+            "packing": "handling luggage carefully",
+            "slow_walk": "walking with measured steps",
+            "none": "resting hands naturally",
+        }.get(habit, "")
+        expression = {
+            "focused": "minimal facial expression with inward attention",
+            "composed": "measured expression and upright posture",
+            "soft": "gentle expression and relaxed shoulders",
+            "transitional": "slight distance in the gaze with a thoughtful pause",
+            "relaxed": "easy expression and natural posture",
+        }.get(self_presentation, "")
+        if "focused" in str(getattr(scene, "mood", "") or "").lower() and not expression:
+            expression = "minimal facial expression with inward attention"
+        return movement, interaction, expression
+
+    def _scene_micro_detail(self, scene: Any, behavior: Any, object_terms: List[str], visual_focus: str) -> str:
+        del behavior
+        lowered = self._scene_text(scene).lower()
+        if any(token in lowered for token in ["terminal", "airport", "gate", "boarding"]) and "waiting" in lowered:
+            if "window" in lowered:
+                return "seated near window row seating and checking the boarding screen occasionally"
+            return "checking the boarding screen occasionally near the gate seating"
+        if visual_focus:
+            return f"small detail: {visual_focus}"
+        if object_terms:
+            return f"small detail: {object_terms[0]} kept close"
+        return "small detail: lived-in candid timing"
+
+    @staticmethod
+    def _object_scene_phrase(object_term: str, scene: Any) -> str:
+        lowered = PromptComposer._scene_text(scene).lower()
+        mapping = {
+            "coffee cup": "coffee cup in hand",
+            "carry on": "carry on placed nearby",
+            "bag": "bag resting beside her",
+        }
+        if object_term == "carry on" and any(token in lowered for token in ["walking", "walk", "stroll", "moving through"]):
+            return "carry on rolling alongside her"
+        return mapping.get(object_term, f"{object_term} visible in the scene")
+
+    def _validate_canonical_prompt(self, prompt: str, scene: Any, context: Dict[str, Any]) -> None:
         blocks = [block.strip() for block in prompt.split("\n\n") if block.strip()]
         if len(blocks) != 6:
-            raise ValueError("Canonical prompt must contain exactly six blocks.")
+            raise PromptValidationError("Canonical prompt must contain exactly six blocks.")
         if not blocks[0].startswith("Identity: "):
-            raise ValueError("Canonical prompt must start with the identity block.")
+            raise PromptValidationError("Canonical prompt must start with the identity block.")
         if not blocks[2].startswith("Scene: "):
-            raise ValueError("Canonical prompt must contain a scene block in third position.")
+            raise PromptValidationError("Canonical prompt must contain a scene block in third position.")
         if not blocks[3].startswith("Outfit: "):
-            raise ValueError("Canonical prompt must contain an outfit block in fourth position.")
+            raise PromptValidationError("Canonical prompt must contain an outfit block in fourth position.")
         if not blocks[4].startswith("Environment: "):
-            raise ValueError("Canonical prompt must contain an environment block in fifth position.")
+            raise PromptValidationError("Canonical prompt must contain an environment block in fifth position.")
         if not blocks[5].startswith("Mood: "):
-            raise ValueError("Canonical prompt must contain a mood block in sixth position.")
+            raise PromptValidationError("Canonical prompt must contain a mood block in sixth position.")
         if self.CYRILLIC_RE.search(prompt):
-            raise ValueError("Canonical prompt must contain English text only.")
+            raise PromptValidationError("Cyrillic detected in prompt")
+
+        outfit_body = blocks[3].replace("Outfit: ", "").strip().rstrip(".")
+        if not outfit_body or outfit_body == ".":
+            raise PromptValidationError("Outfit block is empty")
+        outfit_categories = {self._outfit_category(item) for item in outfit_body.split(",")}
+        if "dress" not in outfit_categories and ("top" not in outfit_categories or "bottom" not in outfit_categories):
+            raise PromptValidationError("Outfit must include a top and a bottom or a dress")
+        if "shoes" not in outfit_categories:
+            raise PromptValidationError("Outfit must include shoes")
 
         lowered = prompt.lower()
         for phrase in self.BANNED_SYNTHETIC_PATTERNS + self.FORBIDDEN_POSITIVE_PHRASES:
             if phrase in lowered:
-                raise ValueError(f"Forbidden phrase in positive prompt: {phrase}")
+                raise PromptValidationError(f"Forbidden phrase in positive prompt: {phrase}")
+
+        if self._has_duplicate_clauses(prompt):
+            raise PromptValidationError("Duplicate clauses detected in prompt")
 
         if self._is_travel_walk(self._scene_text(scene).lower()):
             if blocks[1] != "3/4 body walking shot":
-                raise ValueError("Travel walk framing must be exactly '3/4 body walking shot'.")
+                raise PromptValidationError("Travel walk framing must be exactly '3/4 body walking shot'.")
             for token in ("waist-up", "half-body", "full body"):
                 if token in lowered:
-                    raise ValueError(f"Forbidden framing alternative detected: {token}")
+                    raise PromptValidationError(f"Forbidden framing alternative detected: {token}")
+
+        framing_block = blocks[1].lower()
+        for block in blocks[2:]:
+            for token in self.FRAMING_TOKENS:
+                if token in block.lower() and token not in framing_block:
+                    raise PromptValidationError("Conflicting framing detected outside framing block")
+
+        scene_block = blocks[2].lower()
+        required_objects = self._behavior_object_terms(context)
+        for object_term in required_objects:
+            if object_term and object_term.lower() not in scene_block:
+                raise PromptValidationError(f"Required object missing from scene block: {object_term}")
 
         if re.search(r"\b([a-z]+)(?:\s+\1\b)+", lowered):
-            raise ValueError("Duplicate word sequence detected in canonical prompt.")
+            raise PromptValidationError("Duplicate word sequence detected in canonical prompt.")
 
     @staticmethod
     def _extract_continuity_hint(continuity_block: str) -> str:

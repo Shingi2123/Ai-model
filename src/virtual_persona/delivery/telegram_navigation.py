@@ -167,10 +167,10 @@ def _detail_post_title(item: PublishingPlanItem, post_index: int) -> str:
 
 
 def _format_generation_block(item: PublishingPlanItem) -> str:
-    shot_archetype = _display_value(item.shot_archetype, "Not set")
-    framing_mode = _display_value(item.framing_mode, "Not set")
-    reference_type = _display_value(item.reference_type or item.reference_pack_type, "Not set")
-    generation_mode = _display_value(item.generation_mode, "Not set")
+    shot_archetype = _display_value(item.shot_archetype, "Не задано")
+    framing_mode = _display_value(item.framing_mode, "Не задано")
+    reference_type = _display_value(item.reference_type or item.reference_pack_type, "Не задано")
+    generation_mode = _display_value(item.generation_mode, "Не задано")
     return "\n".join(
         [
             ui_label("Generation"),
@@ -283,14 +283,14 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
         prompt = str(prompt_meta.get("final_prompt") or "").strip()
         if prompt:
             prompt_source = "prompt_package_json.final_prompt_fallback"
-    prompt = _display_value(prompt, "No saved prompt for this post.")
-    caption = _display_value(item.caption_text, "No saved caption.")
-    short_caption = _display_value(item.short_caption or item.caption_text, "No short caption.")
-    negative = _display_value(item.negative_prompt, "No negative prompt.")
-    prompt_mode = _display_value(item.prompt_mode, "Not set")
-    identity_mode = _display_value(item.identity_mode, "Not set")
-    primary_anchors = _display_value(format_reference_aliases(item.primary_anchors), "No primary anchors")
-    secondary_anchors = _display_value(format_reference_aliases(item.secondary_anchors), "No secondary anchors")
+    prompt = _display_value(prompt, "Промпт для этого поста не сохранён.")
+    caption = _display_value(item.caption_text, "Подпись не сохранена.")
+    short_caption = _display_value(item.short_caption or item.caption_text, "Короткая подпись не сохранена.")
+    negative = _display_value(item.negative_prompt, "Негативный промпт не сохранён.")
+    prompt_mode = _display_value(item.prompt_mode, "Не задано")
+    identity_mode = _display_value(item.identity_mode, "Не задано")
+    primary_anchors = _display_value(format_reference_aliases(item.primary_anchors), "Нет основных референсов")
+    secondary_anchors = _display_value(format_reference_aliases(item.secondary_anchors), "Нет дополнительных референсов")
     manual_generation_step = _format_manual_generation_step(item.manual_generation_step)
 
     logger.info(
@@ -323,13 +323,13 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
         f"{_post_title(item, post_index)}\n\n"
         f"{_format_generation_block(item)}\n\n"
         f"{references_block}\n\n"
-        "Prompt\n```\n"
+        f"{ui_label('Prompt')}\n```\n"
         f"{prompt}\n"
         "```\n\n"
-        "Negative prompt\n```\n"
+        "Негативный промпт\n```\n"
         f"{negative}\n"
         "```\n\n"
-        "Caption\n```\n"
+        f"{ui_label('Caption')}\n```\n"
         f"{caption}\n"
         "```\n\n"
         f"{ui_label('Short caption')}\n```\n"

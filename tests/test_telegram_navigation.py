@@ -1,3 +1,4 @@
+import json
 from datetime import date
 
 from virtual_persona.delivery.telegram_navigation import (
@@ -39,6 +40,23 @@ def _item(index: int = 1, publication_id: str | None = None) -> PublishingPlanIt
         outfit_ids=["o1"],
         prompt_type="photo",
         prompt_text="A cinematic candid in warm morning light",
+        prompt_package_json=json.dumps(
+            {
+                "final_prompt": "Identity: stable.\n\nmirror selfie head-and-shoulders shot\n\nScene: final room check with luggage ready by the door.\n\nOutfit: soft knit top, straight jeans, white sneakers.\n\nEnvironment: photorealistic hotel room; lived-in environmental detail; accurate perspective and scale.\n\nMood: quiet confidence.",
+                "negative_prompt": "extra fingers, plastic skin",
+                "shot_archetype": "mirror_selfie",
+                "platform_intent": "instagram_feed",
+                "generation_mode": "mirror_selfie_mode",
+                "framing_mode": "mirror selfie, head-and-shoulders",
+                "prompt_mode": "dense",
+                "identity_mode": "reference_manifest",
+                "reference_pack_type": "identity_lock",
+                "reference_type": "selfie",
+                "primary_anchors": "refs/selfies/, refs/base/",
+                "secondary_anchors": "refs/identity_lock/",
+                "manual_generation_step": "Attach 2-3 primary anchors, add 1 secondary anchor if the generator starts drifting.",
+            }
+        ),
         negative_prompt="extra fingers, plastic skin",
         shot_archetype="mirror_selfie",
         platform_intent="instagram_feed",
@@ -164,6 +182,7 @@ def test_format_plan_and_post_card_contains_localized_ui_and_raw_behavior_values
 def test_detail_views_have_fallback_for_empty_prompt_and_caption():
     empty = _item()
     empty.prompt_text = ""
+    empty.prompt_package_json = "{}"
     empty.caption_text = ""
     empty.short_caption = ""
     empty.negative_prompt = ""
@@ -172,7 +191,7 @@ def test_detail_views_have_fallback_for_empty_prompt_and_caption():
     caption_text = format_caption_screen(empty, 0)
 
     assert "🖼 Промпт для ПОСТ #1" in prompt_text
-    assert "No negative prompt" in prompt_text
+    assert "Негативный промпт не сохранён." in prompt_text
     assert "✍️ Подпись" in caption_text
 
 
@@ -194,9 +213,9 @@ def test_prompt_screen_localizes_ui_and_keeps_generation_blocks_english():
     assert "🎯 Генерация" in text
     assert "🧷 Референсы" in text
     assert "- Как использовать: Прикрепите 2-3 основных референса." in text
-    assert "Prompt\n```" in text
-    assert "Negative prompt\n```" in text
-    assert "Caption\n```" in text
+    assert "🖼 Промпт\n```" in text
+    assert "Негативный промпт\n```" in text
+    assert "✍️ Подпись\n```" in text
     assert "Короткая подпись\n```" in text
     assert "⚙️ Дополнительно:" in text
     assert "- Платформа: Instagram" in text
