@@ -5,6 +5,7 @@ import re
 from typing import Any, Dict, List
 
 from virtual_persona.pipeline.identity import CharacterIdentityManager
+from virtual_persona.pipeline.outfit_generator import ManualOutfitValidationError, OutfitGenerationError, OutfitGenerator
 
 
 class PromptValidationError(ValueError):
@@ -65,6 +66,7 @@ class PromptComposer:
     GENERATION_MODE_REGISTRY: Dict[str, Dict[str, Any]] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
+        self.outfit_generator = OutfitGenerator()
         if self.CAMERA_ARCHETYPES is None:
             self.CAMERA_ARCHETYPES = {
                 "front_selfie": {
@@ -991,45 +993,19 @@ class PromptComposer:
             or getattr(getattr(behavior, "daily_state", None), "self_presentation_mode", "")
             or ""
         )
-        default_items = self.generate_default_outfit(
-            scene,
-            city,
-            weather,
-            day_type=day_type,
-            behavior_mode=behavior_mode,
-        )
-        raw = self._clean_fragment(outfit_summary)
-        if self._is_invalid_outfit_value(raw):
+        try:
+            return self.outfit_generator.generate(outfit_summary=outfit_summary, scene=scene, context=context)
+        except ManualOutfitValidationError as exc:
+            raise PromptValidationError(str(exc)) from exc
+        except OutfitGenerationError:
+            default_items = self.generate_default_outfit(
+                scene,
+                city,
+                weather,
+                day_type=day_type,
+                behavior_mode=behavior_mode,
+            )
             return ", ".join(default_items)
-
-        items = [
-            self._ensure_english_fragment(self._clean_fragment(item), "")
-            for item in re.split(r"\s*(?:,|\+|/|;)\s*", raw)
-        ]
-        items = [
-            item
-            for item in self._dedupe_phrases(items)
-            if item and not self._is_invalid_outfit_value(item)
-        ]
-        if not items:
-            return ", ".join(default_items)
-
-        normalized = list(items)
-        categories = {self._outfit_category(item) for item in normalized}
-
-        if "dress" not in categories:
-            if "top" not in categories:
-                normalized.append(next((item for item in default_items if self._outfit_category(item) == "top"), default_items[0]))
-            if "bottom" not in categories:
-                normalized.append(next((item for item in default_items if self._outfit_category(item) == "bottom"), default_items[1]))
-        if "dress" in categories:
-            normalized = [item for item in normalized if self._outfit_category(item) != "bottom"] + [item for item in normalized if self._outfit_category(item) == "bottom"]
-        if "shoes" not in {self._outfit_category(item) for item in normalized}:
-            normalized.append(next((item for item in default_items if self._outfit_category(item) == "shoes"), default_items[2]))
-        normalized = [item for item in self._dedupe_phrases(normalized) if not self._is_invalid_outfit_value(item)]
-        if not normalized:
-            return ", ".join(default_items)
-        return ", ".join(normalized)
 
     def generate_default_outfit(
         self,
@@ -1109,9 +1085,11 @@ class PromptComposer:
             return "dress"
         if any(token in lowered for token in ["jeans", "trousers", "pants", "skirt", "shorts", "denim"]):
             return "bottom"
-        if any(token in lowered for token in ["sneakers", "boots", "heels", "loafers", "sandals", "shoes"]):
+        if any(token in lowered for token in ["sneakers", "trainers", "boots", "heels", "loafers", "sandals", "slides", "shoes"]):
             return "shoes"
-        if any(token in lowered for token in ["bag", "tote", "scarf", "watch", "glasses", "jewelry", "necklace", "earrings", "cap", "belt"]):
+        if any(token in lowered for token in ["coat", "jacket", "blazer", "cardigan", "hoodie", "trench"]):
+            return "outerwear"
+        if any(token in lowered for token in ["bag", "tote", "scarf", "watch", "glasses", "sunglasses", "jewelry", "necklace", "earrings", "cap", "belt"]):
             return "accessory"
         return "top"
 

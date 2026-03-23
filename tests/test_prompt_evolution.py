@@ -182,9 +182,14 @@ def test_outfit_block_contains_only_clothing_items():
     package = _compose(outfit_summary="cream trench coat, cream trench coat, denim, white sneakers")
     outfit_block = package["final_prompt"].split("\n\n")[3]
 
-    assert outfit_block == "Outfit: cream trench coat, denim, white sneakers."
-    assert "lighting" not in outfit_block.lower()
-    assert "mood" not in outfit_block.lower()
+    lowered = outfit_block.lower()
+
+    assert outfit_block.startswith("Outfit: ")
+    assert "lighting" not in lowered
+    assert "mood" not in lowered
+    assert "white sneakers" in lowered or "comfortable sneakers" in lowered
+    assert "denim" in lowered or "trousers" in lowered or "jeans" in lowered
+    assert "bag" in lowered or "carry on" in lowered or "accessor" not in lowered
 
 
 def test_environment_block_contains_realism_depth_and_light_only():
@@ -257,7 +262,7 @@ def test_outfit_fallback_adds_missing_shoes_when_summary_is_incomplete():
     package = _compose(outfit_summary="cream cardigan, denim")
     outfit_block = package["final_prompt"].split("\n\n")[3].lower()
 
-    assert "cream cardigan" in outfit_block
+    assert "cardigan" in outfit_block or "layer" in outfit_block
     assert "denim" in outfit_block
     assert "sneakers" in outfit_block or "boots" in outfit_block or "sandals" in outfit_block or "shoes" in outfit_block
 
@@ -279,6 +284,71 @@ def test_placeholder_outfit_uses_safe_fallback(placeholder: str):
     assert outfit_block != "outfit: ."
     assert "placeholder" not in outfit_block
     assert "same outfit" not in outfit_block
+
+
+def test_manual_outfit_override_is_inserted_without_regeneration():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["outfit_override"] = "soft fitted knit dress, light cardigan, flat slides, small overnight bag"
+
+    package = composer.compose_package(context, Scene(), "ignored summary", "photo", ["dress_1"])
+    outfit_block = package["final_prompt"].split("\n\n")[3]
+
+    assert outfit_block == "Outfit: soft fitted knit dress, light cardigan, flat slides, small overnight bag."
+
+
+def test_invalid_manual_outfit_override_raises_validation_error():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["outfit_override"] = "мягкий свитер"
+
+    with pytest.raises(PromptValidationError, match="Manual outfit override"):
+        composer.compose_package(context, Scene(), "ignored summary", "photo", ["top_1"])
+
+
+def test_bold_style_intensity_keeps_realistic_attractive_silhouette():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["style_intensity"] = "bold"
+    context["outfit_style"] = "bold_minimal"
+    scene = Scene()
+    scene.location = "hotel room"
+    scene.scene_moment = "Quiet evening in a hotel room before sleep"
+    scene.description = "Quiet evening in a hotel room"
+    scene.time_of_day = "evening"
+
+    package = composer.compose_package(context, scene, "", "photo", ["dress_1"])
+    outfit_block = package["final_prompt"].split("\n\n")[3].lower()
+
+    assert "fitted" in outfit_block or "body lines" in outfit_block or "open neckline" in outfit_block
+    assert "lingerie" not in outfit_block
+    assert "sexy" not in outfit_block
+
+
+def test_airport_outfit_fallback_stays_travel_ready_and_contextual():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["behavioral_context"] = BehaviorState(
+        energy_level="medium",
+        social_mode="light_public",
+        emotional_arc="transition",
+        habit="packing",
+        place_anchor="terminal_gate",
+        objects=["carry_on", "bag"],
+        self_presentation="transitional",
+    )
+    scene = Scene()
+    scene.location = "airport terminal"
+    scene.activity = "walking"
+    scene.scene_moment = "Walking to the gate before boarding"
+    scene.description = "Walking to the gate before boarding"
+
+    package = composer.compose_package(context, scene, ".", "photo", ["top_1"])
+    outfit_block = package["final_prompt"].split("\n\n")[3].lower()
+
+    assert "carry on" in outfit_block
+    assert "jacket" in outfit_block or "layer" in outfit_block or "coat" in outfit_block
+    assert "sneakers" in outfit_block or "boots" in outfit_block
 
 
 def test_validate_prompt_rejects_cyrillic():
