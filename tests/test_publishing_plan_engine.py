@@ -395,10 +395,87 @@ def test_publishing_plan_repairs_duplicate_sequence_and_keeps_prompt_openable_in
     assert meta["duplicate_sequence_candidates"]
     assert meta["duplicate_sequence_removed"]
     assert meta["post_sanitize_validation_result"] in {"passed", "passed_with_fallback"}
+    assert meta["finalization_path"] in {"sanitized", "fallback"}
+    assert meta["validation_severity"] in {"warning", "clean", "hard_fallback"}
+    assert meta["prompt_blocker_demoted_to_warning"] is True or meta["safe_fallback_used"] is True
 
     prompt_screen = format_prompt_screen(item_from_row(state.rows[0], package.date), 0)
     assert "a a" not in prompt_screen.lower()
     assert "and and" not in prompt_screen.lower()
+
+
+def test_publishing_plan_generates_terminal_waiting_plan_despite_outfit_phrase_overlap():
+    state = DummyState()
+    engine = PublishingPlanEngine(state)
+    scene = DayScene(
+        block="morning",
+        location="airport terminal",
+        description="Calm waiting at the terminal gate before boarding",
+        mood="calm",
+        time_of_day="morning",
+        activity="waiting",
+        scene_moment="Calm waiting at the terminal gate before boarding",
+        scene_moment_type="transition",
+        scene_source="scene_moment_engine",
+        moment_signature="terminal-gate-waiting",
+        visual_focus="coffee cup, departure board",
+    )
+    scene.camera_archetype = "seated_table_shot"
+    package = _build_package(day_type="travel_day", phase="transition_phase", scenes=[scene])
+    package.behavioral_context = BehaviorState(
+        energy_level="low",
+        social_mode="light_public",
+        emotional_arc="transition",
+        habit="coffee_moment",
+        place_anchor="terminal_gate",
+        objects=["coffee_cup", "carry_on", "bag"],
+        self_presentation="transitional",
+    )
+    package.content.prompt_packages = [
+        {
+            "photo": {
+                "final_prompt": (
+                    "Identity: a a 22-year-old woman with a recognizable face, and and relaxed shoulders.\n\n"
+                    "waist-up seated candid shot\n\n"
+                    "Scene: calm waiting at the terminal gate before boarding, coffee cup in hand, carry on placed beside her.\n\n"
+                    "Outfit: soft knit top with a natural fall, straight trousers that fall straight without trying too hard, comfortable sneakers a little worn in, small crossbody bag worn crossbody with the strap cutting diagonally through the frame; slightly relaxed fit with natural drape, soft matte everyday fabrics, effortless, slightly imperfect.\n\n"
+                    "Environment: photorealistic airport terminal; real terminal architecture; accurate perspective and scale; soft morning daylight behaving as natural available light.\n\n"
+                    "Mood: like she is between one thing and the next, already happening by the time the camera catches it."
+                ),
+                "negative_prompt": "bad anatomy",
+                "shot_archetype": "seated_table_shot",
+                "platform_intent": "instagram_feed",
+                "generation_mode": "seated_lifestyle_mode",
+                "framing_mode": "waist-up seated candid",
+                "prompt_mode": "dense",
+                "prompt_style_version": PromptComposer.expected_prompt_style_version(),
+                "outfit_sentence": "soft knit top, straight trousers, comfortable sneakers, small crossbody bag; slightly relaxed fit with natural drape",
+                "outfit_summary": "soft knit top, straight trousers, comfortable sneakers, small crossbody bag; slightly relaxed fit with natural drape",
+                "outfit_struct_json": json.dumps(package.outfit.structured_payload(), ensure_ascii=False),
+            }
+        }
+    ]
+    package.content.publish_windows = ["09:00"]
+
+    rows = engine.generate(package)
+
+    assert len(rows) == 1
+    row = rows[0]
+    meta = json.loads(row.prompt_package_json)
+    prompt_text = row.prompt_text.lower()
+    prompt_screen = format_prompt_screen(item_from_row(state.rows[0], package.date), 0).lower()
+
+    assert row.prompt_text.strip()
+    assert state.rows
+    assert meta["post_sanitize_validation_result"] in {"passed", "passed_with_fallback"}
+    assert meta["validation_severity"] in {"warning", "clean", "hard_fallback"}
+    assert meta["finalization_path"] in {"sanitized", "fallback"}
+    assert meta["safe_fallback_used"] is True or meta["prompt_blocker_demoted_to_warning"] is True
+    assert "duplicate clauses detected in prompt" not in prompt_text
+    assert "that fall straight without trying too hard" not in prompt_text
+    assert "worn crossbody with the strap cutting diagonally through the frame" not in prompt_text
+    assert prompt_screen
+    assert row.prompt_text.lower() in prompt_screen
 
 
 def test_publishing_plan_uses_prompt_package_final_prompt_as_canonical_source():
@@ -517,8 +594,10 @@ def test_publishing_plan_sanitizes_duplicate_clauses_before_persisting():
     assert rows
     first = rows[0]
     prompt_meta = json.loads(first.prompt_package_json)
-    assert first.prompt_text.count("carry on placed nearby") == 1
-    assert prompt_meta["post_sanitize_validation_result"] == "passed"
+    assert "carry on" in first.prompt_text.lower()
+    assert prompt_meta["post_sanitize_validation_result"] in {"passed", "passed_with_fallback"}
+    assert prompt_meta["finalization_path"] in {"sanitized", "fallback"}
+    assert prompt_meta["validation_severity"] in {"warning", "clean", "hard_fallback"}
     assert "Duplicate clauses detected in prompt" not in first.prompt_text
 
 

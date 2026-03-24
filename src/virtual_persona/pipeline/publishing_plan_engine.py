@@ -125,6 +125,13 @@ class PublishingPlanEngine:
             prompt_meta["rewrite_pass_applied"] = bool(finalized.get("rewrite_pass_applied"))
             prompt_meta["rewrite_diagnostics"] = dict(finalized.get("rewrite_diagnostics") or {})
             prompt_meta["fallback_prompt_applied"] = bool(finalized.get("fallback_prompt_applied"))
+            prompt_meta["finalization_path"] = str(finalized.get("finalization_path") or "main")
+            prompt_meta["fatal_validation_reason"] = str(finalized.get("fatal_validation_reason") or "")
+            prompt_meta["garment_phrase_compaction_applied"] = bool(finalized.get("garment_phrase_compaction_applied"))
+            prompt_meta["softened_duplicate_sequences_count"] = int(finalized.get("softened_duplicate_sequences_count") or 0)
+            prompt_meta["prompt_blocker_demoted_to_warning"] = bool(finalized.get("prompt_blocker_demoted_to_warning"))
+            prompt_meta["safe_fallback_used"] = bool(finalized.get("safe_fallback_used"))
+            prompt_meta["validation_severity"] = str(finalized.get("validation_severity") or "pending")
             prompt_meta["post_sanitize_prompt_length"] = int(finalized.get("post_sanitize_prompt_length") or len(final_prompt))
             prompt_meta["post_sanitize_validation_result"] = str(finalized.get("post_sanitize_validation_result") or "")
             prompt_meta["prompt_blocks"] = dict(finalized.get("prompt_blocks") or {})
@@ -169,16 +176,50 @@ class PublishingPlanEngine:
                     or validation_result.get("fallback_prompt_applied", False)
                 )
                 prompt_meta["prompt_blocks"] = dict(validation_result.get("prompt_blocks") or prompt_meta.get("prompt_blocks") or {})
+                prompt_meta["finalization_path"] = str(validation_result.get("finalization_path") or prompt_meta.get("finalization_path") or "main")
+                prompt_meta["fatal_validation_reason"] = str(validation_result.get("fatal_validation_reason") or prompt_meta.get("fatal_validation_reason") or "")
+                prompt_meta["garment_phrase_compaction_applied"] = bool(
+                    prompt_meta.get("garment_phrase_compaction_applied", False)
+                    or validation_result.get("garment_phrase_compaction_applied", False)
+                )
+                prompt_meta["softened_duplicate_sequences_count"] = int(
+                    prompt_meta.get("softened_duplicate_sequences_count", 0)
+                    + int(validation_result.get("softened_duplicate_sequences_count") or 0)
+                )
+                prompt_meta["prompt_blocker_demoted_to_warning"] = bool(
+                    prompt_meta.get("prompt_blocker_demoted_to_warning", False)
+                    or validation_result.get("prompt_blocker_demoted_to_warning", False)
+                )
+                prompt_meta["safe_fallback_used"] = bool(
+                    prompt_meta.get("safe_fallback_used", False)
+                    or validation_result.get("safe_fallback_used", False)
+                )
+                prompt_meta["validation_severity"] = str(
+                    validation_result.get("validation_severity")
+                    or prompt_meta.get("validation_severity")
+                    or "pending"
+                )
                 prompt_meta["post_sanitize_prompt_length"] = int(validation_result.get("post_sanitize_prompt_length") or len(final_prompt))
                 prompt_meta["post_sanitize_validation_result"] = str(validation_result.get("post_sanitize_validation_result") or prompt_meta.get("post_sanitize_validation_result") or "")
                 prompt_meta["final_prompt_length"] = len(final_prompt)
+                logger.info(
+                    "publishing_plan prompt_finalization_result publication_id=%s finalization_path=%s validation_severity=%s fatal_validation_reason=%s garment_phrase_compaction_applied=%s softened_duplicate_sequences_count=%s prompt_blocker_demoted_to_warning=%s safe_fallback_used=%s",
+                    f"{package.date.isoformat()}-{idx+1:02d}",
+                    prompt_meta.get("finalization_path", "main"),
+                    prompt_meta.get("validation_severity", "pending"),
+                    prompt_meta.get("fatal_validation_reason", ""),
+                    prompt_meta.get("garment_phrase_compaction_applied", False),
+                    prompt_meta.get("softened_duplicate_sequences_count", 0),
+                    prompt_meta.get("prompt_blocker_demoted_to_warning", False),
+                    prompt_meta.get("safe_fallback_used", False),
+                )
             except PromptValidationError as exc:
                 duplicate_clauses = ", ".join(prompt_meta.get("duplicate_clauses", []) or []) or "-"
                 duplicate_sequence_candidates = ", ".join(prompt_meta.get("duplicate_sequence_candidates", []) or []) or "-"
                 duplicate_sequence_removed = ", ".join(prompt_meta.get("duplicate_sequence_removed", []) or []) or "-"
                 duplicate_sequence_kept_reason = ", ".join(prompt_meta.get("duplicate_sequence_kept_reason", []) or []) or "-"
                 logger.error(
-                    "publishing_plan prompt_validation_failed publication_id=%s scene=%s reason=%s outfit_source=%s scene_source=%s behavior_source=%s duplicate_clauses=%s duplicate_sequence_candidates=%s duplicate_sequence_removed=%s duplicate_sequence_kept_reason=%s sanitized_prompt_applied=%s final_prompt_length=%s post_sanitize_prompt_length=%s post_sanitize_validation_result=%s prompt_mode=%s objects=%s",
+                    "publishing_plan prompt_validation_failed publication_id=%s scene=%s reason=%s outfit_source=%s scene_source=%s behavior_source=%s duplicate_clauses=%s duplicate_sequence_candidates=%s duplicate_sequence_removed=%s duplicate_sequence_kept_reason=%s sanitized_prompt_applied=%s final_prompt_length=%s post_sanitize_prompt_length=%s post_sanitize_validation_result=%s prompt_mode=%s objects=%s finalization_path=%s fatal_validation_reason=%s garment_phrase_compaction_applied=%s softened_duplicate_sequences_count=%s prompt_blocker_demoted_to_warning=%s safe_fallback_used=%s validation_severity=%s",
                     f"{package.date.isoformat()}-{idx+1:02d}",
                     scene.scene_moment or scene.description or "unknown_scene",
                     str(exc),
@@ -195,6 +236,13 @@ class PublishingPlanEngine:
                     prompt_meta.get("post_sanitize_validation_result", ""),
                     prompt_meta.get("prompt_mode", ""),
                     ", ".join(prompt_meta.get("objects_inserted", []) or []),
+                    prompt_meta.get("finalization_path", "main"),
+                    prompt_meta.get("fatal_validation_reason", ""),
+                    prompt_meta.get("garment_phrase_compaction_applied", False),
+                    prompt_meta.get("softened_duplicate_sequences_count", 0),
+                    prompt_meta.get("prompt_blocker_demoted_to_warning", False),
+                    prompt_meta.get("safe_fallback_used", False),
+                    prompt_meta.get("validation_severity", "fatal"),
                 )
                 if hasattr(self.state, "save_run_log"):
                     self.state.save_run_log(
@@ -206,7 +254,14 @@ class PublishingPlanEngine:
                             f"duplicate_clauses={duplicate_clauses} duplicate_sequence_candidates={duplicate_sequence_candidates} "
                             f"duplicate_sequence_removed={duplicate_sequence_removed} duplicate_sequence_kept_reason={duplicate_sequence_kept_reason} "
                             f"sanitized_prompt_applied={prompt_meta.get('sanitized_prompt_applied', False)} "
-                            f"post_sanitize_validation_result={prompt_meta.get('post_sanitize_validation_result', '')}"
+                            f"post_sanitize_validation_result={prompt_meta.get('post_sanitize_validation_result', '')} "
+                            f"finalization_path={prompt_meta.get('finalization_path', 'main')} "
+                            f"fatal_validation_reason={prompt_meta.get('fatal_validation_reason', '')} "
+                            f"garment_phrase_compaction_applied={prompt_meta.get('garment_phrase_compaction_applied', False)} "
+                            f"softened_duplicate_sequences_count={prompt_meta.get('softened_duplicate_sequences_count', 0)} "
+                            f"prompt_blocker_demoted_to_warning={prompt_meta.get('prompt_blocker_demoted_to_warning', False)} "
+                            f"safe_fallback_used={prompt_meta.get('safe_fallback_used', False)} "
+                            f"validation_severity={prompt_meta.get('validation_severity', 'fatal')}"
                         ),
                         outfit_source=prompt_meta.get("outfit_source", ""),
                         scene_source=prompt_meta.get("scene_source", ""),
@@ -220,6 +275,13 @@ class PublishingPlanEngine:
                         post_sanitize_prompt_length=prompt_meta.get("post_sanitize_prompt_length", 0),
                         post_sanitize_validation_result=prompt_meta.get("post_sanitize_validation_result", ""),
                         prompt_mode=prompt_meta.get("prompt_mode", ""),
+                        finalization_path=prompt_meta.get("finalization_path", "main"),
+                        fatal_validation_reason=prompt_meta.get("fatal_validation_reason", ""),
+                        garment_phrase_compaction_applied=prompt_meta.get("garment_phrase_compaction_applied", False),
+                        softened_duplicate_sequences_count=prompt_meta.get("softened_duplicate_sequences_count", 0),
+                        prompt_blocker_demoted_to_warning=prompt_meta.get("prompt_blocker_demoted_to_warning", False),
+                        safe_fallback_used=prompt_meta.get("safe_fallback_used", False),
+                        validation_severity=prompt_meta.get("validation_severity", "fatal"),
                     )
                 raise
             prompt_meta["prompt_mode"] = prompt_validator._prompt_mode(final_prompt)

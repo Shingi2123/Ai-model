@@ -420,6 +420,15 @@ class LocalStateStore:
             "duplicate_clauses": trace_fields.get("duplicate_clauses", ""),
             "sanitized_prompt_applied": trace_fields.get("sanitized_prompt_applied", ""),
             "final_prompt_length": trace_fields.get("final_prompt_length", ""),
+            "post_sanitize_prompt_length": trace_fields.get("post_sanitize_prompt_length", ""),
+            "post_sanitize_validation_result": trace_fields.get("post_sanitize_validation_result", ""),
+            "finalization_path": trace_fields.get("finalization_path", ""),
+            "fatal_validation_reason": trace_fields.get("fatal_validation_reason", ""),
+            "garment_phrase_compaction_applied": trace_fields.get("garment_phrase_compaction_applied", ""),
+            "softened_duplicate_sequences_count": trace_fields.get("softened_duplicate_sequences_count", ""),
+            "prompt_blocker_demoted_to_warning": trace_fields.get("prompt_blocker_demoted_to_warning", ""),
+            "safe_fallback_used": trace_fields.get("safe_fallback_used", ""),
+            "validation_severity": trace_fields.get("validation_severity", ""),
         }
         logs.append(
             {
@@ -457,6 +466,19 @@ class LocalStateStore:
 
 
 class GoogleSheetsStateStore:
+    RECORD_CACHE_TTL_SECONDS = 45
+    LONG_LIVED_RECORD_CACHE_TTL_SECONDS = 300
+    LONG_LIVED_CACHE_TITLES = {
+        "activity_candidates",
+        "scene_candidates",
+        "scene_library",
+        "world_candidates",
+        "wardrobe_items",
+        "wardrobe",
+        "cities",
+        "posting_rules",
+    }
+
     def __init__(self, json_path: str, sheet_id: str) -> None:
         self.json_path = json_path
         self.sheet_id = sheet_id
@@ -464,6 +486,7 @@ class GoogleSheetsStateStore:
         self.sheet = None
         self.last_error = ""
         self._sheet_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._sheet_cache_time: Dict[str, float] = {}
         self._ws_cache: Dict[str, Any] = {}
         self._header_cache: Dict[str, List[str]] = {}
         self._headers_ensured: set[str] = set()
@@ -547,16 +570,38 @@ class GoogleSheetsStateStore:
     def _get_ws(self, title: str):
         return self._with_retry(lambda: self._ws(title), operation_name=f"open worksheet {title}")
 
+    def _record_cache_ttl(self, title: str) -> int:
+        return self.LONG_LIVED_RECORD_CACHE_TTL_SECONDS if title in self.LONG_LIVED_CACHE_TITLES else self.RECORD_CACHE_TTL_SECONDS
+
+    def _cached_sheet_records(self, title: str) -> List[Dict[str, Any]] | None:
+        cache = getattr(self, "_sheet_cache", {})
+        cached = cache.get(title)
+        if cached is None:
+            return None
+        cache_time = getattr(self, "_sheet_cache_time", {}).get(title, 0.0)
+        if cache_time and (time.time() - cache_time) <= self._record_cache_ttl(title):
+            return list(cached)
+        return None
+
+    def _stale_sheet_records(self, title: str) -> List[Dict[str, Any]] | None:
+        cache = getattr(self, "_sheet_cache", {})
+        cached = cache.get(title)
+        return list(cached) if cached is not None else None
+
     def _read_records(self, title: str) -> List[Dict[str, Any]]:
-        if title in self._sheet_cache:
-            return self._sheet_cache[title]
+        cached = self._cached_sheet_records(title)
+        if cached is not None:
+            return cached
         ws = self._get_ws(title)
         rows = self._with_retry(lambda: ws.get_all_records() or [], operation_name=f"read records {title}")
         self._sheet_cache[title] = rows
-        return rows
+        self._sheet_cache_time[title] = time.time()
+        return list(rows)
 
     def _invalidate_sheet_cache(self, title: str) -> None:
         self._sheet_cache.pop(title, None)
+        if hasattr(self, "_sheet_cache_time"):
+            self._sheet_cache_time.pop(title, None)
         if hasattr(self, "_header_cache"):
             self._header_cache.pop(title, None)
 
@@ -567,6 +612,10 @@ class GoogleSheetsStateStore:
         try:
             return self._read_records(title)
         except Exception as exc:
+            stale = self._stale_sheet_records(title)
+            if stale is not None:
+                logger.warning("Google Sheets read failed for '%s', using stale cached rows: %s", title, exc)
+                return stale
             logger.error("Google Sheets read failed for '%s': %s", title, exc)
             return []
 
@@ -1170,6 +1219,15 @@ class GoogleSheetsStateStore:
             "duplicate_clauses",
             "sanitized_prompt_applied",
             "final_prompt_length",
+            "post_sanitize_prompt_length",
+            "post_sanitize_validation_result",
+            "finalization_path",
+            "fatal_validation_reason",
+            "garment_phrase_compaction_applied",
+            "softened_duplicate_sequences_count",
+            "prompt_blocker_demoted_to_warning",
+            "safe_fallback_used",
+            "validation_severity",
         ]
         self._ensure_headers("run_log", headers)
         self._append_dict_row(
@@ -1198,6 +1256,15 @@ class GoogleSheetsStateStore:
                 "duplicate_clauses": trace_fields.get("duplicate_clauses", ""),
                 "sanitized_prompt_applied": trace_fields.get("sanitized_prompt_applied", ""),
                 "final_prompt_length": trace_fields.get("final_prompt_length", ""),
+                "post_sanitize_prompt_length": trace_fields.get("post_sanitize_prompt_length", ""),
+                "post_sanitize_validation_result": trace_fields.get("post_sanitize_validation_result", ""),
+                "finalization_path": trace_fields.get("finalization_path", ""),
+                "fatal_validation_reason": trace_fields.get("fatal_validation_reason", ""),
+                "garment_phrase_compaction_applied": trace_fields.get("garment_phrase_compaction_applied", ""),
+                "softened_duplicate_sequences_count": trace_fields.get("softened_duplicate_sequences_count", ""),
+                "prompt_blocker_demoted_to_warning": trace_fields.get("prompt_blocker_demoted_to_warning", ""),
+                "safe_fallback_used": trace_fields.get("safe_fallback_used", ""),
+                "validation_severity": trace_fields.get("validation_severity", ""),
             },
             prefer_sheet_header_order=True,
         )

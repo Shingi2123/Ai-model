@@ -824,6 +824,62 @@ def test_final_prompt_rewrite_pass_removes_known_antipatterns():
     assert "coffee cup" in prompt
 
 
+def test_finalize_canonical_prompt_softens_terminal_outfit_phrase_overlap_instead_of_blocking():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["day_type"] = "travel_day"
+    context["behavioral_context"] = BehaviorState(
+        energy_level="low",
+        social_mode="light_public",
+        emotional_arc="transition",
+        habit="coffee_moment",
+        place_anchor="terminal_gate",
+        objects=["coffee_cup", "carry_on", "bag"],
+        self_presentation="transitional",
+    )
+    scene = Scene()
+    scene.location = "airport terminal"
+    scene.activity = "waiting"
+    scene.scene_moment = "Calm waiting at the terminal gate before boarding"
+    scene.description = "Calm waiting at the terminal gate before boarding"
+    scene.time_of_day = "morning"
+    scene.visual_focus = "coffee cup, departure board"
+    scene.camera_archetype = "seated_table_shot"
+
+    prompt = (
+        "Identity: a a 22-year-old woman with a recognizable face, and and relaxed shoulders.\n\n"
+        "waist-up seated candid shot\n\n"
+        "Scene: calm waiting at the terminal gate before boarding, coffee cup in hand, carry on placed beside her.\n\n"
+        "Outfit: soft knit top with a natural fall, straight trousers that fall straight without trying too hard, comfortable sneakers a little worn in, small crossbody bag worn crossbody with the strap cutting diagonally through the frame; slightly relaxed fit with natural drape, soft matte everyday fabrics, effortless, slightly imperfect.\n\n"
+        "Environment: photorealistic airport terminal; real terminal architecture; accurate perspective and scale; soft morning daylight behaving as natural available light.\n\n"
+        "Mood: like she is between one thing and the next, already happening by the time the camera catches it."
+    )
+
+    diagnostics = composer.finalize_canonical_prompt(
+        prompt,
+        scene,
+        context,
+        outfit_sentence="soft knit top, straight trousers, comfortable sneakers, small crossbody bag; slightly relaxed fit with natural drape",
+        shot_archetype="seated_table_shot",
+        step="test_terminal_overlap",
+        apply_rewrite=False,
+        allow_fallback=True,
+    )
+
+    final_prompt = diagnostics["prompt"].lower()
+    outfit_block = final_prompt.split("\n\n")[3]
+
+    assert diagnostics["post_sanitize_validation_result"] in {"passed", "passed_with_fallback"}
+    assert diagnostics["validation_severity"] in {"warning", "clean", "hard_fallback"}
+    assert diagnostics["finalization_path"] in {"sanitized", "fallback"}
+    assert diagnostics["prompt_blocker_demoted_to_warning"] is True or diagnostics["safe_fallback_used"] is True
+    assert diagnostics["garment_phrase_compaction_applied"] is True or diagnostics["safe_fallback_used"] is True
+    assert "a a" not in final_prompt
+    assert "and and" not in final_prompt
+    assert "that fall straight without trying too hard" not in outfit_block
+    assert "worn crossbody with the strap cutting diagonally through the frame" not in outfit_block
+
+
 def test_override_hint_pushes_presence_and_camera_distance():
     composer = PromptComposer(DummyState())
     context = dict(BASE_CONTEXT)

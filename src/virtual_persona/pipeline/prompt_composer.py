@@ -5,7 +5,7 @@ import hashlib
 import json
 import logging
 import re
-from typing import Any, Dict, List, Mapping
+from typing import Any, ClassVar, Dict, List, Mapping
 
 from virtual_persona.pipeline.identity import CharacterIdentityManager
 from virtual_persona.pipeline.outfit_generator import ManualOutfitValidationError, OutfitBundle, OutfitGenerationError, OutfitGenerator
@@ -143,6 +143,58 @@ class PromptComposer:
         "yet",
     )
     DUPLICATE_SEQUENCE_SCAN_RANGE: tuple[int, ...] = tuple(range(12, 1, -1))
+    DUPLICATE_BLOCK_FAILURE_TOKEN_THRESHOLD = 5
+    DUPLICATE_CLAUSE_FATAL_RATIO = 0.88
+    SOFTENED_DUPLICATE_VALIDATION_REASONS: tuple[str, ...] = (
+        "Duplicate clauses detected in prompt",
+        "Duplicate word sequence detected in canonical prompt.",
+    )
+    GARMENT_DUPLICATE_FAMILIES: ClassVar[Dict[str, tuple[str, ...]]] = {
+        "fit_line": (
+            "fall straight",
+            "falls naturally",
+            "natural drape",
+            "gentle drape",
+            "lived-in fall",
+            "fabric falling easy",
+            "easy line",
+            "easy movement",
+        ),
+        "effortless_styling": (
+            "without trying too hard",
+            "without looking overthought",
+            "without looking styled",
+            "without looking staged",
+            "effortless",
+            "unforced",
+            "not styled for attention",
+        ),
+        "fabric_texture": (
+            "soft matte everyday fabrics",
+            "soft matte everyday textures",
+            "soft matte fabric",
+            "light breathable everyday fabrics",
+            "matte everyday fabric",
+        ),
+        "lived_in_wear": (
+            "slightly imperfect",
+            "lightly worn",
+            "natural folds",
+            "natural fabric folds",
+            "slightly rumpled",
+            "worn in",
+            "actually used",
+            "not pressed fully flat",
+        ),
+    }
+    GARMENT_CATEGORY_TOKENS: ClassVar[Dict[str, tuple[str, ...]]] = {
+        "dress": ("dress",),
+        "bottom": ("jeans", "trousers", "pants", "skirt", "shorts", "denim", "joggers", "leggings"),
+        "shoes": ("sneakers", "boots", "loafers", "sandals", "slides", "shoes", "trainers"),
+        "outerwear": ("coat", "jacket", "cardigan", "blazer", "hoodie", "trench", "layer"),
+        "accessory": ("bag", "tote", "scarf", "watch", "glasses", "sunglasses", "jewelry", "necklace", "earrings", "belt"),
+        "top": ("top", "blouse", "shirt", "sweater", "knit", "knitwear", "tank", "tee", "camisole"),
+    }
     REWRITE_FORBIDDEN_SCENE_PHRASES: tuple[str, ...] = (
         "before the day starts",
         "during the morning routine",
@@ -1699,6 +1751,9 @@ class PromptComposer:
     def _fallback_mood_presence_phrase(self, scene: Any, context: Dict[str, Any]) -> str:
         behavior = context.get("behavioral_context")
         self_presentation = str(getattr(behavior, "self_presentation", "") or "").lower() if behavior is not None else ""
+        outfit_override = str(context.get("outfit_override", "") or "").lower()
+        if outfit_override == "slightly_sexy":
+            return "quietly intimate body language, a little more open through the posture"
         if self_presentation == "transitional":
             return "like she is between one thing and the next, already happening by the time the camera catches it"
         if "focused" in str(getattr(scene, "mood", "") or "").lower() or self_presentation == "focused":
@@ -1781,17 +1836,19 @@ class PromptComposer:
 
         if category == "dress":
             if "knit" in lowered:
-                return f"{cleaned} following the body without looking styled"
+                return f"{cleaned} with an easy line through the body"
             return f"{cleaned} worn like the day is already underway"
         if category == "bottom":
             if "trousers" in lowered or "pants" in lowered:
-                return f"{cleaned} that fall straight without trying too hard"
+                if "straight" in lowered:
+                    return f"{cleaned} with an easy line through the leg"
+                return f"{cleaned} with easy movement through the leg"
             if "jeans" in lowered or "denim" in lowered:
-                return f"{cleaned} worn in enough to feel real"
+                return f"{cleaned} with light natural wear"
             return f"{cleaned} moving easy with her"
         if category == "shoes":
             if any(token in lowered for token in ["sneakers", "trainers"]):
-                return f"{cleaned} a little worn in"
+                return f"{cleaned} worn in"
             if any(token in lowered for token in ["slides", "sandals"]):
                 return f"{cleaned} that look actually used"
             return f"{cleaned} kept easy and grounded"
@@ -1808,7 +1865,7 @@ class PromptComposer:
                 return f"{cleaned} worn crossbody with the strap cutting diagonally through the frame"
             return f"{cleaned} looking actually carried"
         if "knitwear" in lowered:
-            return f"{cleaned} sitting naturally with a few real folds"
+            return f"{cleaned} with a few real folds"
         if "knit" in lowered:
             return f"{cleaned} that sits naturally"
         return f"{cleaned} worn without looking overthought"
@@ -1822,9 +1879,9 @@ class PromptComposer:
             if "not perfectly arranged" in lowered or "not too arranged" in lowered or "shifted" in lowered:
                 return "one side sitting a little off from recent movement"
             if any(token in lowered for token in ["drape", "soft body lines", "relaxed fit"]):
-                return "the fabric falling easy instead of too clean"
+                return "easy movement through the fit"
             if any(token in lowered for token in ["fold", "wrinkle", "crease", "texture"]):
-                return "fabric not pressed fully flat"
+                return "light natural wear in the fabric"
             if any(token in lowered for token in ["pull", "off center", "uneven", "higher"]):
                 return cleaned
         return ""
@@ -2725,6 +2782,67 @@ class PromptComposer:
             if len(word) > 2 and word not in self.DUPLICATE_SEQUENCE_STOPWORDS
         ]
 
+    def _garment_phrase_family(self, text: str) -> str:
+        lowered = self._clean_fragment(text).lower()
+        if not lowered:
+            return ""
+        for family, phrases in self.GARMENT_DUPLICATE_FAMILIES.items():
+            if any(phrase in lowered for phrase in phrases):
+                return family
+        return ""
+
+    def _garment_category_hint(self, text: str) -> str:
+        lowered = self._clean_fragment(text).lower()
+        if not lowered:
+            return ""
+        category = self._outfit_category(lowered)
+        if category:
+            return category
+        for family, tokens in self.GARMENT_CATEGORY_TOKENS.items():
+            if any(token in lowered for token in tokens):
+                return family
+        return ""
+
+    def _is_soft_garment_overlap(self, left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+        blocks = {str(left.get("block") or ""), str(right.get("block") or "")}
+        if "Outfit" not in blocks:
+            return False
+        left_text = self._clean_fragment(str(left.get("text") or ""))
+        right_text = self._clean_fragment(str(right.get("text") or ""))
+        if not left_text or not right_text:
+            return False
+        left_family = self._garment_phrase_family(left_text)
+        right_family = self._garment_phrase_family(right_text)
+        left_category = self._garment_category_hint(left_text)
+        right_category = self._garment_category_hint(right_text)
+        if not left_category or not right_category or left_category != right_category:
+            return False
+        if left_family and right_family and left_family == right_family:
+            return True
+        lowered = f"{left_text.lower()} {right_text.lower()}"
+        return any(
+            token in lowered
+            for token in (
+                "without trying too hard",
+                "natural drape",
+                "fall straight",
+                "falls naturally",
+                "slightly imperfect",
+                "effortless",
+                "soft matte",
+            )
+        )
+
+    def _is_fatal_duplicate_sequence(self, entry: Mapping[str, Any]) -> bool:
+        if not bool(entry.get("critical")):
+            return False
+        sequence = self._clean_fragment(str(entry.get("sequence") or ""))
+        if not sequence:
+            return False
+        if self._garment_phrase_family(sequence) and int(entry.get("count") or 0) <= 2:
+            return False
+        return True
+
     def _detect_duplicate_sequence_candidates(self, prompt: str) -> List[Dict[str, Any]]:
         normalized_prompt = str(prompt or "").strip()
         if not normalized_prompt:
@@ -2737,6 +2855,9 @@ class PromptComposer:
             cleaned_sequence = self._clean_fragment(sequence)
             if not cleaned_sequence:
                 return
+            if self._garment_phrase_family(cleaned_sequence) and count <= 2:
+                critical = False
+                kept_reason = kept_reason or "garment_phrase_overlap"
             key = f"{kind}:{self._sequence_key(cleaned_sequence)}"
             current = candidates.get(key)
             payload = {
@@ -2887,7 +3008,12 @@ class PromptComposer:
             elif label == "Outfit":
                 preferred_outfit = self._clean_fragment(outfit_sentence) or repaired_body
                 try:
-                    repaired_body = self._normalize_outfit_sentence_for_prompt(repaired_body or preferred_outfit, scene, context)
+                    compacted = self._compact_outfit_phrase_clusters(repaired_body or preferred_outfit, aggressive=aggressive)
+                    repaired_body = self._normalize_outfit_sentence_for_prompt(
+                        str(compacted.get("outfit_sentence") or repaired_body or preferred_outfit),
+                        scene,
+                        context,
+                    )
                 except PromptValidationError:
                     repaired_body = self._normalize_outfit_sentence_for_prompt(preferred_outfit, scene, context)
             prompt_blocks[label] = (
@@ -2939,55 +3065,63 @@ class PromptComposer:
     ) -> Dict[str, Any]:
         block_map = self._prompt_block_map(prompt)
         identity_body = self._split_block_label(block_map.get("Identity", ""))[1] if block_map else ""
-        scene_body = self._split_block_label(block_map.get("Scene", ""))[1] if block_map else ""
         framing_block = block_map.get("Framing", "") if block_map else ""
         resolved_shot = shot_archetype or self._resolve_shot_archetype(scene, context, context.get("recent_moment_memory") or [])
         if not framing_block:
             framing_block = self._framing_block(self._framing_mode(resolved_shot, self._resolve_generation_mode(scene, resolved_shot)), resolved_shot, scene)
 
-        if identity_body and ";" in identity_body:
-            identity_text = self._in_the_moment_identity_body(identity_body)
-        else:
-            identity_text = "a 22-year-old woman with a recognizable face, relaxed shoulders, and an easy upright posture"
-        scene_anchor = self._scene_presence_lead(scene, scene_body or self._minimal_scene_body(scene))
-        scene_clauses = self._dedupe_semantic_phrases(
-            [
-                scene_anchor,
-                *[
-                    phrase
-                    for phrase in [
-                        self._object_scene_phrase(term, scene, context=context)
-                        for term in self._behavior_object_terms(context, scene)[:2]
-                    ]
-                    if phrase
-                ],
-            ]
+        identity_text = (
+            self._clean_fragment(identity_body.split(";")[0])
+            if identity_body
+            else "a 22-year-old woman with a recognizable face, relaxed shoulders, and an easy upright posture"
         )
-        preferred_outfit = self._clean_fragment(outfit_sentence) or self.extract_outfit_sentence(prompt) or self._contextual_outfit_fallback_sentence(scene, context)
-        outfit_text = self._normalize_outfit_sentence_for_prompt(preferred_outfit, scene, context)
-        try:
-            outfit_text = self._in_the_moment_outfit_body(
-                outfit_text,
-                scene=scene,
-                context=context,
-                shot_archetype=resolved_shot,
-            )
-        except PromptValidationError:
-            outfit_text = self._normalize_outfit_sentence_for_prompt(outfit_text, scene, context)
-        if any(entry.get("critical") for entry in self._detect_duplicate_sequence_candidates(outfit_text)):
-            outfit_text = self._in_the_moment_outfit_body(
-                self._contextual_outfit_fallback_sentence(scene, context),
-                scene=scene,
-                context=context,
-                shot_archetype=resolved_shot,
-            )
+        if not identity_text:
+            identity_text = "a 22-year-old woman with a recognizable face, relaxed shoulders, and an easy upright posture"
 
-        environment_text = self._in_the_moment_environment_body(self._minimal_environment_body(scene))
-        mood_text = self._fallback_mood_presence_phrase(scene, context)
+        preferred_outfit = self._clean_fragment(outfit_sentence) or self.extract_outfit_sentence(prompt) or self._contextual_outfit_fallback_sentence(scene, context)
+        scene_anchor = self._scene_presence_lead(scene, self._minimal_scene_body(scene)) or self._minimal_scene_body(scene)
+        coherence = self._resolve_place_coherence(context, scene, outfit_body=preferred_outfit)
+        scene_objects = [
+            phrase
+            for phrase in [
+                self._object_scene_phrase(term, scene, context=context)
+                for term in self._behavior_object_terms(context, scene)[:3]
+            ]
+            if phrase
+        ]
+        lowered_scene_text = self._scene_text(scene).lower()
+        if (
+            any(token in lowered_scene_text for token in ["waiting", "coffee", "pause"])
+            and not any("pause" in phrase.lower() or "still for a second" in phrase.lower() for phrase in scene_objects)
+        ):
+            scene_objects.append("a pause already underway")
+        if (
+            any(token in lowered_scene_text for token in ["terminal", "gate", "boarding"])
+            and "checking the boarding screen occasionally" not in " ".join(scene_objects).lower()
+        ):
+            scene_objects.append("checking the boarding screen occasionally")
+        scene_text = ", ".join(self._dedupe_semantic_phrases([scene_anchor] + scene_objects)[:6]) or scene_anchor
+
+        compacted = self._compact_outfit_phrase_clusters(preferred_outfit, aggressive=True)
+        coherent_outfit = self._coherent_outfit_sentence(
+            str(compacted.get("outfit_sentence") or preferred_outfit),
+            scene=scene,
+            context=context,
+            shot_archetype=resolved_shot,
+            coherence=coherence,
+            apply_in_the_moment=False,
+        )
+        outfit_text = self._normalize_outfit_sentence_for_prompt(coherent_outfit, scene, context)
+        outfit_text = self._clean_fragment(outfit_text.split(";")[0]) or self._contextual_outfit_fallback_sentence(scene, context)
+
+        minimal_environment = self._coherent_environment_seed(scene, context, coherence)
+        environment_parts = [self._clean_fragment(part) for part in minimal_environment.split(";") if self._clean_fragment(part)]
+        environment_text = ", ".join(environment_parts[:6]) if environment_parts else "photorealistic real environment with accurate perspective and scale"
+        mood_text = self._fallback_mood_presence_phrase(scene, context) or "held together without turning it into a pose"
         prompt_blocks = {
             "Identity": f"Identity: {identity_text}.",
             "Framing": framing_block,
-            "Scene": f"Scene: {', '.join(scene_clauses[:3])}.",
+            "Scene": f"Scene: {scene_text}.",
             "Outfit": f"Outfit: {outfit_text}.",
             "Environment": f"Environment: {environment_text}.",
             "Mood": f"Mood: {mood_text}.",
@@ -3020,8 +3154,22 @@ class PromptComposer:
     def _has_duplicate_clauses(self, prompt: str) -> bool:
         return bool(self._find_duplicate_clauses(prompt))
 
-    def _find_duplicate_clauses(self, prompt: str) -> List[str]:
-        duplicates: List[str] = []
+    def _classify_duplicate_clause_entry(self, left: Dict[str, Any], right: Dict[str, Any]) -> str:
+        left_tokens = set(left.get("tokens") or set())
+        right_tokens = set(right.get("tokens") or set())
+        if left.get("key") and left.get("key") == right.get("key") and max(len(left_tokens), len(right_tokens)) >= self.DUPLICATE_BLOCK_FAILURE_TOKEN_THRESHOLD:
+            return "fatal"
+        if self._is_soft_garment_overlap(left, right):
+            return "soft"
+        if left_tokens and right_tokens:
+            if (left_tokens <= right_tokens or right_tokens <= left_tokens) and max(len(left_tokens), len(right_tokens)) >= self.DUPLICATE_BLOCK_FAILURE_TOKEN_THRESHOLD:
+                return "fatal"
+            if self._token_overlap_ratio(left_tokens, right_tokens) >= self.DUPLICATE_CLAUSE_FATAL_RATIO:
+                return "fatal"
+        return "soft"
+
+    def _duplicate_clause_entries(self, prompt: str) -> List[Dict[str, Any]]:
+        duplicates: List[Dict[str, Any]] = []
         seen: List[Dict[str, Any]] = []
         for block in [block.strip() for block in str(prompt or "").split("\n\n") if block.strip()]:
             block_name, body = self._split_block_label(block)
@@ -3030,8 +3178,18 @@ class PromptComposer:
                 if duplicate_of is None:
                     seen.append(clause)
                     continue
-                duplicates.append(f"{block_name}:{clause['text']} == {duplicate_of['block']}:{duplicate_of['text']}")
+                duplicates.append(
+                    {
+                        "severity": self._classify_duplicate_clause_entry(clause, duplicate_of),
+                        "message": f"{block_name}:{clause['text']} == {duplicate_of['block']}:{duplicate_of['text']}",
+                        "left": clause,
+                        "right": duplicate_of,
+                    }
+                )
         return duplicates
+
+    def _find_duplicate_clauses(self, prompt: str) -> List[str]:
+        return [entry["message"] for entry in self._duplicate_clause_entries(prompt)]
 
     def sanitize_canonical_prompt(
         self,
@@ -3079,11 +3237,13 @@ class PromptComposer:
             for clause in clauses:
                 duplicate_of = next((entry for entry in kept_entries if self._clauses_overlap(clause, entry)), None)
                 if duplicate_of is not None:
+                    severity = self._classify_duplicate_clause_entry(clause, duplicate_of)
                     diagnostics["duplicate_clauses"].append(
-                        f"{label}:{clause['text']} == {duplicate_of['block']}:{duplicate_of['text']}"
+                        f"{severity}:{label}:{clause['text']} == {duplicate_of['block']}:{duplicate_of['text']}"
                     )
-                    diagnostics["sanitized_prompt_applied"] = True
-                    continue
+                    if severity == "fatal":
+                        diagnostics["sanitized_prompt_applied"] = True
+                        continue
                 kept_clauses.append(clause)
                 kept_entries.append(clause)
             sanitized_bodies[label] = self._compose_block_body(
@@ -3192,6 +3352,8 @@ class PromptComposer:
         right_tokens = set(right.get("tokens") or set())
         if not left_tokens or not right_tokens:
             return False
+        if self._is_soft_garment_overlap(left, right):
+            return self._token_overlap_ratio(left_tokens, right_tokens) >= self.DUPLICATE_CLAUSE_FATAL_RATIO
         overlap = left_tokens & right_tokens
         if len(overlap) < 2:
             return False
@@ -3288,9 +3450,92 @@ class PromptComposer:
             return "laptop"
         return self._clean_fragment(text)
 
+    def _compact_outfit_item_phrase(self, text: str, *, aggressive: bool) -> str:
+        cleaned = self._clean_fragment(text)
+        if not cleaned:
+            return ""
+        lowered = cleaned.lower()
+        category = self._outfit_category(cleaned)
+        for token in self.GARMENT_CATEGORY_TOKENS.get(category, ()):
+            if token in lowered:
+                token_index = lowered.find(token)
+                if token_index >= 0:
+                    compact = cleaned[: token_index + len(token)].strip(" ,;:.")
+                    if compact:
+                        return compact
+        if aggressive:
+            compact = re.split(
+                r"\b(?:that|with|worn|following|moving|kept|left|looking|falling)\b",
+                cleaned,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0].strip(" ,;:.")
+            if compact:
+                return compact
+        return cleaned
+
+    def _compact_outfit_details(self, details: List[str], *, aggressive: bool) -> tuple[List[str], int]:
+        canonical_by_family = {
+            "fit_line": "easy movement through the fit",
+            "effortless_styling": "styled in an unforced way",
+            "fabric_texture": "matte everyday fabric",
+            "lived_in_wear": "worn in",
+        }
+        kept: List[str] = []
+        seen_families: set[str] = set()
+        removed_count = 0
+        for detail in self._dedupe_phrases(details):
+            cleaned = self._clean_fragment(detail)
+            if not cleaned:
+                continue
+            family = self._garment_phrase_family(cleaned)
+            if family:
+                if family in seen_families:
+                    removed_count += 1
+                    continue
+                seen_families.add(family)
+                if aggressive:
+                    kept.append(canonical_by_family.get(family, cleaned))
+                else:
+                    kept.append(cleaned)
+                continue
+            kept.append(cleaned)
+        return self._dedupe_phrases(kept), removed_count
+
+    def _compact_outfit_phrase_clusters(
+        self,
+        outfit_sentence: str,
+        *,
+        aggressive: bool,
+    ) -> Dict[str, Any]:
+        clothing, details, _props = self._split_outfit_scene_props(outfit_sentence)
+        compacted_clothing: List[str] = []
+        removed_count = 0
+        for item in clothing:
+            if self._is_outfit_detail_only_clause(item):
+                details.append(item)
+                removed_count += 1
+                continue
+            compacted = self._compact_outfit_item_phrase(item, aggressive=aggressive)
+            if compacted != self._clean_fragment(item):
+                removed_count += 1
+            compacted_clothing.append(compacted or self._clean_fragment(item))
+        compacted_details, detail_removed = self._compact_outfit_details(details, aggressive=aggressive)
+        removed_count += detail_removed
+        prompt_text = ", ".join(self._dedupe_phrases(compacted_clothing))
+        if compacted_details:
+            prompt_text = f"{prompt_text}; {', '.join(self._dedupe_phrases(compacted_details))}" if prompt_text else ", ".join(compacted_details)
+        return {
+            "outfit_sentence": self._clean_fragment(prompt_text),
+            "garment_phrase_compaction_applied": removed_count > 0,
+            "softened_duplicate_sequences_count": removed_count,
+        }
+
     def _normalize_outfit_sentence_for_prompt(self, outfit_sentence: str, scene: Any | None = None, context: Dict[str, Any] | None = None) -> str:
         cleaned = self._clean_fragment(outfit_sentence)
         if cleaned and not self._is_invalid_outfit_value(cleaned):
+            compacted = self._compact_outfit_phrase_clusters(cleaned, aggressive=False)
+            cleaned = self._clean_fragment(str(compacted.get("outfit_sentence") or cleaned))
             clothing, details, _ = self._split_outfit_scene_props(cleaned)
             rebuilt = ", ".join(clothing)
             if details:
@@ -3365,6 +3610,78 @@ class PromptComposer:
                 shot_archetype=shot_archetype,
             )
         )
+
+    def _soft_simplify_canonical_prompt(
+        self,
+        prompt: str,
+        scene: Any,
+        context: Dict[str, Any],
+        *,
+        outfit_sentence: str = "",
+        aggressive: bool,
+    ) -> Dict[str, Any]:
+        block_map = self._prompt_block_map(prompt)
+        if not block_map:
+            return {
+                "prompt": str(prompt or "").strip(),
+                "prompt_blocks": {},
+                "changed": False,
+                "garment_phrase_compaction_applied": False,
+                "softened_duplicate_sequences_count": 0,
+            }
+
+        updated_blocks = dict(block_map)
+        preferred_outfit = self._split_block_label(updated_blocks["Outfit"])[1] or self._clean_fragment(outfit_sentence)
+        compacted_outfit = self._compact_outfit_phrase_clusters(preferred_outfit, aggressive=aggressive)
+        try:
+            outfit_body = self._normalize_outfit_sentence_for_prompt(
+                str(compacted_outfit.get("outfit_sentence") or preferred_outfit),
+                scene,
+                context,
+            )
+        except PromptValidationError:
+            outfit_body = self._contextual_outfit_fallback_sentence(scene, context)
+        if aggressive and ";" in outfit_body:
+            head, _, tail = outfit_body.partition(";")
+            detail = self._clean_fragment(tail.split(",", 1)[0])
+            if detail:
+                outfit_body = f"{self._clean_fragment(head)}, {detail}"
+            else:
+                outfit_body = self._clean_fragment(head) or outfit_body
+        if aggressive and "sneakers" in outfit_body.lower() and "worn in" not in outfit_body.lower():
+            outfit_body = re.sub(r"\bcomfortable sneakers\b", "comfortable sneakers worn in", outfit_body, flags=re.IGNORECASE)
+        updated_blocks["Outfit"] = f"Outfit: {outfit_body}."
+
+        scene_clauses = [clause["text"] for clause in self._extract_semantic_clauses("Scene", self._split_block_label(updated_blocks["Scene"])[1])]
+        if scene_clauses:
+            limit = 6 if aggressive else 4
+            updated_blocks["Scene"] = f"Scene: {', '.join(self._prioritized_scene_clauses(scene_clauses, context, limit))}."
+
+        environment_clauses = self._dedupe_phrases(
+            [clause["text"] for clause in self._extract_semantic_clauses("Environment", self._split_block_label(updated_blocks["Environment"])[1])]
+        )
+        if environment_clauses:
+            limit = 6 if aggressive else 4
+            separator = ", " if aggressive else "; "
+            updated_blocks["Environment"] = f"Environment: {separator.join(environment_clauses[:limit])}."
+
+        mood_clauses = self._dedupe_phrases(
+            [clause["text"] for clause in self._extract_semantic_clauses("Mood", self._split_block_label(updated_blocks["Mood"])[1])]
+        )
+        if mood_clauses:
+            updated_blocks["Mood"] = f"Mood: {', '.join(mood_clauses[:2 if aggressive else 2])}."
+
+        updated_prompt = "\n\n".join(
+            updated_blocks[name]
+            for name in ["Identity", "Framing", "Scene", "Outfit", "Environment", "Mood"]
+        )
+        return {
+            "prompt": updated_prompt,
+            "prompt_blocks": updated_blocks,
+            "changed": updated_prompt.strip() != str(prompt or "").strip(),
+            "garment_phrase_compaction_applied": bool(compacted_outfit.get("garment_phrase_compaction_applied")),
+            "softened_duplicate_sequences_count": int(compacted_outfit.get("softened_duplicate_sequences_count") or 0),
+        }
 
     @staticmethod
     def _is_outfit_detail_only_clause(text: str) -> bool:
@@ -4071,6 +4388,13 @@ class PromptComposer:
             "rewrite_pass_applied": False,
             "rewrite_diagnostics": {},
             "fallback_prompt_applied": False,
+            "finalization_path": "main",
+            "fatal_validation_reason": "",
+            "garment_phrase_compaction_applied": False,
+            "softened_duplicate_sequences_count": 0,
+            "prompt_blocker_demoted_to_warning": False,
+            "safe_fallback_used": False,
+            "validation_severity": "pending",
             "post_sanitize_prompt_length": len(normalized_prompt),
             "post_sanitize_validation_result": "pending",
             "sanitization_step": step,
@@ -4078,29 +4402,34 @@ class PromptComposer:
 
         working_prompt = normalized_prompt
         preferred_outfit = self._clean_fragment(outfit_sentence) or self.extract_outfit_sentence(working_prompt)
-        if not apply_rewrite:
-            initial_candidates = self._detect_duplicate_sequence_candidates(working_prompt)
-            try:
-                self._validate_canonical_prompt_core(working_prompt, scene, context)
-                if not any(entry.get("critical") for entry in initial_candidates):
-                    if any(str(entry.get("kind") or "").startswith("adjacent_") for entry in initial_candidates):
-                        raise PromptValidationError("Adjacent duplicate sequence repair required")
-                    diagnostics["duplicate_sequence_candidates"] = [entry["sequence"] for entry in initial_candidates]
-                    diagnostics["duplicate_sequence_kept_reason"] = [
-                        f"{entry['sequence']}:{entry['kept_reason']}"
-                        for entry in initial_candidates
-                        if entry.get("kept_reason")
-                    ]
-                    diagnostics["rewrite_diagnostics"] = (
-                        self._rewrite_pass_diagnostics(diagnostics["prompt_blocks"])
-                        if diagnostics["prompt_blocks"]
-                        else {}
-                    )
-                    diagnostics["post_sanitize_prompt_length"] = len(working_prompt)
-                    diagnostics["post_sanitize_validation_result"] = "passed"
-                    return diagnostics
-            except PromptValidationError:
-                pass
+
+        resolved_shot = shot_archetype or self._resolve_shot_archetype(scene, context, context.get("recent_moment_memory") or [])
+        if apply_rewrite:
+            rewritten = self.rewrite_canonical_prompt(
+                working_prompt,
+                scene,
+                context,
+                shot_archetype=resolved_shot,
+            )
+            working_prompt = str(rewritten.get("prompt") or working_prompt).strip()
+            diagnostics["rewrite_pass_applied"] = bool(rewritten.get("rewrite_pass_applied"))
+            diagnostics["prompt_blocks"] = dict(rewritten.get("prompt_blocks") or diagnostics["prompt_blocks"])
+
+        coherent_prompt = self._apply_place_coherence_to_prompt(
+            working_prompt,
+            scene,
+            context,
+            outfit_sentence=preferred_outfit,
+            shot_archetype=resolved_shot,
+            apply_in_the_moment=True,
+        )
+        working_prompt = str(coherent_prompt.get("prompt") or working_prompt).strip()
+        diagnostics["prompt_blocks"] = dict(coherent_prompt.get("prompt_blocks") or diagnostics["prompt_blocks"])
+        diagnostics["sanitized_prompt_applied"] = (
+            diagnostics["sanitized_prompt_applied"]
+            or bool(coherent_prompt.get("changed"))
+        )
+        diagnostics["rewrite_diagnostics"] = self._rewrite_pass_diagnostics(diagnostics["prompt_blocks"]) if diagnostics["prompt_blocks"] else {}
 
         clause_sanitized = self.sanitize_canonical_prompt(
             working_prompt,
@@ -4111,65 +4440,11 @@ class PromptComposer:
         )
         working_prompt = str(clause_sanitized.get("prompt") or working_prompt).strip()
         diagnostics["duplicate_clauses"] = list(clause_sanitized.get("duplicate_clauses", []))
-        diagnostics["sanitized_prompt_applied"] = bool(clause_sanitized.get("sanitized_prompt_applied"))
-        diagnostics["prompt_blocks"] = dict(clause_sanitized.get("prompt_blocks") or diagnostics["prompt_blocks"])
-
-        coherent_before_rewrite = self._apply_place_coherence_to_prompt(
-            working_prompt,
-            scene,
-            context,
-            outfit_sentence=preferred_outfit,
-            shot_archetype=shot_archetype or self._resolve_shot_archetype(scene, context, context.get("recent_moment_memory") or []),
-            apply_in_the_moment=False,
-        )
-        working_prompt = str(coherent_before_rewrite.get("prompt") or working_prompt).strip()
-        diagnostics["prompt_blocks"] = dict(coherent_before_rewrite.get("prompt_blocks") or diagnostics["prompt_blocks"])
         diagnostics["sanitized_prompt_applied"] = (
             diagnostics["sanitized_prompt_applied"]
-            or bool(coherent_before_rewrite.get("changed"))
+            or bool(clause_sanitized.get("sanitized_prompt_applied"))
         )
-
-        if apply_rewrite:
-            rewritten = self.rewrite_canonical_prompt(
-                working_prompt,
-                scene,
-                context,
-                shot_archetype=shot_archetype,
-            )
-            working_prompt = str(rewritten.get("prompt") or working_prompt).strip()
-            diagnostics["rewrite_pass_applied"] = bool(rewritten.get("rewrite_pass_applied"))
-            diagnostics["prompt_blocks"] = dict(rewritten.get("prompt_blocks") or diagnostics["prompt_blocks"])
-            coherent_after_rewrite = self._apply_place_coherence_to_prompt(
-                working_prompt,
-                scene,
-                context,
-                outfit_sentence=preferred_outfit,
-                shot_archetype=shot_archetype or self._resolve_shot_archetype(scene, context, context.get("recent_moment_memory") or []),
-                apply_in_the_moment=True,
-            )
-            working_prompt = str(coherent_after_rewrite.get("prompt") or working_prompt).strip()
-            diagnostics["prompt_blocks"] = dict(coherent_after_rewrite.get("prompt_blocks") or diagnostics["prompt_blocks"])
-            diagnostics["sanitized_prompt_applied"] = (
-                diagnostics["sanitized_prompt_applied"]
-                or bool(coherent_after_rewrite.get("changed"))
-            )
-            diagnostics["rewrite_diagnostics"] = self._rewrite_pass_diagnostics(diagnostics["prompt_blocks"])
-        elif diagnostics["prompt_blocks"]:
-            coherent_current = self._apply_place_coherence_to_prompt(
-                working_prompt,
-                scene,
-                context,
-                outfit_sentence=preferred_outfit,
-                shot_archetype=shot_archetype or self._resolve_shot_archetype(scene, context, context.get("recent_moment_memory") or []),
-                apply_in_the_moment=True,
-            )
-            working_prompt = str(coherent_current.get("prompt") or working_prompt).strip()
-            diagnostics["prompt_blocks"] = dict(coherent_current.get("prompt_blocks") or diagnostics["prompt_blocks"])
-            diagnostics["sanitized_prompt_applied"] = (
-                diagnostics["sanitized_prompt_applied"]
-                or bool(coherent_current.get("changed"))
-            )
-            diagnostics["rewrite_diagnostics"] = self._rewrite_pass_diagnostics(diagnostics["prompt_blocks"])
+        diagnostics["prompt_blocks"] = dict(clause_sanitized.get("prompt_blocks") or diagnostics["prompt_blocks"])
 
         last_error: PromptValidationError | None = None
         for attempt_index, aggressive in enumerate((False, True), start=1):
@@ -4198,6 +4473,29 @@ class PromptComposer:
             if sequence_sanitized.get("prompt_blocks"):
                 diagnostics["prompt_blocks"] = dict(sequence_sanitized.get("prompt_blocks") or diagnostics["prompt_blocks"])
 
+            simplified = self._soft_simplify_canonical_prompt(
+                candidate_prompt,
+                scene,
+                context,
+                outfit_sentence=preferred_outfit,
+                aggressive=aggressive,
+            )
+            candidate_prompt = str(simplified.get("prompt") or candidate_prompt).strip()
+            diagnostics["garment_phrase_compaction_applied"] = (
+                diagnostics["garment_phrase_compaction_applied"]
+                or bool(simplified.get("garment_phrase_compaction_applied"))
+            )
+            diagnostics["softened_duplicate_sequences_count"] = int(
+                diagnostics["softened_duplicate_sequences_count"]
+                + int(simplified.get("softened_duplicate_sequences_count") or 0)
+            )
+            diagnostics["sanitized_prompt_applied"] = (
+                diagnostics["sanitized_prompt_applied"]
+                or bool(simplified.get("changed"))
+            )
+            if simplified.get("prompt_blocks"):
+                diagnostics["prompt_blocks"] = dict(simplified.get("prompt_blocks") or diagnostics["prompt_blocks"])
+
             try:
                 self._validate_canonical_prompt_core(candidate_prompt, scene, context)
                 diagnostics["prompt"] = candidate_prompt
@@ -4209,6 +4507,18 @@ class PromptComposer:
                     or candidate_prompt != normalized_prompt
                     or bool(diagnostics["duplicate_sequence_removed"])
                 )
+                soft_duplicate_entries = [entry for entry in self._duplicate_clause_entries(candidate_prompt) if entry.get("severity") != "fatal"]
+                softened_sequences = [
+                    entry["sequence"]
+                    for entry in self._detect_duplicate_sequence_candidates(candidate_prompt)
+                    if not self._is_fatal_duplicate_sequence(entry)
+                ]
+                if soft_duplicate_entries or softened_sequences:
+                    diagnostics["prompt_blocker_demoted_to_warning"] = True
+                    diagnostics["validation_severity"] = "warning"
+                else:
+                    diagnostics["validation_severity"] = "clean"
+                diagnostics["finalization_path"] = "sanitized" if diagnostics["sanitized_prompt_applied"] else "main"
                 logger.info(
                     "prompt_duplicate_sequence_trace scene=%s step=%s duplicate_sequence_candidates=%s duplicate_sequence_removed=%s duplicate_sequence_kept_reason=%s post_sanitize_prompt_length=%s post_sanitize_validation_result=%s",
                     str(getattr(scene, "scene_moment", "") or getattr(scene, "description", "") or "unknown_scene"),
@@ -4222,6 +4532,7 @@ class PromptComposer:
                 return diagnostics
             except PromptValidationError as exc:
                 last_error = exc
+                diagnostics["fatal_validation_reason"] = str(exc)
                 diagnostics["post_sanitize_prompt_length"] = len(candidate_prompt)
                 diagnostics["post_sanitize_validation_result"] = f"retry_needed:{exc}"
                 working_prompt = candidate_prompt
@@ -4232,7 +4543,7 @@ class PromptComposer:
                 scene,
                 context,
                 outfit_sentence=preferred_outfit,
-                shot_archetype=shot_archetype,
+                shot_archetype=resolved_shot,
             )
             fallback_prompt = str(fallback.get("prompt") or working_prompt).strip()
             fallback_sanitized = self._sanitize_duplicate_sequences_in_canonical_prompt(
@@ -4249,10 +4560,18 @@ class PromptComposer:
                 scene,
                 context,
                 outfit_sentence=preferred_outfit,
-                shot_archetype=shot_archetype or self._resolve_shot_archetype(scene, context, context.get("recent_moment_memory") or []),
+                shot_archetype=resolved_shot,
                 apply_in_the_moment=True,
             )
             fallback_prompt = str(coherent_fallback.get("prompt") or fallback_prompt).strip()
+            fallback_simplified = self._soft_simplify_canonical_prompt(
+                fallback_prompt,
+                scene,
+                context,
+                outfit_sentence=preferred_outfit,
+                aggressive=True,
+            )
+            fallback_prompt = str(fallback_simplified.get("prompt") or fallback_prompt).strip()
             diagnostics["duplicate_sequence_candidates"] = self._dedupe_phrases(
                 diagnostics["duplicate_sequence_candidates"] + list(fallback_sanitized.get("duplicate_sequence_candidates", []))
             )
@@ -4266,17 +4585,30 @@ class PromptComposer:
                 diagnostics["sanitized_prompt_applied"]
                 or bool(fallback_sanitized.get("sanitized_prompt_applied"))
                 or bool(coherent_fallback.get("changed"))
+                or bool(fallback_simplified.get("changed"))
+            )
+            diagnostics["garment_phrase_compaction_applied"] = (
+                diagnostics["garment_phrase_compaction_applied"]
+                or bool(fallback_simplified.get("garment_phrase_compaction_applied"))
+            )
+            diagnostics["softened_duplicate_sequences_count"] = int(
+                diagnostics["softened_duplicate_sequences_count"]
+                + int(fallback_simplified.get("softened_duplicate_sequences_count") or 0)
             )
             try:
                 self._validate_canonical_prompt_core(fallback_prompt, scene, context)
                 diagnostics["prompt"] = fallback_prompt
                 diagnostics["prompt_blocks"] = (
-                    dict(coherent_fallback.get("prompt_blocks") or {})
+                    dict(fallback_simplified.get("prompt_blocks") or {})
+                    or dict(coherent_fallback.get("prompt_blocks") or {})
                     or self._prompt_block_map(fallback_prompt)
                     or dict(fallback.get("prompt_blocks") or {})
                 )
                 diagnostics["fallback_prompt_applied"] = True
                 diagnostics["sanitized_prompt_applied"] = True
+                diagnostics["finalization_path"] = "fallback"
+                diagnostics["safe_fallback_used"] = True
+                diagnostics["validation_severity"] = "hard_fallback"
                 diagnostics["post_sanitize_prompt_length"] = len(fallback_prompt)
                 diagnostics["post_sanitize_validation_result"] = "passed_with_fallback"
                 logger.warning(
@@ -4291,9 +4623,11 @@ class PromptComposer:
                 return diagnostics
             except PromptValidationError as exc:
                 last_error = exc
+                diagnostics["fatal_validation_reason"] = str(exc)
                 diagnostics["post_sanitize_prompt_length"] = len(fallback_prompt)
                 diagnostics["post_sanitize_validation_result"] = f"fallback_failed:{exc}"
 
+        diagnostics["validation_severity"] = "fatal"
         logger.warning(
             "prompt_duplicate_sequence_unresolved scene=%s step=%s duplicate_sequence_candidates=%s duplicate_sequence_removed=%s duplicate_sequence_kept_reason=%s post_sanitize_prompt_length=%s post_sanitize_validation_result=%s",
             str(getattr(scene, "scene_moment", "") or getattr(scene, "description", "") or "unknown_scene"),
@@ -4352,11 +4686,25 @@ class PromptComposer:
             "rewrite_pass_applied": False,
             "rewrite_diagnostics": {},
             "fallback_prompt_applied": False,
+            "finalization_path": "main",
+            "fatal_validation_reason": "",
+            "garment_phrase_compaction_applied": False,
+            "softened_duplicate_sequences_count": 0,
+            "prompt_blocker_demoted_to_warning": False,
+            "safe_fallback_used": False,
+            "validation_severity": "clean",
             "post_sanitize_prompt_length": len(str(prompt or "").strip()),
             "post_sanitize_validation_result": "passed",
         }
 
-    def _validate_canonical_prompt_core(self, prompt: str, scene: Any, context: Dict[str, Any]) -> None:
+    def _validate_canonical_prompt_core(
+        self,
+        prompt: str,
+        scene: Any,
+        context: Dict[str, Any],
+        *,
+        strict_duplicate_validation: bool = False,
+    ) -> None:
         raw_blocks = [block.strip() for block in prompt.split("\n\n")]
         if len(raw_blocks) != 6 or any(not block for block in raw_blocks):
             raise PromptValidationError("Canonical prompt must contain exactly six non-empty blocks.")
@@ -4419,8 +4767,8 @@ class PromptComposer:
         if place_conflicts:
             raise PromptValidationError("; ".join(place_conflicts))
 
-        duplicate_clauses = self._find_duplicate_clauses(prompt)
-        if duplicate_clauses:
+        duplicate_clause_entries = self._duplicate_clause_entries(prompt)
+        if any(entry.get("severity") == "fatal" for entry in duplicate_clause_entries):
             raise PromptValidationError("Duplicate clauses detected in prompt")
 
         if self._is_travel_walk(self._scene_text(scene).lower()):
@@ -4438,12 +4786,30 @@ class PromptComposer:
 
         required_objects = self._behavior_object_terms(context, scene)
         for object_term in required_objects:
-            if object_term and object_term.lower() not in lowered:
-                raise PromptValidationError(f"Required object missing from prompt: {object_term}")
+            lowered_object = object_term.lower() if object_term else ""
+            if not lowered_object:
+                continue
+            if lowered_object in lowered:
+                continue
+            if lowered_object == "bag" and any(
+                alias in lowered
+                for alias in [
+                    "travel items nearby",
+                    "not fully unpacked travel items nearby",
+                    "overnight bag",
+                    "shoulder bag",
+                    "crossbody bag",
+                    "bag resting",
+                ]
+            ):
+                continue
+            raise PromptValidationError(f"Required object missing from prompt: {object_term}")
 
         duplicate_sequence_candidates = self._detect_duplicate_sequence_candidates(prompt)
-        if any(entry.get("critical") for entry in duplicate_sequence_candidates):
+        if any(self._is_fatal_duplicate_sequence(entry) for entry in duplicate_sequence_candidates):
             raise PromptValidationError("Duplicate word sequence detected in canonical prompt.")
+        if strict_duplicate_validation and duplicate_clause_entries:
+            raise PromptValidationError("Duplicate clauses detected in prompt")
 
     def _is_placeholder_body(self, text: str) -> bool:
         cleaned = self._clean_fragment(text).lower()

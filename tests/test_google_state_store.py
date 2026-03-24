@@ -1,6 +1,7 @@
 from virtual_persona.storage.state_store import GoogleSheetsStateStore, LocalStateStore, TelegramStateView, build_state_store
 from virtual_persona.models.domain import DailyPackage, GeneratedContent, OutfitSelection, PublishingPlanItem, SunSnapshot, WeatherSnapshot
 from datetime import date, datetime
+import time
 
 
 class FakeWS:
@@ -166,6 +167,30 @@ def test_google_store_caches_sheet_headers_between_reads():
     assert first == ["publication_id", "prompt_text"]
     assert second == ["publication_id", "prompt_text"]
     assert ws.header_reads == 1
+
+
+def test_google_store_uses_stale_cached_activity_candidates_when_refresh_fails():
+    class FailingWS:
+        def get_all_records(self):
+            raise RuntimeError("quota read fail")
+
+    store = GoogleSheetsStateStore.__new__(GoogleSheetsStateStore)
+    store.json_path = ""
+    store.sheet_id = ""
+    store.client = object()
+    store.sheet = object()
+    store.last_error = ""
+    store._sheet_cache = {"activity_candidates": [{"candidate_id": "cached-1"}]}
+    store._sheet_cache_time = {"activity_candidates": time.time() - 999}
+    store._ws_cache = {"activity_candidates": FailingWS()}
+    store._header_cache = {}
+    store._headers_ensured = set()
+    store._worksheet_fetch_count = 0
+    store._with_retry = lambda operation, **_kwargs: operation()
+
+    rows = store._safe_records("activity_candidates")
+
+    assert rows == [{"candidate_id": "cached-1"}]
 
 
 def test_telegram_state_view_proxies_base_store_methods_needed_for_generation():
