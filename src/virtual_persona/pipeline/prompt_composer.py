@@ -64,6 +64,13 @@ class PromptComposer:
         "creases",
         "everyday",
         "natural",
+        "lived-in",
+        "shifted",
+        "arranged",
+        "tension",
+        "gathering",
+        "settling",
+        "slouched",
     )
     FORBIDDEN_POSITIVE_PHRASES: tuple[str, ...] = (
         "no plastic skin",
@@ -223,6 +230,8 @@ class PromptComposer:
         scene_action = self._scene_action(scene, scene_desc, scene_loc)
         outfit_bundle, outfit_source = self._resolve_outfit_bundle(context, scene, outfit_summary)
         normalized_outfit = self._normalize_outfit_sentence_for_prompt(outfit_bundle.outfit_sentence or outfit_bundle.sentence, scene, context)
+        presence_layer = self._presence_layer(context, scene, outfit_bundle, shot_archetype, platform_behavior)
+        perceived_outfit = self._perceived_outfit_sentence(outfit_bundle, normalized_outfit, scene, context)
         wardrobe_block = self._wardrobe_context(outfit_bundle, shot_archetype, item_ids_text)
         camera_block = self._camera_context(shot_archetype, context)
         realism_block = self._realism_cues(shot_archetype, scene_loc)
@@ -246,9 +255,15 @@ class PromptComposer:
             "outfit_struct_json": json.dumps(outfit_bundle.to_dict(), ensure_ascii=False),
             "outfit_sentence": normalized_outfit,
             "outfit_summary": normalized_outfit,
+            "outfit_perceived_sentence": perceived_outfit,
             "camera_block": camera_block,
             "realism_block": realism_block,
             "continuity_block": continuity_block,
+            "presence_layer": presence_layer["summary"],
+            "micro_body_behavior": presence_layer["micro_body_behavior"],
+            "interaction_realism": presence_layer["interaction_realism"],
+            "anti_model_symmetry": presence_layer["anti_model_symmetry"],
+            "camera_distance_hint": presence_layer["camera_distance"],
             "platform_intent": platform_block,
             "prompt_mode": prompt_mode,
             "generation_mode": generation_mode,
@@ -301,12 +316,13 @@ class PromptComposer:
             scene=scene,
             scene_desc=scene_desc,
             scene_loc=scene_loc,
-            outfit_sentence=normalized_outfit,
+            outfit_sentence=perceived_outfit,
             realism_block=realism_block,
             continuity_block=continuity_block,
             device_identity=ordered_blocks["device_identity"],
             social_behavior=ordered_blocks["social_behavior"],
             scene_tags=scene_alignment.get("scene_tags", []),
+            presence_layer=presence_layer,
         )
         final_prompt = str(prompt_payload["prompt"])
         prompt_mode = self._prompt_mode(final_prompt)
@@ -348,7 +364,7 @@ class PromptComposer:
             ):
                 expanded_blocks += 1
 
-        if "selfie" in framing_block and len(normalized) < 1000:
+        if "selfie" in framing_block and len(normalized) < 1550:
             return "compact"
         if len(normalized) > PromptComposer.COMPACT_PROMPT_THRESHOLD and expanded_blocks >= PromptComposer.DENSE_PROMPT_EXPANDED_BLOCKS:
             return "dense"
@@ -667,9 +683,9 @@ class PromptComposer:
             lowered = detail.lower()
             if not payload["fit"] and any(token in lowered for token in ["fit", "fitted", "relaxed", "silhouette", "drape"]):
                 payload["fit"] = detail
-            elif not payload["fabric"] and any(token in lowered for token in ["fabric", "fabrics", "texture", "textures", "matte", "cotton", "knit", "linen", "wool"]):
+            elif not payload["fabric"] and any(token in lowered for token in ["fabric", "fabrics", "texture", "textures", "matte", "cotton", "knit", "linen", "wool", "settling"]):
                 payload["fabric"] = detail
-            elif not payload["condition"] and any(token in lowered for token in ["fold", "folds", "worn", "wrinkle", "wrinkles", "crease", "creases", "bunching"]):
+            elif not payload["condition"] and any(token in lowered for token in ["fold", "folds", "worn", "wrinkle", "wrinkles", "crease", "creases", "bunching", "lived-in", "shifted", "arranged", "tension", "gathering"]):
                 payload["condition"] = detail
             elif not payload["styling"]:
                 payload["styling"] = detail
@@ -737,10 +753,12 @@ class PromptComposer:
     def _negative_prompt(self, shot_archetype: str, scene: Any, scene_loc: str, platform_behavior: str, generation_mode: str) -> str:
         universal = [
             "extra fingers", "deformed hands", "duplicate person", "plastic skin", "bad anatomy", "wrong limb placement",
-            "generic model photo", "fashion catalog symmetry", "sterile beauty campaign polish", "wrong phone shape",
+            "generic model photo", "sterile beauty campaign polish", "wrong phone shape",
             "identity drift", "unstable face geometry", "inconsistent body proportions",
-            "fashion catalog outfit", "perfect styling", "overly trendy outfit", "runway fashion",
-            "influencer outfit", "studio fashion look", "over-coordinated clothing", "impractical clothing for context",
+            "perfect styling", "overly trendy outfit", "runway fashion",
+            "over-coordinated clothing", "impractical clothing for context", "perfectly symmetrical pose",
+            "over-styled clothing", "staged body posture", "influencer aesthetic", "studio-perfect positioning",
+            "centered perfect posture", "posed look",
         ]
         shot_specific = {
             "mirror_selfie": ["broken mirror reflection", "floating phone", "inconsistent reflection angle", "duplicated hand", "impossible reflection geometry"],
@@ -845,7 +863,7 @@ class PromptComposer:
 
     @staticmethod
     def _anti_generic_constraints_layer() -> str:
-        return "forbid generic AI wording and campaign aesthetics: no fashion catalog mood, no sterile luxury vibe, no editorial over-posing."
+        return "forbid generic AI wording and campaign aesthetics: no sterile commercial vibe, no luxury polish, no editorial over-posing."
 
     @staticmethod
     def _clean_generic_prompt_terms(text: str) -> str:
@@ -949,15 +967,16 @@ class PromptComposer:
         device_identity: str,
         social_behavior: str,
         scene_tags: List[str],
+        presence_layer: Dict[str, Any],
     ) -> Dict[str, Any]:
         del prompt_mode, device_identity, social_behavior
 
         identity_block = self._identity_block(identity_anchor=identity_anchor, body_anchor=body_anchor)
-        framing_block = self._framing_block(framing_mode, shot_archetype, scene)
-        scene_block = self._scene_block(context, scene, scene_desc, scene_loc, scene_tags)
+        framing_block = self._framing_block(framing_mode, shot_archetype, scene, presence_layer.get("camera_distance", ""))
+        scene_block = self._scene_block(context, scene, scene_desc, scene_loc, scene_tags, presence_layer)
         outfit_block = self._outfit_block(outfit_sentence)
         environment_block = self._environment_block(context, scene, scene_loc, scene_tags, continuity_block)
-        mood_block = self._mood_block(context, scene, continuity_block)
+        mood_block = self._mood_block(context, scene, continuity_block, presence_layer)
 
         blocks = [
             identity_block,
@@ -1018,7 +1037,7 @@ class PromptComposer:
         ]
         return f"Identity: {'; '.join(self._dedupe_phrases(phrases))}."
 
-    def _framing_block(self, framing_mode: str, shot_archetype: str, scene: Any) -> str:
+    def _framing_block(self, framing_mode: str, shot_archetype: str, scene: Any, camera_distance_hint: str = "") -> str:
         lowered = self._scene_text(scene).lower()
         if self._is_travel_walk(lowered):
             return "3/4 body walking shot"
@@ -1034,9 +1053,20 @@ class PromptComposer:
         }
         if shot_archetype == "mirror_selfie" and "waist-up" in framing_mode:
             return "mirror selfie waist-up shot"
-        return canonical.get(shot_archetype, "candid 3/4 body shot")
+        framing = canonical.get(shot_archetype, "candid 3/4 body shot")
+        if camera_distance_hint and shot_archetype in {"friend_shot", "candid_handheld", "seated_table_shot", "waist_up", "close_portrait"}:
+            return f"{framing} {camera_distance_hint}".strip()
+        return framing
 
-    def _scene_block(self, context: Dict[str, Any], scene: Any, scene_desc: str, scene_loc: str, scene_tags: List[str]) -> str:
+    def _scene_block(
+        self,
+        context: Dict[str, Any],
+        scene: Any,
+        scene_desc: str,
+        scene_loc: str,
+        scene_tags: List[str],
+        presence_layer: Dict[str, Any] | None = None,
+    ) -> str:
         lowered = self._scene_text(scene).lower()
         visual_focus = self._strip_scene_noise(str(getattr(scene, "visual_focus", "") or "").strip())
         tag_prefix = self._scene_tag_prefix(scene_tags)
@@ -1044,6 +1074,7 @@ class PromptComposer:
         object_terms = self._behavior_object_terms(context)
         movement, interaction, expression = self._behavior_scene_cues(context, scene)
         micro_detail = self._scene_micro_detail(scene, behavior, object_terms, visual_focus)
+        scene_presence = list((presence_layer or {}).get("scene_cues") or [])
         if self._is_travel_walk(lowered):
             pieces = [f"{tag_prefix} walking through the airport terminal before boarding" if tag_prefix else "Walking through the airport terminal before boarding"]
             luggage_phrase = self._travel_luggage_phrase(lowered, visual_focus).lstrip(", ").strip()
@@ -1060,6 +1091,9 @@ class PromptComposer:
             for object_term in object_terms:
                 if object_term.lower() not in " ".join(pieces).lower():
                     pieces.append(self._object_scene_phrase(object_term, scene))
+            for cue in scene_presence:
+                if cue.lower() not in " ".join(pieces).lower():
+                    pieces.append(cue)
             return f"Scene: {', '.join(self._dedupe_phrases(pieces))}."
 
         activity = str(getattr(scene, "activity", "") or "").strip().replace("_", " ")
@@ -1089,6 +1123,9 @@ class PromptComposer:
         for object_term in object_terms:
             if object_term.lower() not in " ".join(pieces).lower():
                 pieces.append(self._object_scene_phrase(object_term, scene))
+        for cue in scene_presence:
+            if cue.lower() not in " ".join(pieces).lower():
+                pieces.append(cue)
         return f"Scene: {', '.join(self._dedupe_phrases(pieces))}."
 
     def _outfit_block(self, outfit_sentence: str) -> str:
@@ -1121,10 +1158,17 @@ class PromptComposer:
                 parts.append(presence)
         return f"{'; '.join(self._dedupe_phrases(parts))}."
 
-    def _mood_block(self, context: Dict[str, Any], scene: Any, continuity_block: str) -> str:
+    def _mood_block(
+        self,
+        context: Dict[str, Any],
+        scene: Any,
+        continuity_block: str,
+        presence_layer: Dict[str, Any] | None = None,
+    ) -> str:
         del continuity_block
         mood = str(getattr(scene, "mood", "") or "").strip().lower()
         behavior = context.get("behavioral_context")
+        mood_presence = list((presence_layer or {}).get("mood_cues") or [])
         canonical = {
             "curious": "quiet curiosity",
             "focused": "composed focus",
@@ -1150,8 +1194,237 @@ class PromptComposer:
                 details.append(arc_mood)
             if self_presentation:
                 details.append(f"{self_presentation} self-presentation")
+            details.extend(mood_presence)
             return f"Mood: {', '.join(self._dedupe_phrases(details))}."
+        if mood_presence:
+            return f"Mood: {', '.join(self._dedupe_phrases([base] + mood_presence))}."
         return f"Mood: {base}."
+
+    def _presence_layer(
+        self,
+        context: Dict[str, Any],
+        scene: Any,
+        outfit_bundle: OutfitBundle,
+        shot_archetype: str,
+        platform_behavior: str,
+    ) -> Dict[str, Any]:
+        del platform_behavior
+        behavior = context.get("behavioral_context")
+        object_terms = self._behavior_object_terms(context)
+        descriptor = " ".join(
+            [
+                str(getattr(outfit_bundle, "top", "") or ""),
+                str(getattr(outfit_bundle, "bottom", "") or ""),
+                str(getattr(outfit_bundle, "outerwear", "") or ""),
+                str(getattr(outfit_bundle, "shoes", "") or ""),
+                str(getattr(outfit_bundle, "accessories", "") or ""),
+                str(getattr(outfit_bundle, "fit", "") or ""),
+                str(getattr(outfit_bundle, "fabric", "") or ""),
+                str(getattr(outfit_bundle, "condition", "") or ""),
+                str(getattr(outfit_bundle, "styling", "") or ""),
+                str(getattr(outfit_bundle, "outfit_style", "") or ""),
+                str(getattr(outfit_bundle, "outfit_override_used", "") or ""),
+            ]
+        ).lower()
+        relaxed = any(token in descriptor for token in ["soft", "relaxed", "easy", "lived-in", "knit", "drape", "loose", "cardigan"])
+        fitted = any(token in descriptor for token in ["fitted", "body-skimming", "close fit", "ribbed", "silhouette", "defined", "open neckline"])
+        structured = any(token in descriptor for token in ["tailored", "blazer", "neat"])
+        seated = shot_archetype == "seated_table_shot" or any(token in self._scene_text(scene).lower() for token in ["seated", "sitting", "chair", "table"])
+        override_key = self._presence_override_key(outfit_bundle, scene, context)
+
+        posture_cue = self._presence_posture_cue(behavior, relaxed, fitted, structured)
+        asymmetry_cue = self._presence_asymmetry_cue(object_terms, shot_archetype)
+        imperfection_cue = self._presence_imperfection_cue(behavior, seated)
+        fabric_cue = self._presence_fabric_cue(outfit_bundle, object_terms, relaxed, fitted, seated)
+        interaction_cue = self._presence_interaction_cue(outfit_bundle, object_terms, shot_archetype)
+        body_language_cue = self._presence_body_language_cue(behavior, override_key, relaxed, fitted, structured)
+        camera_distance = self._presence_camera_distance_cue(behavior, override_key, shot_archetype, relaxed, fitted)
+
+        scene_cues = self._dedupe_phrases([posture_cue, asymmetry_cue, fabric_cue, interaction_cue, imperfection_cue])[:5]
+        mood_cues = self._dedupe_phrases(
+            [
+                body_language_cue,
+                "in-the-moment presence",
+                "unposed asymmetry kept in the frame",
+            ]
+        )[:3]
+
+        return {
+            "scene_cues": scene_cues,
+            "mood_cues": mood_cues,
+            "camera_distance": camera_distance,
+            "micro_body_behavior": ", ".join(scene_cues[:3]),
+            "interaction_realism": interaction_cue,
+            "anti_model_symmetry": ", ".join(self._dedupe_phrases([asymmetry_cue, imperfection_cue, "in-the-moment presence"])),
+            "summary": ", ".join(self._dedupe_phrases(scene_cues[:2] + mood_cues[:2])),
+        }
+
+    def _perceived_outfit_sentence(
+        self,
+        outfit_bundle: OutfitBundle,
+        fallback_sentence: str,
+        scene: Any,
+        context: Dict[str, Any],
+    ) -> str:
+        top = self._clean_fragment(getattr(outfit_bundle, "top", "") or "")
+        bottom = self._clean_fragment(getattr(outfit_bundle, "bottom", "") or "")
+        outerwear = self._clean_fragment(getattr(outfit_bundle, "outerwear", "") or "")
+        shoes = self._clean_fragment(getattr(outfit_bundle, "shoes", "") or "")
+        accessories = self._clean_fragment(getattr(outfit_bundle, "accessories", "") or "")
+
+        clothing: List[str] = []
+        if top and bottom:
+            clothing.append(f"{top} worn with {bottom}")
+        elif top:
+            clothing.append(top)
+        for piece in [outerwear, shoes, accessories]:
+            if piece:
+                clothing.append(piece)
+
+        details = self._dedupe_phrases(
+            [
+                self._clean_fragment(getattr(outfit_bundle, "fit", "") or ""),
+                self._clean_fragment(getattr(outfit_bundle, "fabric", "") or ""),
+                self._clean_fragment(getattr(outfit_bundle, "condition", "") or ""),
+                self._clean_fragment(getattr(outfit_bundle, "styling", "") or ""),
+                "slightly shifted and not perfectly arranged",
+            ]
+        )
+
+        if clothing:
+            rebuilt = self._human_join(clothing)
+            if details:
+                rebuilt = f"{rebuilt}; {', '.join(details)}"
+            try:
+                return self.validate_outfit_sentence(rebuilt)
+            except PromptValidationError:
+                pass
+        return self._normalize_outfit_sentence_for_prompt(fallback_sentence, scene, context)
+
+    def _presence_override_key(self, outfit_bundle: OutfitBundle, scene: Any, context: Dict[str, Any]) -> str:
+        raw = self._clean_fragment(
+            getattr(outfit_bundle, "outfit_override_used", "")
+            or getattr(scene, "outfit_override", "")
+            or context.get("outfit_override")
+            or ""
+        ).lower().replace(" ", "_")
+        allowed = set(getattr(self.outfit_generator, "OVERRIDE_HINTS", {}).keys())
+        return raw if raw in allowed else ""
+
+    @staticmethod
+    def _presence_posture_cue(behavior: Any, relaxed: bool, fitted: bool, structured: bool) -> str:
+        energy = str(getattr(behavior, "energy_level", "medium") or "medium").lower() if behavior is not None else "medium"
+        if fitted or structured:
+            return "posture held a little more intentionally so the clothing catches lightly at the waist and shoulders"
+        if relaxed and energy == "low":
+            return "shoulders resting a touch lower with a soft bend through the torso"
+        if energy == "high":
+            return "weight shifting naturally through one hip instead of a frozen centered stance"
+        return "weight settled slightly off-center with a natural line through the torso"
+
+    @staticmethod
+    def _presence_asymmetry_cue(object_terms: List[str], shot_archetype: str) -> str:
+        if "carry on" in object_terms or "bag" in object_terms:
+            return "one shoulder sitting slightly higher from the bag or handle and the torso turned a few degrees"
+        if "coffee cup" in object_terms:
+            return "one hand sitting a little higher around the cup while the other side of the body stays looser"
+        if shot_archetype in {"front_selfie", "mirror_selfie"}:
+            return "phone-side shoulder fractionally lifted with the body angled a little off-center"
+        return "one arm a little higher than the other with the body turned slightly off-center"
+
+    @staticmethod
+    def _presence_imperfection_cue(behavior: Any, seated: bool) -> str:
+        energy = str(getattr(behavior, "energy_level", "medium") or "medium").lower() if behavior is not None else "medium"
+        if seated:
+            return "back not perfectly aligned with the seat and the head tipped lightly"
+        if energy == "low":
+            return "back not fully straight and chin tipped slightly instead of held perfectly level"
+        return "head tipped slightly with balance not split perfectly down the center"
+
+    def _presence_fabric_cue(
+        self,
+        outfit_bundle: OutfitBundle,
+        object_terms: List[str],
+        relaxed: bool,
+        fitted: bool,
+        seated: bool,
+    ) -> str:
+        top_text = " ".join(
+            [
+                str(getattr(outfit_bundle, "top", "") or ""),
+                str(getattr(outfit_bundle, "outerwear", "") or ""),
+                str(getattr(outfit_bundle, "fabric", "") or ""),
+                str(getattr(outfit_bundle, "condition", "") or ""),
+            ]
+        ).lower()
+        has_sleeve = any(token in top_text for token in ["sleeve", "cardigan", "jacket", "coat", "knit", "shirt", "top"])
+        if fitted:
+            return "fabric catching lightly at the waist or shoulder as the body turns"
+        if relaxed and ("coffee cup" in object_terms or seated) and has_sleeve:
+            return "fabric easing into soft folds at the waist and gathering a little at the elbow where the sleeve bends"
+        if relaxed:
+            return "fabric settling into soft real folds instead of a clean showroom fall"
+        if seated:
+            return "clothing settling with believable folds where the body meets the seat"
+        return "clothing shifting slightly on the body with small lived-in folds"
+
+    def _presence_interaction_cue(self, outfit_bundle: OutfitBundle, object_terms: List[str], shot_archetype: str) -> str:
+        outer_text = " ".join(
+            [
+                str(getattr(outfit_bundle, "top", "") or ""),
+                str(getattr(outfit_bundle, "outerwear", "") or ""),
+                str(getattr(outfit_bundle, "accessories", "") or ""),
+            ]
+        ).lower()
+        cues: List[str] = []
+        if "coffee cup" in object_terms:
+            sleeve_touch = "sleeve brushing the cup" if any(token in outer_text for token in ["cardigan", "jacket", "coat", "knit", "sleeve"]) else "wrist bending naturally around the cup"
+            cues.append(f"coffee cup held with a relaxed uneven grip and light finger pressure, {sleeve_touch}")
+        if "carry on" in object_terms:
+            cues.append("carry on handle held without perfect alignment, with the wrist relaxed and the clothing pulling lightly near the shoulder")
+        if "bag" in object_terms:
+            cues.append("bag strap sitting naturally so the clothing shifts slightly under it")
+        if "phone" in object_terms and shot_archetype not in {"front_selfie", "mirror_selfie"}:
+            cues.append("phone held casually instead of squared for presentation")
+        if cues:
+            return ", ".join(self._dedupe_phrases(cues[:2]))
+        return "hands interacting with objects in a casual imperfect way"
+
+    @staticmethod
+    def _presence_body_language_cue(behavior: Any, override_key: str, relaxed: bool, fitted: bool, structured: bool) -> str:
+        self_presentation = str(getattr(behavior, "self_presentation", "") or "").lower() if behavior is not None else ""
+        if override_key in {"slightly_sexy", "intimate_home", "tight_silhouette"}:
+            return "quietly intimate body language with a slightly more open posture"
+        if override_key == "more_feminine":
+            return "softly confident body language with gentle openness"
+        if self_presentation in {"focused", "composed"}:
+            return "more closed body language that still feels naturally inhabited"
+        if relaxed:
+            return "relaxed body language that feels lived-in rather than arranged"
+        if fitted or structured:
+            return "quietly confident body language without a staged pose"
+        return "natural body language with no posed look"
+
+    @staticmethod
+    def _presence_camera_distance_cue(
+        behavior: Any,
+        override_key: str,
+        shot_archetype: str,
+        relaxed: bool,
+        fitted: bool,
+    ) -> str:
+        energy = str(getattr(behavior, "energy_level", "medium") or "medium").lower() if behavior is not None else "medium"
+        if shot_archetype in {"front_selfie", "mirror_selfie", "full_body"}:
+            return ""
+        if override_key in {"slightly_sexy", "intimate_home", "tight_silhouette"}:
+            return "from slightly closer private distance"
+        if override_key == "more_feminine" or fitted:
+            return "from easy conversational distance"
+        if shot_archetype in {"friend_shot", "candid_handheld"} and energy == "high":
+            return "from slightly looser observer distance"
+        if relaxed and shot_archetype == "seated_table_shot":
+            return "from close table-side distance"
+        return ""
 
     @staticmethod
     def _scene_location_fallback(scene: Any) -> str:
@@ -1208,6 +1481,17 @@ class PromptComposer:
             seen.add(key)
             result.append(cleaned)
         return result
+
+    @staticmethod
+    def _human_join(parts: List[str]) -> str:
+        cleaned = [PromptComposer._clean_fragment(part) for part in parts if PromptComposer._clean_fragment(part)]
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        if len(cleaned) == 2:
+            return f"{cleaned[0]} and {cleaned[1]}"
+        return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
 
     def _has_duplicate_clauses(self, prompt: str) -> bool:
         return bool(self._find_duplicate_clauses(prompt))
@@ -2017,7 +2301,6 @@ class PromptComposer:
         "editorial fashion shoot",
         "microscopic details",
         "perfect composition",
-        "fashion catalog",
         "cinematic lighting",
         "hyper-detailed beauty",
         "editorial symmetry",

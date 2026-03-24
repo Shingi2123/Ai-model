@@ -215,7 +215,8 @@ def test_mood_block_uses_controlled_emotional_vocabulary_only():
     package = _compose(scene)
     mood_block = package["final_prompt"].split("\n\n")[5]
 
-    assert mood_block == "Mood: composed focus."
+    assert mood_block.startswith("Mood: composed focus")
+    assert "in-the-moment presence" in mood_block
 
 
 def test_positive_prompt_contains_only_english_ascii_letters_from_scene_payload():
@@ -297,7 +298,13 @@ def test_compose_package_uses_canonical_outfit_sentence_from_context_without_reb
 
     assert package["outfit_sentence"] == context["outfit_sentence"]
     assert package["outfit_summary"] == context["outfit_sentence"]
-    assert package["final_prompt"].split("\n\n")[3] == f"Outfit: {context['outfit_sentence']}."
+    outfit_block = package["final_prompt"].split("\n\n")[3].lower()
+    assert outfit_block.startswith("outfit: ")
+    assert "soft knit top" in outfit_block
+    assert "relaxed straight trousers" in outfit_block
+    assert "comfortable sneakers" in outfit_block
+    assert "small crossbody bag" in outfit_block
+    assert "slightly shifted and not perfectly arranged" in outfit_block
 
 
 def test_canonical_outfit_sentence_wins_over_legacy_summary_in_final_prompt(monkeypatch):
@@ -316,7 +323,10 @@ def test_canonical_outfit_sentence_wins_over_legacy_summary_in_final_prompt(monk
 
     assert "old glossy trench summary" not in prompt
     assert "pointed heels" not in prompt
-    assert context["outfit_sentence"] in package["final_prompt"]
+    assert "soft knit top" in prompt
+    assert "relaxed straight trousers" in prompt
+    assert "comfortable sneakers" in prompt
+    assert "small crossbody bag" in prompt
 
 
 @pytest.mark.parametrize("placeholder", ["placeholder", "outfit", "same outfit", "n/a"])
@@ -338,7 +348,13 @@ def test_manual_outfit_override_is_inserted_without_regeneration():
     package = composer.compose_package(context, Scene(), "ignored summary", "photo", ["dress_1"])
     outfit_block = package["final_prompt"].split("\n\n")[3]
 
-    assert outfit_block == "Outfit: soft fitted knit dress, light cardigan, flat slides, small overnight bag."
+    lowered = outfit_block.lower()
+    assert outfit_block.startswith("Outfit: ")
+    assert "soft fitted knit dress" in lowered
+    assert "light cardigan" in lowered
+    assert "flat slides" in lowered
+    assert "small overnight bag" in lowered
+    assert "slightly shifted and not perfectly arranged" in lowered
 
 
 def test_invalid_manual_outfit_override_raises_validation_error():
@@ -444,4 +460,40 @@ def test_behavior_influences_prompt_with_movement_mood_and_objects():
     assert "checking the boarding screen occasionally" in prompt
     assert "transitional mood" in prompt
     assert "soft background people only" in prompt
+    assert "relaxed uneven grip" in prompt
+    assert "one hand sitting a little higher around the cup" in prompt or "one shoulder sitting slightly higher" in prompt
+    assert "in-the-moment presence" in prompt
     assert composer._find_duplicate_clauses(package["final_prompt"]) == []
+
+
+def test_negative_prompt_prefers_anti_model_symmetry_terms():
+    package = _compose()
+    negative = package["negative_prompt"]
+
+    assert "perfectly symmetrical pose" in negative
+    assert "over-styled clothing" in negative
+    assert "staged body posture" in negative
+    assert "influencer aesthetic" in negative
+    assert "studio-perfect positioning" in negative
+    assert "fashion catalog" not in negative
+
+
+def test_override_hint_pushes_presence_and_camera_distance():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["outfit_override"] = "slightly_sexy"
+    scene = Scene()
+    scene.location = "hotel room"
+    scene.scene_moment = "Quiet evening pause by the hotel window"
+    scene.description = "Quiet evening pause by the hotel window"
+    scene.time_of_day = "evening"
+    scene.scene_moment_type = "quiet_pause"
+    scene.camera_archetype = "friend_shot"
+
+    package = composer.compose_package(context, scene, "", "photo", ["dress_1"])
+    framing_block = package["final_prompt"].split("\n\n")[1].lower()
+    mood_block = package["final_prompt"].split("\n\n")[5].lower()
+
+    assert package["camera_distance_hint"] == "from slightly closer private distance"
+    assert "slightly closer private distance" in framing_block or "slightly closer private distance" in package["final_prompt"].lower()
+    assert "quietly intimate body language" in mood_block

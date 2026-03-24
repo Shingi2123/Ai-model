@@ -110,10 +110,13 @@ class OutfitGenerator:
 
         try:
             bundle = self._compose_contextual_bundle(descriptor)
-            return self._validate_bundle(bundle, descriptor)
+            bundle = self._validate_bundle(bundle, descriptor)
         except OutfitGenerationError:
             fallback = self._fallback_bundle(descriptor)
-            return self._validate_bundle(fallback, descriptor)
+            bundle = self._validate_bundle(fallback, descriptor)
+        if override_hint and not bundle.outfit_override_used:
+            bundle.outfit_override_used = override_hint
+        return bundle
 
     def validate_manual_outfit(self, manual_outfit: str) -> str:
         cleaned = self._clean_text(manual_outfit)
@@ -398,6 +401,10 @@ class OutfitGenerator:
             outerwear=mapped["outerwear"],
             shoes=mapped["shoes"],
             accessories=mapped["accessories"],
+            fit=self._choose_fit(descriptor),
+            fabric=self._choose_fabric(descriptor),
+            condition=self._choose_condition(descriptor),
+            styling=self._choose_styling(descriptor),
             sentence=manual_outfit,
             outfit_sentence=manual_outfit,
             style_profile=list(descriptor["style_profile"]),
