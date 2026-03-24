@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, date
 import json
+import logging
 
 from virtual_persona.config.settings import AppSettings
 from virtual_persona.delivery.formatter import package_to_markdown
 from virtual_persona.delivery.telegram_bot import TelegramDelivery
 from virtual_persona.delivery.telegram_delivery_service import TelegramDeliveryService
 from virtual_persona.delivery.telegram_navigation import item_from_row
+from virtual_persona.delivery.publishing_plan_normalizer import inspect_prompt_lineage
 from virtual_persona.llm.provider import OpenAIProvider, TemplateFallbackProvider
 from virtual_persona.models.domain import DailyPackage, GeneratedContent, OutfitSelection, PublishingPlanItem, SunSnapshot, WeatherSnapshot
 from virtual_persona.narrative.life_narrative_engine import LifeNarrativeEngine
@@ -28,6 +30,9 @@ from virtual_persona.pipeline.wardrobe_brain import WardrobeBrain
 from virtual_persona.pipeline.behavior_engine import BehaviorEngine
 from virtual_persona.services.wardrobe import WardrobeManager
 from virtual_persona.storage.state_store import build_state_store
+
+
+logger = logging.getLogger(__name__)
 
 
 def short_text(text: str, limit: int) -> str:
@@ -91,6 +96,36 @@ class PipelineOrchestrator:
         rows = self.state.load_publishing_plan(target_date.isoformat()) or []
         if not rows:
             return None
+        legacy_rows = []
+        outdated_style_rows = []
+        for row in rows:
+            lineage = inspect_prompt_lineage(row)
+            diagnostics = lineage["style_diagnostics"]
+            if diagnostics.get("has_legacy_content"):
+                legacy_rows.append(lineage)
+            elif not diagnostics.get("prompt_style_version_current"):
+                outdated_style_rows.append(lineage)
+        if legacy_rows:
+            publication_ids = ", ".join(entry["publication_id"] for entry in legacy_rows)
+            logger.warning(
+                "orchestrator persisted_plan_legacy_prompt_detected date=%s publication_ids=%s action=regenerate",
+                target_date.isoformat(),
+                publication_ids or "<missing>",
+            )
+            if hasattr(self.state, "save_run_log"):
+                self.state.save_run_log(
+                    "warning",
+                    f"day_generation mode=regenerate_legacy_prompt date={target_date.isoformat()} rows={len(legacy_rows)}",
+                )
+            return None
+        if outdated_style_rows:
+            publication_ids = ", ".join(entry["publication_id"] for entry in outdated_style_rows)
+            logger.warning(
+                "orchestrator persisted_plan_prompt_style_version_warning date=%s publication_ids=%s expected=%s",
+                target_date.isoformat(),
+                publication_ids or "<missing>",
+                self.content_generator.prompt_composer.expected_prompt_style_version(),
+            )
         city = str(rows[0].get("city") or "Unknown")
         day_type = str(rows[0].get("day_type") or "work_day")
         scene_text = " | ".join(str(r.get("scene_moment") or "") for r in rows if r.get("scene_moment"))

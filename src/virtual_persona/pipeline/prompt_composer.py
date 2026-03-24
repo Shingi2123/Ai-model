@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import hashlib
 import json
+import logging
 import re
 from typing import Any, Dict, List, Mapping
 
@@ -14,10 +15,14 @@ class PromptValidationError(ValueError):
     pass
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class PromptComposer:
     state_store: Any
     CANONICAL_PROMPT_VERSION = "v6"
+    PROMPT_STYLE_VERSION = "rewrite_v2"
     COMPACT_PROMPT_THRESHOLD = 740
     DENSE_PROMPT_MIN_LENGTH = 728
     DENSE_PROMPT_EXPANDED_BLOCKS = 4
@@ -384,6 +389,9 @@ class PromptComposer:
         prompt_mode = self._prompt_mode(final_prompt)
         ordered_blocks["final_prompt"] = final_prompt
         ordered_blocks["prompt_format_version"] = self.CANONICAL_PROMPT_VERSION
+        ordered_blocks["prompt_style_version"] = str(
+            prompt_payload.get("prompt_style_version") or self.PROMPT_STYLE_VERSION
+        )
         ordered_blocks["shot_archetype"] = shot_archetype
         ordered_blocks["platform_behavior"] = platform_behavior
         ordered_blocks["generation_mode"] = generation_mode
@@ -1055,8 +1063,9 @@ class PromptComposer:
             outfit_sentence=outfit_sentence,
             step="build_final_prompt",
         )
+        raw_pre_rewrite_prompt = str(sanitized.get("prompt") or prompt)
         rewritten = self.rewrite_canonical_prompt(
-            str(sanitized.get("prompt") or prompt),
+            raw_pre_rewrite_prompt,
             scene,
             context,
             shot_archetype=shot_archetype,
@@ -1066,9 +1075,70 @@ class PromptComposer:
         sanitized["prompt_blocks"] = final_blocks
         sanitized["rewrite_pass_applied"] = bool(rewritten.get("rewrite_pass_applied"))
         sanitized["rewrite_diagnostics"] = dict(rewritten.get("rewrite_diagnostics") or {})
+        sanitized["prompt_style_version"] = self.PROMPT_STYLE_VERSION
+        logger.info(
+            "prompt_rewrite_trace scene=%s raw_pre_rewrite_prompt=%r post_rewrite_prompt=%r prompt_style_version=%s",
+            str(getattr(scene, "scene_moment", "") or getattr(scene, "description", "") or "unknown_scene"),
+            raw_pre_rewrite_prompt,
+            prompt,
+            self.PROMPT_STYLE_VERSION,
+        )
         self._validate_canonical_prompt(prompt, scene, context)
         sanitized["prompt"] = prompt
         return sanitized
+
+    @classmethod
+    def expected_prompt_style_version(cls) -> str:
+        return cls.PROMPT_STYLE_VERSION
+
+    @classmethod
+    def prompt_style_diagnostics(cls, prompt: str, *, prompt_style_version: str = "") -> Dict[str, Any]:
+        normalized = str(prompt or "").strip()
+        blocks = [block.strip() for block in normalized.split("\n\n") if block.strip()]
+
+        def block_body(index: int) -> str:
+            if index >= len(blocks):
+                return ""
+            _, _, body = blocks[index].partition(":")
+            return (body.strip() or blocks[index].strip()).strip()
+
+        identity_body = block_body(0)
+        scene_body = block_body(2).lower()
+        outfit_body = block_body(3).lower()
+        mood_body = block_body(5).lower()
+
+        scene_banned_phrases = [phrase for phrase in cls.REWRITE_FORBIDDEN_SCENE_PHRASES if phrase in scene_body]
+        outfit_scene_props = [token for token in cls.SCENE_PROP_TOKENS if token in outfit_body]
+        mood_label_like = (
+            bool(mood_body)
+            and (
+                "self-presentation" in mood_body
+                or mood_body.endswith(" mood")
+                or mood_body in cls.REWRITE_FORBIDDEN_MOOD_PHRASES
+            )
+        )
+        legacy_signatures: List[str] = []
+        if identity_body.count(";") > 0:
+            legacy_signatures.append("identity_semicolons")
+        if scene_banned_phrases:
+            legacy_signatures.append("scene_legacy_phrases")
+        if outfit_scene_props:
+            legacy_signatures.append("outfit_scene_props")
+        if mood_label_like:
+            legacy_signatures.append("mood_label_like")
+
+        prompt_style_version_current = not prompt_style_version or prompt_style_version == cls.PROMPT_STYLE_VERSION
+        return {
+            "prompt_style_version": prompt_style_version,
+            "expected_prompt_style_version": cls.PROMPT_STYLE_VERSION,
+            "prompt_style_version_current": prompt_style_version_current,
+            "identity_semicolons": identity_body.count(";"),
+            "scene_banned_phrases": scene_banned_phrases,
+            "outfit_scene_props": outfit_scene_props,
+            "mood_label_like": mood_label_like,
+            "legacy_signatures": legacy_signatures,
+            "has_legacy_content": bool(legacy_signatures),
+        }
 
     @staticmethod
     def _stable_variation_index(*parts: Any, modulo: int) -> int:

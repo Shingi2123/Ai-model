@@ -551,6 +551,7 @@ class PublishingPlanItem:
     outfit_ids: List[str]
     prompt_type: str
     prompt_text: str
+    prompt_style_version: str = ""
     outfit_sentence: str = ""
     outfit_struct_json: str = ""
     outfit_summary: str = ""

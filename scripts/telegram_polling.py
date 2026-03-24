@@ -29,6 +29,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 from virtual_persona.config.settings import AppSettings
 from virtual_persona.delivery.publishing_formatter import filter_plan_items, format_command_message, split_for_telegram
+from virtual_persona.delivery.publishing_plan_normalizer import inspect_prompt_lineage
 from virtual_persona.delivery.telegram_navigation import (
     PlanScreenContext,
     build_detail_keyboard,
@@ -113,6 +114,17 @@ def _load_persisted_plan(target_date: date) -> tuple[PlanScreenContext, list]:
     return context, items
 
 
+def _persisted_plan_prompt_issues(target_date: date) -> list[dict]:
+    rows = orchestrator.state.load_publishing_plan(target_date.isoformat()) if hasattr(orchestrator.state, "load_publishing_plan") else []
+    issues: list[dict] = []
+    for row in rows:
+        lineage = inspect_prompt_lineage(row)
+        diagnostics = lineage["style_diagnostics"]
+        if diagnostics.get("has_legacy_content") or not diagnostics.get("prompt_style_version_current"):
+            issues.append(lineage)
+    return issues
+
+
 def _is_today(target_date: date) -> bool:
     return target_date == date.today()
 
@@ -158,9 +170,17 @@ async def _load_plan_with_generate_if_missing(
     status_message=None,
 ) -> tuple[PlanScreenContext, list]:
     context, items = _load_persisted_plan(target_date)
-    if items:
+    prompt_issues = _persisted_plan_prompt_issues(target_date)
+    if items and not prompt_issues:
         logger.info("telegram_polling plan lookup: found existing plan for %s", target_date.isoformat())
         return context, items
+    if items and prompt_issues:
+        publication_ids = ", ".join(issue["publication_id"] for issue in prompt_issues)
+        logger.warning(
+            "telegram_polling legacy_or_outdated_prompt_detected date=%s publication_ids=%s action=force_regenerate",
+            target_date.isoformat(),
+            publication_ids or "<missing>",
+        )
 
     generation_key = _generation_key(update, target_date)
     lock = _get_generation_lock(generation_key)
@@ -182,17 +202,21 @@ async def _load_plan_with_generate_if_missing(
 
     async with lock:
         context, items = _load_persisted_plan(target_date)
-        if items:
+        prompt_issues = _persisted_plan_prompt_issues(target_date)
+        if items and not prompt_issues:
             logger.info("telegram_polling plan lookup: found existing plan for %s", target_date.isoformat())
             return context, items
 
         logger.info(
-            "telegram_polling plan lookup: no plan found for %s, starting generate-if-missing",
+            "telegram_polling plan lookup: no valid plan found for %s, starting generate-if-missing",
             target_date.isoformat(),
         )
         await _maybe_update_generation_status(status_message, GENERATING_PLAN_MESSAGE)
         try:
-            await asyncio.to_thread(orchestrator.generate_day, target_date=target_date)
+            generation_kwargs = {"target_date": target_date}
+            if prompt_issues:
+                generation_kwargs["force_regenerate"] = True
+            await asyncio.to_thread(orchestrator.generate_day, **generation_kwargs)
         except Exception as exc:
             logger.exception("telegram_polling generation failed for %s: %s", target_date.isoformat(), exc)
             raise

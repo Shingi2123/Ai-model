@@ -162,6 +162,12 @@ class LocalStateStore:
         rows = self._read_json(path, [])
         payload = dict(row)
         payload["prompt"] = payload.get("prompt_text", "")
+        logger.info(
+            "publishing_plan_state_persist publication_id=%s sheet_prompt_text=%r prompt_style_version=%s",
+            payload.get("publication_id", "<missing>"),
+            payload.get("prompt_text", ""),
+            payload.get("prompt_style_version", "") or "unknown",
+        )
         rows.append(payload)
         self._write_json(path, rows)
 
@@ -728,6 +734,12 @@ class GoogleSheetsStateStore:
         self._ensure_headers("publishing_plan", headers)
         payload = dict(row)
         payload["prompt"] = payload.get("prompt_text", "")
+        logger.info(
+            "publishing_plan_sheet_persist publication_id=%s sheet_prompt_text=%r prompt_style_version=%s",
+            payload.get("publication_id", "<missing>"),
+            payload.get("prompt_text", ""),
+            payload.get("prompt_style_version", "") or "unknown",
+        )
         self._append_dict_row("publishing_plan", headers, payload, prefer_sheet_header_order=True)
 
     def load_posting_rules(self) -> List[Dict[str, Any]]:

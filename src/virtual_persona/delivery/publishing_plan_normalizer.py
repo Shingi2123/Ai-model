@@ -34,6 +34,7 @@ PUBLISHING_PLAN_HEADERS = [
     "outfit_summary",
     "prompt_type",
     "prompt_text",
+    "prompt_style_version",
     "negative_prompt",
     "prompt_package_json",
     "shot_archetype",
@@ -103,6 +104,7 @@ REQUIRED_PUBLISHING_PLAN_HEADERS = [
     "moment",
     "outfit_sentence",
     "prompt",
+    "prompt_style_version",
     "negative_prompt",
 ]
 
@@ -238,6 +240,40 @@ def load_prompt_meta(source: Mapping[str, Any] | PublishingPlanItem | Any) -> di
     return parsed if isinstance(parsed, dict) else {}
 
 
+def resolve_prompt_style_version(
+    source: Mapping[str, Any] | PublishingPlanItem | Any,
+    *,
+    prompt_meta: Mapping[str, Any] | None = None,
+) -> str:
+    row = _to_mapping(source)
+    meta = dict(prompt_meta or load_prompt_meta(row))
+    return (
+        _extract_value(row, "prompt_style_version")
+        or _extract_value(meta, "prompt_style_version")
+        or ""
+    )
+
+
+def inspect_prompt_lineage(source: Mapping[str, Any] | PublishingPlanItem | Any) -> dict[str, Any]:
+    row = _to_mapping(source)
+    prompt_meta = load_prompt_meta(row)
+    row_prompt_text = _extract_value(row, "prompt_text")
+    package_prompt_text = _extract_value(prompt_meta, "final_prompt")
+    prompt_style_version = resolve_prompt_style_version(row, prompt_meta=prompt_meta)
+    active_prompt = package_prompt_text or row_prompt_text
+    style_diagnostics = PromptComposer.prompt_style_diagnostics(
+        active_prompt,
+        prompt_style_version=prompt_style_version,
+    )
+    return {
+        "publication_id": _extract_value(row, "publication_id") or "<missing>",
+        "row_prompt_text": row_prompt_text,
+        "prompt_package_text": package_prompt_text,
+        "prompt_style_version": prompt_style_version,
+        "style_diagnostics": style_diagnostics,
+    }
+
+
 def resolve_outfit_sentence(
     source: Mapping[str, Any] | PublishingPlanItem | Any,
     *,
@@ -260,10 +296,22 @@ def resolve_outfit_sentence(
     return "", "missing"
 
 
-def is_legacy_prompt(text: str, *, row: Mapping[str, Any] | None = None, prompt_meta: Mapping[str, Any] | None = None) -> bool:
+def is_legacy_prompt(
+    text: str,
+    *,
+    row: Mapping[str, Any] | None = None,
+    prompt_meta: Mapping[str, Any] | None = None,
+    prompt_style_version: str = "",
+) -> bool:
     lowered = " ".join(str(text or "").lower().split())
     if not lowered:
         return False
+    style_diagnostics = PromptComposer.prompt_style_diagnostics(
+        text,
+        prompt_style_version=prompt_style_version,
+    )
+    if style_diagnostics.get("has_legacy_content"):
+        return True
     if any(token in lowered for token in LEGACY_PROMPT_PATTERNS):
         return True
 
@@ -288,12 +336,29 @@ def resolve_canonical_prompt(
     row = _to_mapping(source)
     prompt_meta = load_prompt_meta(row)
     outfit_sentence, outfit_source = resolve_outfit_sentence(row, prompt_meta=prompt_meta)
+    row_prompt = _extract_value(row, "prompt_text")
     meta_prompt = _extract_value(prompt_meta, "final_prompt")
-    meta_version = _extract_value(prompt_meta, "prompt_format_version") or ("v6" if meta_prompt else "")
-    meta_legacy = is_legacy_prompt(meta_prompt, row=row, prompt_meta=prompt_meta)
+    prompt_style_version = resolve_prompt_style_version(row, prompt_meta=prompt_meta)
+    meta_legacy = is_legacy_prompt(
+        meta_prompt,
+        row=row,
+        prompt_meta=prompt_meta,
+        prompt_style_version=prompt_style_version,
+    )
+    row_legacy = is_legacy_prompt(
+        row_prompt,
+        row=row,
+        prompt_meta=prompt_meta,
+        prompt_style_version=prompt_style_version,
+    )
     if meta_prompt and meta_legacy:
         logger.warning(
             "publishing_plan_normalizer legacy_prompt_detected publication_id=%s source=prompt_package_json.final_prompt",
+            _extract_value(row, "publication_id") or "<missing>",
+        )
+    if row_prompt and row_legacy:
+        logger.warning(
+            "publishing_plan_normalizer legacy_prompt_detected publication_id=%s source=prompt_text",
             _extract_value(row, "publication_id") or "<missing>",
         )
 
@@ -302,10 +367,13 @@ def resolve_canonical_prompt(
     if meta_prompt and not meta_legacy:
         resolved_prompt = meta_prompt
         prompt_source = "prompt_package_json.final_prompt"
+    elif row_prompt and not row_legacy:
+        resolved_prompt = row_prompt
+        prompt_source = "prompt_text"
     else:
         resolved_prompt = default
 
-    if resolved_prompt and outfit_sentence:
+    if resolved_prompt and outfit_sentence and PromptComposer.prompt_has_invalid_outfit(resolved_prompt):
         try:
             repaired_prompt = PromptComposer.repair_outfit_block(resolved_prompt, outfit_sentence)
         except Exception:
@@ -314,7 +382,7 @@ def resolve_canonical_prompt(
             prompt_source = f"{prompt_source}+{outfit_source}"
             resolved_prompt = repaired_prompt
 
-    return resolved_prompt, prompt_source, meta_legacy, meta_version or ("v6" if resolved_prompt == meta_prompt and resolved_prompt else "")
+    return resolved_prompt, prompt_source, (meta_legacy or row_legacy), prompt_style_version
 
 
 def resolve_prompt_mode(
@@ -448,6 +516,7 @@ def normalize_publishing_plan_payload(
     resolved_prompt, _, _, _ = resolve_canonical_prompt(row)
     outfit_sentence, _ = resolve_outfit_sentence(row, prompt_meta=prompt_meta)
     prompt_mode = resolve_prompt_mode(row, resolved_prompt=resolved_prompt, prompt_meta=prompt_meta)
+    prompt_style_version = resolve_prompt_style_version(row, prompt_meta=prompt_meta)
 
     return {
         "publication_id": _extract_value(row, "publication_id"),
@@ -483,6 +552,7 @@ def normalize_publishing_plan_payload(
         ),
         "prompt_type": _extract_value(row, "prompt_type"),
         "prompt_text": resolved_prompt,
+        "prompt_style_version": prompt_style_version,
         "negative_prompt": _resolve_field(
             row,
             prompt_meta,

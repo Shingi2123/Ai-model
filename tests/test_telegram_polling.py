@@ -267,6 +267,53 @@ def test_show_today_plan_generates_if_missing_and_reloads_persisted_plan(monkeyp
     assert context.user_data["plan_screen"] == "cached-plan"
 
 
+def test_show_today_plan_regenerates_when_persisted_prompt_is_legacy(monkeypatch):
+    module = _load_module()
+    target_date = date.today()
+    stale_context = _make_context(module, target_date, city="Paris")
+    fresh_context = _make_context(module, target_date, city="Prague")
+    stale_item = _make_item(target_date, city="Paris")
+    fresh_item = _make_item(target_date, city="Prague")
+
+    load_calls = {"count": 0}
+
+    def fake_load(_target_date):
+        load_calls["count"] += 1
+        if load_calls["count"] <= 2:
+            return stale_context, [stale_item]
+        return fresh_context, [fresh_item]
+
+    issue_calls = {"count": 0}
+
+    def fake_prompt_issues(_target_date):
+        issue_calls["count"] += 1
+        if issue_calls["count"] <= 2:
+            return [{"publication_id": "pub-1", "style_diagnostics": {"has_legacy_content": True}}]
+        return []
+
+    generate_day = Mock(return_value=types.SimpleNamespace(date=target_date, city="Prague", publishing_plan=[]))
+
+    async def fake_to_thread(func, **kwargs):
+        return func(**kwargs)
+
+    monkeypatch.setattr(module, "_load_persisted_plan", fake_load)
+    monkeypatch.setattr(module, "_persisted_plan_prompt_issues", fake_prompt_issues)
+    monkeypatch.setattr(module, "_render_plan", lambda _context, _items: ("PLAN", object()))
+    monkeypatch.setattr(module, "serialize_context", lambda _context, _items: "cached-plan")
+    monkeypatch.setattr(module.orchestrator, "generate_day", generate_day, raising=False)
+    monkeypatch.setattr(module.asyncio, "to_thread", fake_to_thread)
+
+    update, loading = _message_update()
+    context = types.SimpleNamespace(user_data={})
+
+    asyncio.run(module.show_today_plan(update, context))
+
+    assert loading.edit_calls[0]["text"] == module.GENERATING_PLAN_MESSAGE
+    assert loading.edit_calls[-1]["text"] == "PLAN"
+    assert generate_day.call_args.kwargs == {"target_date": target_date, "force_regenerate": True}
+    assert context.user_data["plan_screen"] == "cached-plan"
+
+
 def test_show_today_plan_reports_generation_failure_without_crashing(monkeypatch):
     module = _load_module()
     target_date = date.today()

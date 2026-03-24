@@ -14,6 +14,8 @@ from virtual_persona.models.domain import (
     SunSnapshot,
     WeatherSnapshot,
 )
+from virtual_persona.delivery.telegram_navigation import format_prompt_screen, item_from_row
+from virtual_persona.pipeline.prompt_composer import PromptComposer
 from virtual_persona.pipeline.publishing_plan_engine import PublishingPlanEngine
 
 
@@ -347,6 +349,16 @@ def test_publishing_plan_normalizer_prefers_only_prompt_package_final_prompt():
     from virtual_persona.delivery.publishing_plan_normalizer import resolve_canonical_prompt, resolve_outfit_sentence
 
     item = engine_item = _build_package(day_type="travel_day", phase="transition_phase").content.prompt_packages[0]["photo"]
+    engine_item = dict(engine_item)
+    engine_item["final_prompt"] = (
+        "Identity: a 22-year-old woman with a recognizable face and relaxed shoulders.\n\n"
+        "candid 3/4 body shot\n\n"
+        "Scene: walking through the terminal, carry on rolling close beside her.\n\n"
+        "Outfit: soft knit top, straight jeans, white sneakers, small shoulder bag with natural drape.\n\n"
+        "Environment: photorealistic terminal, perspective and scale staying real.\n\n"
+        "Mood: held together without turning it into a pose."
+    )
+    engine_item["prompt_style_version"] = PromptComposer.PROMPT_STYLE_VERSION
     resolved, source, legacy, version = resolve_canonical_prompt(
         {
             "publication_id": "pub-1",
@@ -359,9 +371,47 @@ def test_publishing_plan_normalizer_prefers_only_prompt_package_final_prompt():
     assert resolved == engine_item["final_prompt"]
     assert source == "prompt_package_json.final_prompt"
     assert legacy is False
-    assert version
+    assert version == PromptComposer.PROMPT_STYLE_VERSION
     assert outfit_sentence == engine_item["outfit_sentence"]
     assert outfit_source == "prompt_package_json.outfit_sentence"
+
+
+def test_rewritten_prompt_reaches_persisted_row_and_telegram_detail_screen():
+    state = DummyState()
+    engine = PublishingPlanEngine(state)
+    package = _build_package(day_type="work_day", phase="transition_phase")
+    package.scenes = [package.scenes[0]]
+    package.content.prompt_packages = [package.content.prompt_packages[0]]
+    package.content.publish_windows = ["09:00"]
+    package.content.prompt_packages[0]["photo"]["final_prompt"] = (
+        "Identity: 22-year-old woman; same face; natural makeup; relaxed shoulders.\n\n"
+        "candid 3/4 body shot\n\n"
+        "Scene: slow first coffee in the kitchen corner before the day starts, daily pause.\n\n"
+        "Outfit: soft knit top, straight trousers, comfortable sneakers, coffee cup, small everyday bag; grounded routine mood, natural drape.\n\n"
+        "Environment: photorealistic kitchen; lived-in environmental detail; accurate perspective and scale.\n\n"
+        "Mood: composed self-presentation."
+    )
+
+    rows = engine.generate(package)
+
+    assert rows
+    persisted_row = state.rows[0]
+    persisted_meta = json.loads(persisted_row["prompt_package_json"])
+    restored_item = item_from_row(persisted_row, package.date)
+    telegram_text = format_prompt_screen(restored_item, 0).lower()
+    prompt = restored_item.prompt_text.lower()
+    outfit_block = restored_item.prompt_text.split("\n\n")[3].lower()
+
+    assert restored_item.prompt_style_version == PromptComposer.PROMPT_STYLE_VERSION
+    assert persisted_row["prompt_style_version"] == PromptComposer.PROMPT_STYLE_VERSION
+    assert restored_item.prompt_text == persisted_row["prompt_text"]
+    assert restored_item.prompt_text == persisted_meta["final_prompt"]
+    assert ";" not in restored_item.prompt_text.split("\n\n")[0]
+    assert "before the day starts" not in prompt
+    assert "daily pause" not in prompt
+    assert "coffee cup" not in outfit_block
+    assert "self-presentation" not in prompt
+    assert restored_item.prompt_text.lower() in telegram_text
 
 
 def test_publishing_plan_uses_default_rules_when_store_has_none():

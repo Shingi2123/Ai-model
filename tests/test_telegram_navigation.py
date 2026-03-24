@@ -52,9 +52,11 @@ def _item(index: int = 1, publication_id: str | None = None) -> PublishingPlanIt
         outfit_summary="soft knit top, straight jeans, white sneakers, small shoulder bag; slightly relaxed fit with natural drape",
         prompt_type="photo",
         prompt_text="A cinematic candid in warm morning light",
+        prompt_style_version=PromptComposer.PROMPT_STYLE_VERSION,
         prompt_package_json=json.dumps(
             {
                 "final_prompt": "Identity: stable.\n\nmirror selfie head-and-shoulders shot\n\nScene: final room check with luggage ready by the door.\n\nOutfit: soft knit top, straight jeans, white sneakers.\n\nEnvironment: photorealistic hotel room; lived-in environmental detail; accurate perspective and scale.\n\nMood: quiet confidence.",
+                "prompt_style_version": PromptComposer.PROMPT_STYLE_VERSION,
                 "outfit_sentence": "soft knit top, straight jeans, white sneakers, small shoulder bag; slightly relaxed fit with natural drape",
                 "outfit_struct_json": json.dumps(
                     {

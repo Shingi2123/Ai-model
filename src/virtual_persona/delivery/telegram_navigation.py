@@ -12,6 +12,7 @@ from virtual_persona.delivery.publishing_plan_normalizer import (
     resolve_canonical_prompt,
     resolve_outfit_sentence,
     resolve_prompt_mode,
+    resolve_prompt_style_version,
 )
 from virtual_persona.models.domain import PublishingPlanItem
 from virtual_persona.pipeline.prompt_composer import PromptComposer, PromptValidationError
@@ -279,14 +280,19 @@ def format_post_screen(context: PlanScreenContext, item: PublishingPlanItem, pos
 
 
 def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
-    prompt_value, prompt_source, legacy_detected, prompt_format_version = resolve_canonical_prompt(item)
+    prompt_value, prompt_source, legacy_detected, prompt_style_version = resolve_canonical_prompt(item)
     outfit_sentence, outfit_source = resolve_outfit_sentence(item)
     prompt = (prompt_value or "").strip()
+    if not prompt:
+        prompt = str(item.prompt_text or "").strip()
+        if prompt:
+            prompt_source = "prompt_text"
     if not prompt:
         prompt_meta = load_prompt_meta(item)
         prompt = str(prompt_meta.get("final_prompt") or "").strip()
         if prompt:
             prompt_source = "prompt_package_json.final_prompt_fallback"
+            prompt_style_version = resolve_prompt_style_version(item, prompt_meta=prompt_meta)
     if prompt and PromptComposer.prompt_has_invalid_outfit(prompt):
         if outfit_sentence:
             try:
@@ -306,14 +312,35 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
     secondary_anchors = _display_value(format_reference_aliases(item.secondary_anchors), "Нет дополнительных референсов")
     manual_generation_step = _format_manual_generation_step(item.manual_generation_step)
     prompt_mode = _display_value(resolve_prompt_mode(item, resolved_prompt=prompt), prompt_mode)
+    prompt_style_version = prompt_style_version or item.prompt_style_version or ""
+    prompt_style_diagnostics = PromptComposer.prompt_style_diagnostics(
+        prompt,
+        prompt_style_version=prompt_style_version,
+    )
 
     logger.info(
-        "telegram_detail_render publication_id=%s prompt_source=%s prompt_format_version=%s legacy_prompt_detected=%s",
+        "telegram_detail_render publication_id=%s prompt_source=%s prompt_style_version=%s legacy_prompt_detected=%s telegram_prompt_text=%r",
         item.publication_id,
         prompt_source,
-        prompt_format_version or "unknown",
+        prompt_style_version or "unknown",
         "yes" if legacy_detected else "no",
+        prompt,
     )
+    if prompt_style_diagnostics.get("has_legacy_content"):
+        logger.warning(
+            "legacy_style_prompt_detected_in_ui publication_id=%s prompt_style_version=%s signatures=%s telegram_prompt_text=%r",
+            item.publication_id,
+            prompt_style_version or "unknown",
+            ", ".join(prompt_style_diagnostics.get("legacy_signatures", []) or []) or "-",
+            prompt,
+        )
+    if prompt_style_version and prompt_style_version != PromptComposer.expected_prompt_style_version():
+        logger.warning(
+            "telegram_prompt_style_version_warning publication_id=%s prompt_style_version=%s expected=%s",
+            item.publication_id,
+            prompt_style_version,
+            PromptComposer.expected_prompt_style_version(),
+        )
 
     references_block = "\n".join(
         [
@@ -466,6 +493,7 @@ def serialize_context(context: PlanScreenContext, items: list[PublishingPlanItem
                 "outfit_summary": item.outfit_summary,
                 "prompt_type": item.prompt_type,
                 "prompt_text": item.prompt_text,
+                "prompt_style_version": item.prompt_style_version,
                 "negative_prompt": item.negative_prompt,
                 "prompt_package_json": item.prompt_package_json,
                 "shot_archetype": item.shot_archetype,

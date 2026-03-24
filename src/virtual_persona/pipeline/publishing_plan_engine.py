@@ -115,6 +115,9 @@ class PublishingPlanEngine:
             )
             final_prompt = str(rewritten.get("prompt") or sanitized.get("prompt") or final_prompt).strip()
             prompt_meta["final_prompt"] = final_prompt
+            prompt_meta["prompt_style_version"] = str(
+                prompt_meta.get("prompt_style_version") or PromptComposer.expected_prompt_style_version()
+            )
             prompt_meta["duplicate_clauses"] = list(sanitized.get("duplicate_clauses", []))
             prompt_meta["sanitized_prompt_applied"] = bool(sanitized.get("sanitized_prompt_applied"))
             prompt_meta["rewrite_pass_applied"] = bool(rewritten.get("rewrite_pass_applied"))
@@ -184,6 +187,7 @@ class PublishingPlanEngine:
                 outfit_ids=list(package.outfit.item_ids),
                 prompt_type=content_type,
                 prompt_text="",
+                prompt_style_version=str(prompt_meta.get("prompt_style_version") or ""),
                 outfit_sentence=canonical_outfit_sentence,
                 outfit_struct_json=str(prompt_meta.get("outfit_struct_json") or ""),
                 outfit_summary=str(prompt_meta.get("outfit_summary") or canonical_outfit_sentence),
@@ -243,7 +247,18 @@ class PublishingPlanEngine:
                 final_prompt,
                 scene.scene_moment or scene.description or "daily lifestyle scene",
             )
-            logger.info(f"[PROMPT_SAVE] {item.publication_id} prompt saved: {bool(item.prompt_text)}")
+            prompt_meta["final_prompt"] = item.prompt_text
+            prompt_meta["final_prompt_length"] = len(item.prompt_text)
+            item.prompt_style_version = str(prompt_meta.get("prompt_style_version") or "")
+            item.prompt_package_json = json.dumps(prompt_meta, ensure_ascii=False)
+            logger.info(
+                "publishing_plan_prompt_trace publication_id=%s raw_pre_rewrite_prompt=%r post_rewrite_prompt=%r saved_prompt_text=%r prompt_style_version=%s",
+                item.publication_id,
+                raw_prompt,
+                final_prompt,
+                item.prompt_text,
+                item.prompt_style_version or "unknown",
+            )
             items.append(item)
 
         package.publishing_plan = items
