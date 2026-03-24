@@ -520,3 +520,69 @@ def test_publishing_plan_sanitizes_duplicate_clauses_before_persisting():
     assert first.prompt_text.count("carry on placed nearby") == 1
     assert prompt_meta["post_sanitize_validation_result"] == "passed"
     assert "Duplicate clauses detected in prompt" not in first.prompt_text
+
+
+def test_telegram_prompt_screen_uses_place_coherent_prompt_after_persist():
+    state = DummyState()
+    engine = PublishingPlanEngine(state)
+    scene = DayScene(
+        block="morning",
+        location="hotel room",
+        description="Slow first coffee in the kitchen corner before the day starts",
+        mood="calm",
+        time_of_day="morning",
+        activity="daily_pause",
+        scene_moment="Slow first coffee in the kitchen corner before the day starts",
+        scene_moment_type="detail",
+        scene_source="scene_moment_engine",
+        moment_signature="kitchen-coffee-layover",
+        visual_focus="coffee cup, bag",
+    )
+    scene.camera_archetype = "seated_table_shot"
+    package = _build_package(day_type="layover_day", phase="transition_phase", scenes=[scene])
+    package.behavioral_context = BehaviorState(
+        energy_level="low",
+        social_mode="light_public",
+        emotional_arc="transition",
+        habit="coffee_moment",
+        place_anchor="kitchen_corner",
+        objects=["coffee_cup", "bag"],
+        self_presentation="soft",
+    )
+    package.content.prompt_packages = [
+        {
+            "photo": {
+                "final_prompt": (
+                    "Identity: stable.\n\n"
+                    "waist-up seated candid shot\n\n"
+                    "Scene: first coffee in the kitchen corner, coffee cup in hand, bag resting beside her.\n\n"
+                    "Outfit: soft knit top, straight trousers, comfortable sneakers, small shoulder bag.\n\n"
+                    "Environment: photorealistic hotel room; lived-in environmental detail; accurate perspective and scale; soft background people only.\n\n"
+                    "Mood: quiet confidence."
+                ),
+                "negative_prompt": "bad anatomy",
+                "shot_archetype": "seated_table_shot",
+                "platform_intent": "instagram_feed",
+                "generation_mode": "seated_lifestyle_mode",
+                "framing_mode": "waist-up seated candid",
+                "prompt_mode": "dense",
+                "prompt_style_version": PromptComposer.expected_prompt_style_version(),
+                "outfit_sentence": package.outfit.outfit_sentence,
+                "outfit_summary": package.outfit.outfit_sentence,
+                "outfit_struct_json": json.dumps(package.outfit.structured_payload(), ensure_ascii=False),
+            }
+        }
+    ]
+
+    rows = engine.generate(package)
+
+    assert rows
+    row = rows[0]
+    prompt_text = row.prompt_text.lower()
+    telegram_text = format_prompt_screen(item_from_row(state.rows[0], package.date), 0).lower()
+
+    assert "hotel room" not in prompt_text
+    assert "soft background people only" not in prompt_text
+    assert "hotel kitchenette" in prompt_text or "small hotel breakfast corner" in prompt_text
+    assert "subtle cue of not fully unpacked travel items nearby" in prompt_text
+    assert prompt_text in telegram_text

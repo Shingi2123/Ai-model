@@ -18,6 +18,19 @@ class PromptValidationError(ValueError):
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class PlaceCoherenceState:
+    mode: str
+    canonical_location: str
+    location_keywords: tuple[str, ...]
+    private_scene: bool
+    public_scene: bool
+    travel_context: bool
+    allow_background_people: bool
+    allow_bag_prop: bool
+    allow_wearable_bag: bool
+
+
 @dataclass
 class PromptComposer:
     state_store: Any
@@ -160,6 +173,7 @@ class PromptComposer:
         "luggage",
         "suitcase",
         "roller bag",
+        "overnight bag",
         "boarding pass",
         "passport",
         "laptop",
@@ -424,7 +438,7 @@ class PromptComposer:
         ordered_blocks["final_prompt_length"] = len(final_prompt)
         ordered_blocks["post_sanitize_prompt_length"] = int(prompt_payload.get("post_sanitize_prompt_length") or len(final_prompt))
         ordered_blocks["post_sanitize_validation_result"] = str(prompt_payload.get("post_sanitize_validation_result") or "")
-        ordered_blocks["objects_inserted"] = list(self._behavior_object_terms(context))
+        ordered_blocks["objects_inserted"] = list(self._behavior_object_terms(context, scene))
         ordered_blocks["prompt_block_names"] = ["Identity", "Framing", "Scene", "Outfit", "Environment", "Mood"]
         ordered_blocks["prompt_blocks"] = dict(prompt_payload.get("prompt_blocks", {}))
         return ordered_blocks
@@ -1173,7 +1187,7 @@ class PromptComposer:
         platform_behavior: str,
         outfit_sentence: str,
     ) -> Dict[str, Any]:
-        object_terms = self._behavior_object_terms(context)
+        object_terms = self._behavior_object_terms(context, scene)
         scene_text = self._scene_text(scene).lower()
         behavior = context.get("behavioral_context")
         energy = str(getattr(behavior, "energy_level", "medium") or "medium").lower() if behavior is not None else "medium"
@@ -1418,14 +1432,15 @@ class PromptComposer:
             transformed["Outfit"] = f"Outfit: {self._normalize_outfit_sentence_for_prompt(outfit_body, scene, context)}."
 
         required_scene_objects = self._dedupe_phrases(
-            self._behavior_object_terms(context) + self._extract_scene_props_from_outfit_text(scene_body)
+            self._behavior_object_terms(context, scene) + self._extract_scene_props_from_outfit_text(scene_body)
         )
         scene_rewritten_body = self._split_block_label(transformed["Scene"])[1]
         missing_scene_phrases = [
-            self._object_scene_phrase(object_term, scene)
+            self._object_scene_phrase(object_term, scene, context=context)
             for object_term in required_scene_objects
             if object_term and object_term.lower() not in scene_rewritten_body.lower()
         ]
+        missing_scene_phrases = [phrase for phrase in missing_scene_phrases if phrase]
         if missing_scene_phrases:
             scene_clauses = [clause["text"] for clause in self._extract_semantic_clauses("Scene", scene_rewritten_body)]
             scene_rewritten_body = ", ".join(
@@ -1785,10 +1800,12 @@ class PromptComposer:
                 return f"{cleaned} left open and shifting a little"
             return f"{cleaned} falling into its own lines"
         if category == "accessory":
+            if "overnight bag" in lowered:
+                return ""
             if "carry on" in lowered or "carry-on" in lowered:
-                return "carry on close by with the handle a little off straight"
+                return ""
             if "bag" in lowered:
-                return f"{cleaned} kept close with the strap pulling one side slightly off center"
+                return f"{cleaned} worn crossbody with the strap cutting diagonally through the frame"
             return f"{cleaned} looking actually carried"
         if "knitwear" in lowered:
             return f"{cleaned} sitting naturally with a few real folds"
@@ -1807,7 +1824,7 @@ class PromptComposer:
             if any(token in lowered for token in ["drape", "soft body lines", "relaxed fit"]):
                 return "the fabric falling easy instead of too clean"
             if any(token in lowered for token in ["fold", "wrinkle", "crease", "texture"]):
-                return "fabric keeping a few real folds in it"
+                return "fabric not pressed fully flat"
             if any(token in lowered for token in ["pull", "off center", "uneven", "higher"]):
                 return cleaned
         return ""
@@ -1950,7 +1967,7 @@ class PromptComposer:
     def _drop_nonessential_outfit_item(self, clothing: List[str], context: Dict[str, Any], scene: Any) -> List[str]:
         if len(clothing) <= 3:
             return clothing
-        required_objects = {obj.lower() for obj in self._behavior_object_terms(context)}
+        required_objects = {obj.lower() for obj in self._behavior_object_terms(context, scene)}
         drop_candidates: List[str] = []
         for item in clothing:
             lowered = item.lower()
@@ -2044,12 +2061,19 @@ class PromptComposer:
         outfit_scene_props: List[str] | None = None,
     ) -> str:
         lowered = self._scene_text(scene).lower()
+        coherence = self._resolve_place_coherence(context, scene, scene_body=scene_desc)
         visual_focus = self._strip_scene_noise(str(getattr(scene, "visual_focus", "") or "").strip())
         tag_prefix = self._scene_tag_prefix(scene_tags)
         behavior = context.get("behavioral_context")
-        object_terms = self._dedupe_phrases(self._behavior_object_terms(context) + list(outfit_scene_props or []))
+        object_terms = self._dedupe_phrases(self._behavior_object_terms(context, scene) + list(outfit_scene_props or []))
+        object_terms = [
+            term
+            for term in object_terms
+            if self._object_is_legitimate(term, context, scene, coherence)
+        ]
+        visual_focus = self._sanitize_visual_focus(visual_focus, object_terms, coherence)
         movement, interaction, expression = self._behavior_scene_cues(context, scene)
-        micro_detail = self._scene_micro_detail(scene, behavior, object_terms, visual_focus)
+        micro_detail = self._scene_micro_detail(scene, behavior, object_terms, visual_focus, context)
         scene_presence = list((presence_layer or {}).get("scene_cues") or [])
         if self._is_travel_walk(lowered):
             pieces = [f"{tag_prefix} walking through the airport terminal before boarding" if tag_prefix else "Walking through the airport terminal before boarding"]
@@ -2066,7 +2090,9 @@ class PromptComposer:
                 pieces.append(micro_detail)
             for object_term in object_terms:
                 if object_term.lower() not in " ".join(pieces).lower():
-                    pieces.append(self._object_scene_phrase(object_term, scene))
+                    phrase = self._object_scene_phrase(object_term, scene, context=context, coherence=coherence)
+                    if phrase:
+                        pieces.append(phrase)
             for cue in scene_presence:
                 if cue.lower() not in " ".join(pieces).lower():
                     pieces.append(cue)
@@ -2098,7 +2124,9 @@ class PromptComposer:
             pieces.append(micro_detail)
         for object_term in object_terms:
             if object_term.lower() not in " ".join(pieces).lower():
-                pieces.append(self._object_scene_phrase(object_term, scene))
+                phrase = self._object_scene_phrase(object_term, scene, context=context, coherence=coherence)
+                if phrase:
+                    pieces.append(phrase)
         for cue in scene_presence:
             if cue.lower() not in " ".join(pieces).lower():
                 pieces.append(cue)
@@ -2111,8 +2139,8 @@ class PromptComposer:
     def _environment_block(self, context: Dict[str, Any], scene: Any, scene_loc: str, scene_tags: List[str], continuity_block: str) -> str:
         del continuity_block, scene_tags
         lighting = self._lighting_hint(getattr(scene, "time_of_day", "day"))
-        lowered_loc = str(scene_loc or "").lower()
-        location_phrase = "airport terminal" if any(token in lowered_loc for token in ["airport", "terminal"]) else self._clean_fragment(scene_loc)
+        coherence = self._resolve_place_coherence(context, scene, environment_body=scene_loc)
+        location_phrase = self._clean_fragment(coherence.canonical_location or scene_loc)
         behavior = context.get("behavioral_context")
         parts: List[str] = [
             f"Environment: photorealistic {location_phrase}",
@@ -2120,11 +2148,11 @@ class PromptComposer:
             "accurate perspective and scale",
             f"{lighting} behaving as natural available light",
         ]
-        if any(token in lowered_loc for token in ["airport", "terminal"]):
+        if coherence.mode.startswith("airport"):
             parts.insert(1, "real terminal architecture")
         else:
             parts.insert(1, "lived-in environmental detail")
-        if behavior is not None:
+        if behavior is not None and coherence.allow_background_people:
             presence = {
                 "alone": "no other people in frame",
                 "light_public": "soft background people only",
@@ -2142,9 +2170,11 @@ class PromptComposer:
         presence_layer: Dict[str, Any] | None = None,
     ) -> str:
         del continuity_block
+        coherence = self._resolve_place_coherence(context, scene)
         mood = str(getattr(scene, "mood", "") or "").strip().lower()
         behavior = context.get("behavioral_context")
         mood_presence = list((presence_layer or {}).get("mood_cues") or [])
+        time_of_day = str(getattr(scene, "time_of_day", "") or "").lower()
         canonical = {
             "curious": "quiet curiosity",
             "focused": "composed focus",
@@ -2156,6 +2186,8 @@ class PromptComposer:
             "happy": "light warmth",
         }
         base = canonical.get(mood, "quiet confidence")
+        if coherence.private_scene and time_of_day in {"early_morning", "morning", "late_morning"}:
+            return "Mood: already happening by the time the camera catches it."
         if behavior is not None:
             arc_mood = {
                 "arrival": "calm arrival mood",
@@ -2186,7 +2218,7 @@ class PromptComposer:
     ) -> Dict[str, Any]:
         del platform_behavior
         behavior = context.get("behavioral_context")
-        object_terms = self._behavior_object_terms(context)
+        object_terms = self._behavior_object_terms(context, scene)
         descriptor = " ".join(
             [
                 str(getattr(outfit_bundle, "top", "") or ""),
@@ -2414,6 +2446,210 @@ class PromptComposer:
         return "everyday location"
 
     @staticmethod
+    def _context_day_type(context: Dict[str, Any]) -> str:
+        life_state = context.get("life_state")
+        return str(context.get("day_type") or getattr(life_state, "day_type", "") or "").strip().lower()
+
+    def _scene_supports_departure_bag(self, scene: Any, context: Dict[str, Any]) -> bool:
+        lowered = self._scene_text(scene).lower()
+        day_type = self._context_day_type(context)
+        return (
+            day_type in {"layover_day", "travel_day", "airport_transfer"}
+            or any(
+                token in lowered
+                for token in [
+                    "by the door",
+                    "heading out",
+                    "returning",
+                    "return home",
+                    "packed",
+                    "packing",
+                    "unpacked",
+                    "after arriving",
+                    "before leaving",
+                    "arrival",
+                    "departure",
+                ]
+            )
+        )
+
+    def _resolve_place_coherence(
+        self,
+        context: Dict[str, Any],
+        scene: Any,
+        *,
+        scene_body: str = "",
+        environment_body: str = "",
+        outfit_body: str = "",
+    ) -> PlaceCoherenceState:
+        behavior = context.get("behavioral_context")
+        place_anchor = str(getattr(behavior, "place_anchor", getattr(behavior, "familiar_place_anchor", "")) or "").lower()
+        habit = str(getattr(behavior, "habit", getattr(behavior, "selected_habit", "")) or "").lower()
+        day_type = self._context_day_type(context)
+        lowered = " ".join(
+            [
+                self._scene_text(scene),
+                str(scene_body or ""),
+                str(environment_body or ""),
+                str(outfit_body or ""),
+            ]
+        ).lower()
+
+        travel_context = (
+            day_type in {"layover_day", "travel_day", "airport_transfer"}
+            or place_anchor in {"terminal_gate", "hotel_window"}
+            or any(
+                token in lowered
+                for token in [
+                    "airport",
+                    "terminal",
+                    "gate",
+                    "boarding",
+                    "flight",
+                    "layover",
+                    "hotel",
+                    "travel",
+                    "check-in",
+                    "check in",
+                ]
+            )
+        )
+        transit_context = place_anchor == "terminal_gate" or any(
+            token in lowered for token in ["airport", "terminal", "gate", "boarding", "runway"]
+        )
+        cafe_context = place_anchor == "cafe_corner" or "cafe" in lowered
+        kitchen_context = place_anchor == "kitchen_corner" or any(
+            token in lowered for token in ["kitchen", "kitchenette", "breakfast corner", "counter light"]
+        )
+        bathroom_context = "mirror" in lowered and "bathroom" in lowered
+        bedside_context = "bedside" in lowered or ("bed" in lowered and not transit_context and not cafe_context)
+        hotel_private_context = (
+            place_anchor == "hotel_window"
+            or ("hotel" in lowered and not kitchen_context and not transit_context)
+            or any(token in lowered for token in ["hotel room", "window corner"])
+        )
+        home_private_context = any(token in lowered for token in ["home", "living room", "room corner"]) and not kitchen_context
+
+        if transit_context:
+            waiting_context = any(
+                token in lowered for token in ["waiting", "gate", "seated", "seat", "seating", "row seating", "before boarding"]
+            )
+            canonical_location = "airport gate" if waiting_context else "airport terminal"
+            return PlaceCoherenceState(
+                mode="airport_gate" if waiting_context else "airport_terminal",
+                canonical_location=canonical_location,
+                location_keywords=("airport", "terminal", "gate", "boarding"),
+                private_scene=False,
+                public_scene=True,
+                travel_context=True,
+                allow_background_people=True,
+                allow_bag_prop=True,
+                allow_wearable_bag=True,
+            )
+        if cafe_context:
+            return PlaceCoherenceState(
+                mode="cafe_interior",
+                canonical_location="cafe interior",
+                location_keywords=("cafe", "coffee shop", "table"),
+                private_scene=False,
+                public_scene=True,
+                travel_context=travel_context,
+                allow_background_people=True,
+                allow_bag_prop=True,
+                allow_wearable_bag=True,
+            )
+        if kitchen_context:
+            if travel_context or day_type == "layover_day":
+                if "hotel" in lowered or place_anchor == "hotel_window":
+                    canonical_location = "hotel kitchenette"
+                elif day_type == "layover_day":
+                    canonical_location = "small hotel breakfast corner"
+                else:
+                    canonical_location = "small breakfast corner"
+                return PlaceCoherenceState(
+                    mode="hotel_kitchenette",
+                    canonical_location=canonical_location,
+                    location_keywords=("kitchen", "kitchenette", "breakfast", "counter", "coffee"),
+                    private_scene=True,
+                    public_scene=False,
+                    travel_context=True,
+                    allow_background_people=False,
+                    allow_bag_prop=True,
+                    allow_wearable_bag=False,
+                )
+            return PlaceCoherenceState(
+                mode="home_kitchen",
+                canonical_location="home kitchen",
+                location_keywords=("home", "kitchen", "counter", "coffee"),
+                private_scene=True,
+                public_scene=False,
+                travel_context=False,
+                allow_background_people=False,
+                allow_bag_prop=self._scene_supports_departure_bag(scene, context),
+                allow_wearable_bag=False,
+            )
+        if bathroom_context:
+            return PlaceCoherenceState(
+                mode="bathroom_mirror",
+                canonical_location="bathroom mirror",
+                location_keywords=("bathroom", "mirror", "sink"),
+                private_scene=True,
+                public_scene=False,
+                travel_context=travel_context,
+                allow_background_people=False,
+                allow_bag_prop=travel_context,
+                allow_wearable_bag=False,
+            )
+        if bedside_context:
+            return PlaceCoherenceState(
+                mode="bedside",
+                canonical_location="bedside corner",
+                location_keywords=("bedside", "bed", "room"),
+                private_scene=True,
+                public_scene=False,
+                travel_context=travel_context,
+                allow_background_people=False,
+                allow_bag_prop=travel_context,
+                allow_wearable_bag=False,
+            )
+        if hotel_private_context:
+            canonical_location = "hotel window corner" if "window" in lowered else "hotel room"
+            return PlaceCoherenceState(
+                mode="hotel_private",
+                canonical_location=canonical_location,
+                location_keywords=("hotel", "room", "window"),
+                private_scene=True,
+                public_scene=False,
+                travel_context=True,
+                allow_background_people=False,
+                allow_bag_prop=True,
+                allow_wearable_bag=False,
+            )
+        if home_private_context:
+            return PlaceCoherenceState(
+                mode="home_private",
+                canonical_location="quiet home room corner",
+                location_keywords=("home", "room", "corner"),
+                private_scene=True,
+                public_scene=False,
+                travel_context=False,
+                allow_background_people=False,
+                allow_bag_prop=self._scene_supports_departure_bag(scene, context),
+                allow_wearable_bag=False,
+            )
+        return PlaceCoherenceState(
+            mode="generic_daily",
+            canonical_location=self._scene_location_fallback(scene),
+            location_keywords=tuple(self._scene_location_fallback(scene).lower().split()),
+            private_scene=False,
+            public_scene=False,
+            travel_context=travel_context,
+            allow_background_people=False,
+            allow_bag_prop=travel_context,
+            allow_wearable_bag=not travel_context,
+        )
+
+    @staticmethod
     def _clean_fragment(text: str) -> str:
         cleaned = " ".join(str(text or "").replace("_", " ").split())
         return cleaned.strip(" ,;:.")
@@ -2639,9 +2875,11 @@ class PromptComposer:
             repaired_body = self._repair_duplicate_sequences_in_text(body, aggressive=aggressive)
             if label == "Scene":
                 scene_clauses = [clause["text"] for clause in self._extract_semantic_clauses("Scene", repaired_body)]
-                for object_term in self._behavior_object_terms(context):
+                for object_term in self._behavior_object_terms(context, scene):
                     if object_term and object_term.lower() not in ", ".join(scene_clauses).lower():
-                        scene_clauses.append(self._object_scene_phrase(object_term, scene))
+                        phrase = self._object_scene_phrase(object_term, scene, context=context)
+                        if phrase:
+                            scene_clauses.append(phrase)
                 repaired_body = ", ".join(self._dedupe_semantic_phrases(scene_clauses)) if scene_clauses else repaired_body
             elif label == "Mood":
                 mood_clauses = [clause["text"] for clause in self._extract_semantic_clauses("Mood", repaired_body)]
@@ -2713,7 +2951,17 @@ class PromptComposer:
             identity_text = "a 22-year-old woman with a recognizable face, relaxed shoulders, and an easy upright posture"
         scene_anchor = self._scene_presence_lead(scene, scene_body or self._minimal_scene_body(scene))
         scene_clauses = self._dedupe_semantic_phrases(
-            [scene_anchor] + [self._object_scene_phrase(term, scene) for term in self._behavior_object_terms(context)[:2]]
+            [
+                scene_anchor,
+                *[
+                    phrase
+                    for phrase in [
+                        self._object_scene_phrase(term, scene, context=context)
+                        for term in self._behavior_object_terms(context, scene)[:2]
+                    ]
+                    if phrase
+                ],
+            ]
         )
         preferred_outfit = self._clean_fragment(outfit_sentence) or self.extract_outfit_sentence(prompt) or self._contextual_outfit_fallback_sentence(scene, context)
         outfit_text = self._normalize_outfit_sentence_for_prompt(preferred_outfit, scene, context)
@@ -3018,7 +3266,9 @@ class PromptComposer:
         lowered = self._clean_fragment(text).lower()
         if not lowered:
             return False
-        if "bag" in lowered and not any(token in lowered for token in ["carry on", "carry-on", "roller bag", "suitcase", "luggage"]):
+        if "bag" in lowered and not any(
+            token in lowered for token in ["carry on", "carry-on", "roller bag", "suitcase", "luggage", "overnight bag"]
+        ):
             return False
         return any(token in lowered for token in self.SCENE_PROP_TOKENS)
 
@@ -3028,6 +3278,8 @@ class PromptComposer:
             return "carry on"
         if any(token in lowered for token in ["coffee cup", "cup", "mug"]):
             return "coffee cup"
+        if "overnight bag" in lowered:
+            return "bag"
         if "boarding pass" in lowered:
             return "boarding pass"
         if "passport" in lowered:
@@ -3051,6 +3303,68 @@ class PromptComposer:
             fallback = self._contextual_outfit_fallback_sentence(scene, context)
             return self.validate_outfit_sentence(fallback)
         return self.validate_outfit_sentence(cleaned)
+
+    def _outfit_item_allowed_for_place(
+        self,
+        item: str,
+        *,
+        scene: Any,
+        context: Dict[str, Any],
+        coherence: PlaceCoherenceState,
+    ) -> bool:
+        lowered = self._clean_fragment(item).lower()
+        if not lowered:
+            return False
+        if any(token in lowered for token in ["carry on", "carry-on", "coffee cup", "coffee", "mug", "boarding pass", "passport"]):
+            return False
+        if "overnight bag" in lowered:
+            return False
+        if "bag" in lowered and not coherence.allow_wearable_bag:
+            return False
+        if "bag" in lowered and not self._bag_is_legitimate(context, scene, coherence):
+            return False
+        return True
+
+    def _coherent_outfit_sentence(
+        self,
+        outfit_sentence: str,
+        *,
+        scene: Any,
+        context: Dict[str, Any],
+        shot_archetype: str,
+        coherence: PlaceCoherenceState,
+        apply_in_the_moment: bool,
+    ) -> str:
+        cleaned = self._clean_fragment(outfit_sentence)
+        clothing, details, _ = self._split_outfit_scene_props(cleaned)
+        kept_clothing = [
+            item
+            for item in clothing
+            if self._outfit_item_allowed_for_place(item, scene=scene, context=context, coherence=coherence)
+        ]
+        if len(self.outfit_semantic_units(", ".join(kept_clothing))) < 3:
+            fallback_sentence = self._contextual_outfit_fallback_sentence(scene, context)
+            fallback_clothing, fallback_details, _ = self._split_outfit_scene_props(fallback_sentence)
+            kept_clothing = [
+                item
+                for item in fallback_clothing
+                if self._outfit_item_allowed_for_place(item, scene=scene, context=context, coherence=coherence)
+            ]
+            details = fallback_details
+        rebuilt = ", ".join(self._dedupe_phrases(kept_clothing))
+        if details:
+            rebuilt = f"{rebuilt}; {', '.join(self._dedupe_phrases(details))}" if rebuilt else ", ".join(self._dedupe_phrases(details))
+        normalized = self._normalize_outfit_sentence_for_prompt(rebuilt, scene, context)
+        if not apply_in_the_moment:
+            return normalized
+        return self.validate_outfit_sentence(
+            self._in_the_moment_outfit_body(
+                normalized,
+                scene=scene,
+                context=context,
+                shot_archetype=shot_archetype,
+            )
+        )
 
     @staticmethod
     def _is_outfit_detail_only_clause(text: str) -> bool:
@@ -3105,7 +3419,7 @@ class PromptComposer:
         )
         if bold_evening_hotel:
             return (
-                "fitted knit dress, light cardigan, comfortable flat slides, and a small overnight bag; "
+                "fitted knit dress, light cardigan, and comfortable flat slides; "
                 "soft body lines with natural drape"
             )
         if any(token in lowered for token in ["airport", "terminal", "gate", "boarding"]) or place_anchor == "terminal_gate":
@@ -3356,12 +3670,48 @@ class PromptComposer:
             "shoulder_bag": "bag",
         }.get(str(obj or "").strip().lower(), str(obj or "").replace("_", " ").strip())
 
-    def _behavior_object_terms(self, context: Dict[str, Any]) -> List[str]:
+    def _bag_is_legitimate(self, context: Dict[str, Any], scene: Any, coherence: PlaceCoherenceState) -> bool:
+        if coherence.allow_wearable_bag or coherence.allow_bag_prop:
+            if coherence.private_scene and not coherence.travel_context:
+                return self._scene_supports_departure_bag(scene, context)
+            return True
+        return False
+
+    def _object_is_legitimate(
+        self,
+        object_term: str,
+        context: Dict[str, Any],
+        scene: Any,
+        coherence: PlaceCoherenceState,
+    ) -> bool:
+        lowered_scene = self._scene_text(scene).lower()
+        behavior = context.get("behavioral_context")
+        habit = str(getattr(behavior, "habit", getattr(behavior, "selected_habit", "")) or "").lower()
+        lowered_term = str(object_term or "").lower()
+        if lowered_term == "coffee cup":
+            return (
+                habit == "coffee_moment"
+                or any(token in lowered_scene for token in ["coffee", "cup", "mug", "kitchen", "cafe", "breakfast", "gate"])
+                or coherence.mode in {"airport_gate", "cafe_interior", "home_kitchen", "hotel_kitchenette"}
+            )
+        if lowered_term == "carry on":
+            return coherence.travel_context or coherence.mode.startswith("airport")
+        if lowered_term == "bag":
+            return self._bag_is_legitimate(context, scene, coherence)
+        return True
+
+    def _behavior_object_terms(self, context: Dict[str, Any], scene: Any | None = None) -> List[str]:
         behavior = context.get("behavioral_context")
         if behavior is None:
             return []
         objects = getattr(behavior, "objects", getattr(behavior, "recurring_objects", [])) or []
-        return [self._natural_object_term(obj) for obj in objects if self._natural_object_term(obj)]
+        normalized = [self._natural_object_term(obj) for obj in objects if self._natural_object_term(obj)]
+        if scene is None:
+            return self._dedupe_phrases(normalized)
+        coherence = self._resolve_place_coherence(context, scene)
+        return self._dedupe_phrases(
+            [term for term in normalized if self._object_is_legitimate(term, context, scene, coherence)]
+        )
 
     def _is_kitchen_coffee_scene(self, context: Dict[str, Any], scene: Any) -> bool:
         behavior = context.get("behavioral_context")
@@ -3370,7 +3720,7 @@ class PromptComposer:
         lowered_scene = self._scene_text(scene).lower()
         place_anchor = str(getattr(behavior, "place_anchor", getattr(behavior, "familiar_place_anchor", "")) or "")
         habit = str(getattr(behavior, "habit", getattr(behavior, "selected_habit", "")) or "")
-        object_terms = {term.lower() for term in self._behavior_object_terms(context)}
+        object_terms = {term.lower() for term in self._behavior_object_terms(context, scene)}
         return (
             place_anchor == "kitchen_corner"
             and habit == "coffee_moment"
@@ -3411,30 +3761,291 @@ class PromptComposer:
             expression = "minimal facial expression with inward attention"
         return movement, interaction, expression
 
-    def _scene_micro_detail(self, scene: Any, behavior: Any, object_terms: List[str], visual_focus: str) -> str:
+    def _sanitize_visual_focus(
+        self,
+        visual_focus: str,
+        object_terms: List[str],
+        coherence: PlaceCoherenceState,
+    ) -> str:
+        cleaned_focus = self._clean_fragment(visual_focus)
+        if not cleaned_focus:
+            return ""
+        allowed = {term.lower() for term in object_terms}
+        chunks = [self._clean_fragment(chunk) for chunk in cleaned_focus.split(",") if self._clean_fragment(chunk)]
+        kept: List[str] = []
+        for chunk in chunks:
+            lowered = chunk.lower()
+            if "carry on" in lowered and "carry on" not in allowed:
+                continue
+            if "bag" in lowered and "bag" not in allowed:
+                continue
+            if coherence.private_scene and coherence.travel_context and "bag" in lowered:
+                continue
+            kept.append(chunk)
+        return ", ".join(self._dedupe_phrases(kept))
+
+    def _scene_micro_detail(
+        self,
+        scene: Any,
+        behavior: Any,
+        object_terms: List[str],
+        visual_focus: str,
+        context: Dict[str, Any],
+    ) -> str:
         del behavior
         lowered = self._scene_text(scene).lower()
+        coherence = self._resolve_place_coherence(context, scene)
         if any(token in lowered for token in ["terminal", "airport", "gate", "boarding"]) and "waiting" in lowered:
             if "window" in lowered:
                 return "seated near window row seating and checking the boarding screen occasionally"
             return "checking the boarding screen occasionally near the gate seating"
+        if coherence.private_scene and coherence.travel_context and "bag" in {term.lower() for term in object_terms}:
+            return "subtle cue of not fully unpacked travel items nearby"
         if visual_focus:
             return f"small detail: {visual_focus}"
         if object_terms:
             return f"small detail: {object_terms[0]} kept close"
         return "small detail: lived-in candid timing"
 
-    @staticmethod
-    def _object_scene_phrase(object_term: str, scene: Any) -> str:
-        lowered = PromptComposer._scene_text(scene).lower()
-        mapping = {
-            "coffee cup": "coffee cup in hand",
-            "carry on": "carry on placed nearby",
-            "bag": "bag resting beside her",
+    def _object_scene_phrase(
+        self,
+        object_term: str,
+        scene: Any,
+        context: Dict[str, Any] | None = None,
+        coherence: PlaceCoherenceState | None = None,
+    ) -> str:
+        lowered = self._scene_text(scene).lower()
+        resolved_context = context or {}
+        coherence = coherence or self._resolve_place_coherence(resolved_context, scene)
+        lowered_term = str(object_term or "").lower()
+        if lowered_term == "coffee cup":
+            return "coffee cup in hand"
+        if lowered_term == "carry on":
+            if any(token in lowered for token in ["walking", "walk", "stroll", "moving through"]):
+                return "carry on rolling alongside her"
+            if coherence.mode.startswith("airport"):
+                return "carry on placed beside her seat"
+            return "compact carry on left nearby"
+        if lowered_term == "bag":
+            if not self._bag_is_legitimate(resolved_context, scene, coherence):
+                return ""
+            if coherence.private_scene and coherence.travel_context:
+                return "subtle cue of not fully unpacked travel items nearby"
+            if coherence.mode.startswith("airport"):
+                return "bag kept close by her side"
+            if coherence.mode == "cafe_interior":
+                return "bag resting by the chair"
+            return "bag resting nearby"
+        return f"{object_term} visible in the scene"
+
+    def _coherent_environment_seed(
+        self,
+        scene: Any,
+        context: Dict[str, Any],
+        coherence: PlaceCoherenceState,
+    ) -> str:
+        lighting = self._lighting_hint(getattr(scene, "time_of_day", "day"))
+        behavior = context.get("behavioral_context")
+        parts: List[str] = [
+            f"photorealistic {coherence.canonical_location}",
+            "real terminal architecture" if coherence.mode.startswith("airport") else "lived-in environmental detail",
+            "physically plausible spatial depth",
+            "accurate perspective and scale",
+            f"{lighting} behaving as natural available light",
+        ]
+        if behavior is not None and coherence.allow_background_people:
+            presence = {
+                "alone": "no other people in frame",
+                "light_public": "soft background people only",
+                "social": "public life present but secondary",
+            }.get(str(getattr(behavior, "social_mode", "alone") or "alone"), "")
+            if presence:
+                parts.append(presence)
+        return "; ".join(self._dedupe_phrases(parts))
+
+    def _scene_clause_conflicts_with_place(self, clause: str, coherence: PlaceCoherenceState) -> bool:
+        lowered = str(clause or "").lower()
+        if coherence.private_scene and any(
+            token in lowered for token in ["soft background people", "public life present", "crowd", "travelers nearby"]
+        ):
+            return True
+        if coherence.mode in {"home_kitchen", "hotel_kitchenette"}:
+            if any(token in lowered for token in ["airport", "terminal", "gate", "runway"]):
+                return True
+            if coherence.mode == "home_kitchen" and any(token in lowered for token in ["hotel room", "hotel window", "hotel corner"]):
+                return True
+            if coherence.mode == "hotel_kitchenette" and "hotel room" in lowered and "kitchen" not in lowered:
+                return True
+        if coherence.mode.startswith("airport") and any(
+            token in lowered for token in ["home kitchen", "living room", "bedside", "bathroom mirror"]
+        ):
+            return True
+        if coherence.mode == "cafe_interior" and any(token in lowered for token in ["airport terminal", "hotel room", "home kitchen"]):
+            return True
+        return False
+
+    def _scene_mentions_place(self, scene_body: str, coherence: PlaceCoherenceState) -> bool:
+        lowered = str(scene_body or "").lower()
+        return any(keyword in lowered for keyword in coherence.location_keywords if keyword)
+
+    def _scene_place_clause(self, coherence: PlaceCoherenceState) -> str:
+        if coherence.mode.startswith("airport"):
+            return f"at the {coherence.canonical_location}"
+        if coherence.mode == "cafe_interior":
+            return "inside the cafe"
+        if coherence.private_scene:
+            return f"in the {coherence.canonical_location}"
+        return f"at {coherence.canonical_location}"
+
+    def _coherent_scene_body(
+        self,
+        scene_body: str,
+        scene: Any,
+        context: Dict[str, Any],
+        coherence: PlaceCoherenceState,
+    ) -> str:
+        clauses = [clause["text"] for clause in self._extract_semantic_clauses("Scene", scene_body)]
+        cleaned_clauses: List[str] = []
+        object_terms = self._behavior_object_terms(context, scene)
+        for clause in clauses:
+            lowered = clause.lower()
+            if self._scene_clause_conflicts_with_place(clause, coherence):
+                continue
+            if "bag" in lowered and "bag" not in {term.lower() for term in object_terms}:
+                continue
+            if "carry on" in lowered and "carry on" not in {term.lower() for term in object_terms}:
+                continue
+            cleaned_clauses.append(clause)
+        if not cleaned_clauses:
+            cleaned_clauses.append(self._scene_presence_lead(scene, scene_body))
+        if self._scene_clause_conflicts_with_place(cleaned_clauses[0], coherence):
+            cleaned_clauses[0] = self._scene_presence_lead(scene, scene_body)
+        scene_text = ", ".join(cleaned_clauses)
+        if not self._scene_mentions_place(scene_text, coherence):
+            cleaned_clauses.append(self._scene_place_clause(coherence))
+        if coherence.private_scene and coherence.travel_context and "bag" in {term.lower() for term in object_terms}:
+            travel_cue = "subtle cue of not fully unpacked travel items nearby"
+            cleaned_clauses = [clause for clause in cleaned_clauses if clause.lower() != travel_cue]
+            cleaned_clauses.insert(1 if cleaned_clauses else 0, travel_cue)
+        for object_term in object_terms:
+            phrase = self._object_scene_phrase(object_term, scene, context=context, coherence=coherence)
+            if phrase and phrase.lower() not in ", ".join(cleaned_clauses).lower():
+                cleaned_clauses.append(phrase)
+        return ", ".join(self._dedupe_semantic_phrases(cleaned_clauses))
+
+    def _coherent_mood_body(
+        self,
+        mood_body: str,
+        scene: Any,
+        context: Dict[str, Any],
+        coherence: PlaceCoherenceState,
+        *,
+        apply_in_the_moment: bool,
+    ) -> str:
+        time_of_day = str(getattr(scene, "time_of_day", "") or "").lower()
+        if coherence.private_scene and time_of_day in {"early_morning", "morning", "late_morning"}:
+            return "already happening by the time the camera catches it"
+        if apply_in_the_moment:
+            rewritten = self._in_the_moment_mood_body(mood_body)
+            return rewritten or self._fallback_mood_presence_phrase(scene, context)
+        base = mood_body or self._split_block_label(self._mood_block(context, scene, "", {}))[1]
+        return self._clean_fragment(base) or "quiet confidence"
+
+    def _apply_place_coherence_to_prompt(
+        self,
+        prompt: str,
+        scene: Any,
+        context: Dict[str, Any],
+        *,
+        outfit_sentence: str,
+        shot_archetype: str,
+        apply_in_the_moment: bool,
+    ) -> Dict[str, Any]:
+        block_map = self._prompt_block_map(prompt)
+        if not block_map:
+            return {"prompt": str(prompt or "").strip(), "prompt_blocks": {}, "changed": False}
+
+        scene_body = self._split_block_label(block_map["Scene"])[1]
+        environment_body = self._split_block_label(block_map["Environment"])[1]
+        current_outfit = self._clean_fragment(outfit_sentence) or self._split_block_label(block_map["Outfit"])[1]
+        coherence = self._resolve_place_coherence(
+            context,
+            scene,
+            scene_body=scene_body,
+            environment_body=environment_body,
+            outfit_body=current_outfit,
+        )
+        coherent_outfit = self._coherent_outfit_sentence(
+            current_outfit,
+            scene=scene,
+            context=context,
+            shot_archetype=shot_archetype,
+            coherence=coherence,
+            apply_in_the_moment=apply_in_the_moment,
+        )
+        coherent_scene = self._coherent_scene_body(scene_body, scene, context, coherence)
+        coherent_environment = self._coherent_environment_seed(scene, context, coherence)
+        coherent_mood = self._coherent_mood_body(
+            self._split_block_label(block_map["Mood"])[1],
+            scene,
+            context,
+            coherence,
+            apply_in_the_moment=apply_in_the_moment,
+        )
+        if apply_in_the_moment:
+            coherent_environment = self._in_the_moment_environment_body(coherent_environment)
+            coherent_scene = self._in_the_moment_scene_body(coherent_scene, scene)
+
+        updated_blocks = dict(block_map)
+        updated_blocks["Scene"] = f"Scene: {self._clean_fragment(coherent_scene)}."
+        updated_blocks["Outfit"] = f"Outfit: {self._clean_fragment(coherent_outfit)}."
+        updated_blocks["Environment"] = f"Environment: {self._clean_fragment(coherent_environment)}."
+        updated_blocks["Mood"] = f"Mood: {self._clean_fragment(coherent_mood)}."
+        updated_prompt = "\n\n".join(
+            updated_blocks[name]
+            for name in ["Identity", "Framing", "Scene", "Outfit", "Environment", "Mood"]
+        )
+        return {
+            "prompt": updated_prompt,
+            "prompt_blocks": updated_blocks,
+            "changed": updated_prompt.strip() != str(prompt or "").strip(),
         }
-        if object_term == "carry on" and any(token in lowered for token in ["walking", "walk", "stroll", "moving through"]):
-            return "carry on rolling alongside her"
-        return mapping.get(object_term, f"{object_term} visible in the scene")
+
+    def _place_coherence_conflicts(self, block_map: Dict[str, str], scene: Any, context: Dict[str, Any]) -> List[str]:
+        coherence = self._resolve_place_coherence(
+            context,
+            scene,
+            scene_body=self._split_block_label(block_map.get("Scene", ""))[1],
+            environment_body=self._split_block_label(block_map.get("Environment", ""))[1],
+            outfit_body=self._split_block_label(block_map.get("Outfit", ""))[1],
+        )
+        scene_body = self._split_block_label(block_map.get("Scene", ""))[1].lower()
+        environment_body = self._split_block_label(block_map.get("Environment", ""))[1].lower()
+        outfit_body = self._split_block_label(block_map.get("Outfit", ""))[1].lower()
+        conflicts: List[str] = []
+        if coherence.private_scene and any(
+            token in environment_body for token in ["soft background people only", "public life present"]
+        ):
+            conflicts.append("Place coherence conflict: private scene cannot include public background presence")
+        if coherence.mode in {"home_kitchen", "hotel_kitchenette"} and any(
+            token in environment_body for token in ["airport terminal", "airport gate", "terminal architecture"]
+        ):
+            conflicts.append("Place coherence conflict: kitchen scene cannot use transit-space environment")
+        if coherence.mode.startswith("airport") and any(
+            token in environment_body for token in ["home kitchen", "living room", "bathroom mirror", "bedside"]
+        ):
+            conflicts.append("Place coherence conflict: airport scene cannot use home-style environment")
+        if coherence.mode == "home_kitchen" and "hotel room" in environment_body:
+            conflicts.append("Place coherence conflict: environment label must follow the kitchen anchor")
+        if coherence.mode == "hotel_kitchenette" and "hotel room" in environment_body and "kitchen" not in environment_body:
+            conflicts.append("Place coherence conflict: environment label must follow the kitchen anchor")
+        if "carry on" in outfit_body or "overnight bag" in outfit_body:
+            conflicts.append("Place coherence conflict: outfit props must stay out of the outfit block")
+        if "bag" in outfit_body and not coherence.allow_wearable_bag:
+            conflicts.append("Place coherence conflict: outfit props must not contradict the scene")
+        if self._scene_clause_conflicts_with_place(scene_body, coherence):
+            conflicts.append("Place coherence conflict: scene anchor and environment family diverged")
+        return conflicts
 
     def finalize_canonical_prompt(
         self,
@@ -3503,6 +4114,21 @@ class PromptComposer:
         diagnostics["sanitized_prompt_applied"] = bool(clause_sanitized.get("sanitized_prompt_applied"))
         diagnostics["prompt_blocks"] = dict(clause_sanitized.get("prompt_blocks") or diagnostics["prompt_blocks"])
 
+        coherent_before_rewrite = self._apply_place_coherence_to_prompt(
+            working_prompt,
+            scene,
+            context,
+            outfit_sentence=preferred_outfit,
+            shot_archetype=shot_archetype or self._resolve_shot_archetype(scene, context, context.get("recent_moment_memory") or []),
+            apply_in_the_moment=False,
+        )
+        working_prompt = str(coherent_before_rewrite.get("prompt") or working_prompt).strip()
+        diagnostics["prompt_blocks"] = dict(coherent_before_rewrite.get("prompt_blocks") or diagnostics["prompt_blocks"])
+        diagnostics["sanitized_prompt_applied"] = (
+            diagnostics["sanitized_prompt_applied"]
+            or bool(coherent_before_rewrite.get("changed"))
+        )
+
         if apply_rewrite:
             rewritten = self.rewrite_canonical_prompt(
                 working_prompt,
@@ -3512,9 +4138,37 @@ class PromptComposer:
             )
             working_prompt = str(rewritten.get("prompt") or working_prompt).strip()
             diagnostics["rewrite_pass_applied"] = bool(rewritten.get("rewrite_pass_applied"))
-            diagnostics["rewrite_diagnostics"] = dict(rewritten.get("rewrite_diagnostics") or {})
             diagnostics["prompt_blocks"] = dict(rewritten.get("prompt_blocks") or diagnostics["prompt_blocks"])
+            coherent_after_rewrite = self._apply_place_coherence_to_prompt(
+                working_prompt,
+                scene,
+                context,
+                outfit_sentence=preferred_outfit,
+                shot_archetype=shot_archetype or self._resolve_shot_archetype(scene, context, context.get("recent_moment_memory") or []),
+                apply_in_the_moment=True,
+            )
+            working_prompt = str(coherent_after_rewrite.get("prompt") or working_prompt).strip()
+            diagnostics["prompt_blocks"] = dict(coherent_after_rewrite.get("prompt_blocks") or diagnostics["prompt_blocks"])
+            diagnostics["sanitized_prompt_applied"] = (
+                diagnostics["sanitized_prompt_applied"]
+                or bool(coherent_after_rewrite.get("changed"))
+            )
+            diagnostics["rewrite_diagnostics"] = self._rewrite_pass_diagnostics(diagnostics["prompt_blocks"])
         elif diagnostics["prompt_blocks"]:
+            coherent_current = self._apply_place_coherence_to_prompt(
+                working_prompt,
+                scene,
+                context,
+                outfit_sentence=preferred_outfit,
+                shot_archetype=shot_archetype or self._resolve_shot_archetype(scene, context, context.get("recent_moment_memory") or []),
+                apply_in_the_moment=True,
+            )
+            working_prompt = str(coherent_current.get("prompt") or working_prompt).strip()
+            diagnostics["prompt_blocks"] = dict(coherent_current.get("prompt_blocks") or diagnostics["prompt_blocks"])
+            diagnostics["sanitized_prompt_applied"] = (
+                diagnostics["sanitized_prompt_applied"]
+                or bool(coherent_current.get("changed"))
+            )
             diagnostics["rewrite_diagnostics"] = self._rewrite_pass_diagnostics(diagnostics["prompt_blocks"])
 
         last_error: PromptValidationError | None = None
@@ -3590,6 +4244,15 @@ class PromptComposer:
                 step=f"{step or 'finalize'}:fallback_duplicate_sequence",
             )
             fallback_prompt = str(fallback_sanitized.get("prompt") or fallback_prompt).strip()
+            coherent_fallback = self._apply_place_coherence_to_prompt(
+                fallback_prompt,
+                scene,
+                context,
+                outfit_sentence=preferred_outfit,
+                shot_archetype=shot_archetype or self._resolve_shot_archetype(scene, context, context.get("recent_moment_memory") or []),
+                apply_in_the_moment=True,
+            )
+            fallback_prompt = str(coherent_fallback.get("prompt") or fallback_prompt).strip()
             diagnostics["duplicate_sequence_candidates"] = self._dedupe_phrases(
                 diagnostics["duplicate_sequence_candidates"] + list(fallback_sanitized.get("duplicate_sequence_candidates", []))
             )
@@ -3602,11 +4265,16 @@ class PromptComposer:
             diagnostics["sanitized_prompt_applied"] = (
                 diagnostics["sanitized_prompt_applied"]
                 or bool(fallback_sanitized.get("sanitized_prompt_applied"))
+                or bool(coherent_fallback.get("changed"))
             )
             try:
                 self._validate_canonical_prompt_core(fallback_prompt, scene, context)
                 diagnostics["prompt"] = fallback_prompt
-                diagnostics["prompt_blocks"] = self._prompt_block_map(fallback_prompt) or dict(fallback.get("prompt_blocks") or {})
+                diagnostics["prompt_blocks"] = (
+                    dict(coherent_fallback.get("prompt_blocks") or {})
+                    or self._prompt_block_map(fallback_prompt)
+                    or dict(fallback.get("prompt_blocks") or {})
+                )
                 diagnostics["fallback_prompt_applied"] = True
                 diagnostics["sanitized_prompt_applied"] = True
                 diagnostics["post_sanitize_prompt_length"] = len(fallback_prompt)
@@ -3658,6 +4326,7 @@ class PromptComposer:
                     "Duplicate ",
                     "Required object missing",
                     "Rewrite pass failed",
+                    "Place coherence conflict",
                 )
                 if not any(marker in str(exc) for marker in repairable_markers):
                     raise
@@ -3735,6 +4404,21 @@ class PromptComposer:
         if not rewrite_diagnostics.get("passed"):
             raise PromptValidationError("Rewrite pass failed to remove prompt anti-patterns")
 
+        place_conflicts = self._place_coherence_conflicts(
+            {
+                "Identity": blocks[0],
+                "Framing": blocks[1],
+                "Scene": blocks[2],
+                "Outfit": blocks[3],
+                "Environment": blocks[4],
+                "Mood": blocks[5],
+            },
+            scene,
+            context,
+        )
+        if place_conflicts:
+            raise PromptValidationError("; ".join(place_conflicts))
+
         duplicate_clauses = self._find_duplicate_clauses(prompt)
         if duplicate_clauses:
             raise PromptValidationError("Duplicate clauses detected in prompt")
@@ -3752,7 +4436,7 @@ class PromptComposer:
                 if token in block.lower() and token not in framing_block:
                     raise PromptValidationError("Conflicting framing detected outside framing block")
 
-        required_objects = self._behavior_object_terms(context)
+        required_objects = self._behavior_object_terms(context, scene)
         for object_term in required_objects:
             if object_term and object_term.lower() not in lowered:
                 raise PromptValidationError(f"Required object missing from prompt: {object_term}")

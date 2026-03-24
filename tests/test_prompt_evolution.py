@@ -359,7 +359,7 @@ def test_manual_outfit_override_is_inserted_without_regeneration():
     assert "soft fitted knit dress" in lowered
     assert "light cardigan" in lowered
     assert "flat slides" in lowered
-    assert "small overnight bag" in lowered
+    assert "overnight bag" not in lowered
     assert "one side sitting a little off from recent movement" in lowered
 
 
@@ -545,6 +545,138 @@ def test_kitchen_coffee_scene_keeps_single_anchor_per_semantic_idea():
     assert prompt.count("coffee cup") <= 1
     assert composer._find_duplicate_clauses(package["final_prompt"]) == []
     assert critical_candidates == []
+
+
+def test_layover_kitchen_coffee_scene_resolves_to_hotel_kitchen_context():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["day_type"] = "layover_day"
+    context["behavioral_context"] = BehaviorState(
+        energy_level="low",
+        social_mode="light_public",
+        emotional_arc="transition",
+        habit="coffee_moment",
+        place_anchor="kitchen_corner",
+        objects=["coffee_cup", "bag"],
+        self_presentation="soft",
+    )
+    scene = Scene()
+    scene.scene_moment = "Slow first coffee in the kitchen corner before the day starts"
+    scene.description = "Slow first coffee in the kitchen corner before the day starts"
+    scene.location = "hotel room"
+    scene.visual_focus = "coffee cup, bag"
+    scene.camera_archetype = "seated_table_shot"
+
+    package = composer.compose_package(
+        context,
+        scene,
+        "soft knit top, relaxed straight trousers, comfortable sneakers, small shoulder bag",
+        "photo",
+        ["top_1"],
+    )
+    prompt = package["final_prompt"].lower()
+    environment_block = package["final_prompt"].split("\n\n")[4].lower()
+    scene_block = package["final_prompt"].split("\n\n")[2].lower()
+
+    assert "hotel room" not in environment_block
+    assert "hotel kitchenette" in environment_block or "small hotel breakfast corner" in environment_block
+    assert "soft background people only" not in environment_block
+    assert "subtle cue of not fully unpacked travel items nearby" in scene_block
+    assert "airport terminal" not in prompt
+
+
+def test_private_home_kitchen_scene_drops_public_presence_and_unjustified_bag():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["behavioral_context"] = BehaviorState(
+        energy_level="low",
+        social_mode="light_public",
+        emotional_arc="routine",
+        habit="coffee_moment",
+        place_anchor="kitchen_corner",
+        objects=["coffee_cup", "bag"],
+        self_presentation="soft",
+    )
+    scene = Scene()
+    scene.scene_moment = "Slow first coffee in the kitchen corner before the day starts"
+    scene.description = "Slow first coffee in the kitchen corner before the day starts"
+    scene.location = "home kitchen"
+    scene.visual_focus = "coffee cup, bag"
+    scene.camera_archetype = "seated_table_shot"
+
+    package = composer.compose_package(
+        context,
+        scene,
+        "soft knit top, relaxed straight trousers, comfortable sneakers, small shoulder bag",
+        "photo",
+        ["top_1"],
+    )
+    prompt = package["final_prompt"].lower()
+    outfit_block = package["final_prompt"].split("\n\n")[3].lower()
+    environment_block = package["final_prompt"].split("\n\n")[4].lower()
+
+    assert "soft background people only" not in environment_block
+    assert "public life present" not in environment_block
+    assert "airport terminal" not in environment_block
+    assert "hotel room" not in environment_block
+    assert "bag" not in outfit_block
+    assert "bag resting" not in prompt
+    assert "subtle cue of not fully unpacked travel items nearby" not in prompt
+
+
+def test_overnight_bag_is_only_reintroduced_as_travel_scene_cue():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["day_type"] = "layover_day"
+    context["outfit_override"] = "soft fitted knit dress, light cardigan, flat slides, small overnight bag"
+    context["behavioral_context"] = BehaviorState(
+        energy_level="low",
+        social_mode="alone",
+        emotional_arc="transition",
+        habit="coffee_moment",
+        place_anchor="kitchen_corner",
+        objects=["coffee_cup", "bag"],
+        self_presentation="soft",
+    )
+    scene = Scene()
+    scene.scene_moment = "Slow first coffee in the kitchen corner before the day starts"
+    scene.description = "Slow first coffee in the kitchen corner before the day starts"
+    scene.location = "hotel room"
+    scene.visual_focus = "coffee cup, bag"
+    scene.camera_archetype = "seated_table_shot"
+
+    package = composer.compose_package(context, scene, "ignored summary", "photo", ["dress_1"])
+    prompt = package["final_prompt"].lower()
+    outfit_block = package["final_prompt"].split("\n\n")[3].lower()
+
+    assert "overnight bag" not in outfit_block
+    assert "subtle cue of not fully unpacked travel items nearby" in prompt
+
+
+def test_airport_gate_scene_keeps_transit_environment_without_home_descriptors():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["behavioral_context"] = BehaviorState(
+        energy_level="medium",
+        social_mode="light_public",
+        emotional_arc="transition",
+        habit="packing",
+        place_anchor="terminal_gate",
+        objects=["carry_on", "bag"],
+        self_presentation="transitional",
+    )
+    scene = Scene()
+    scene.location = "home kitchen"
+    scene.activity = "waiting"
+    scene.scene_moment = "Coffee at the gate before boarding"
+    scene.description = "Quiet pause before boarding"
+
+    package = composer.compose_package(context, scene, "light knit top, practical straight trousers, comfortable sneakers", "photo", ["top_1"])
+    environment_block = package["final_prompt"].split("\n\n")[4].lower()
+
+    assert "airport gate" in environment_block or "airport terminal" in environment_block
+    assert "home kitchen" not in environment_block
+    assert "living room" not in environment_block
 
 
 def test_scene_and_outfit_blocks_shift_from_description_to_in_the_moment_presence():

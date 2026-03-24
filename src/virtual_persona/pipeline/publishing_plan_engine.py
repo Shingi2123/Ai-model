@@ -132,7 +132,9 @@ class PublishingPlanEngine:
             prompt_meta["outfit_source"] = str(prompt_meta.get("outfit_source") or "publishing_plan.outfit_sentence")
             prompt_meta["scene_source"] = str(prompt_meta.get("scene_source") or scene.scene_source or scene.source or "scene_library")
             prompt_meta["behavior_source"] = str(prompt_meta.get("behavior_source") or getattr(behavior, "source", "none") or "none")
-            prompt_meta["objects_inserted"] = list(prompt_meta.get("objects_inserted") or prompt_validator._behavior_object_terms(validation_context))
+            prompt_meta["objects_inserted"] = list(
+                prompt_meta.get("objects_inserted") or prompt_validator._behavior_object_terms(validation_context, scene)
+            )
             try:
                 if not final_prompt:
                     raise PromptValidationError("Final prompt is empty")
