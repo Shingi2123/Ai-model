@@ -138,6 +138,8 @@ def test_identity_block_is_stable_for_same_character_input():
     identity_b = package_b["final_prompt"].split("\n\n")[0]
 
     assert identity_a == identity_b
+    assert ";" not in identity_a
+    assert "with " in identity_a.lower()
 
 
 def test_travel_walk_prompt_uses_fixed_framing_and_no_alternatives():
@@ -189,7 +191,8 @@ def test_outfit_block_contains_only_clothing_items():
     assert "mood" not in lowered
     assert "white sneakers" in lowered or "comfortable sneakers" in lowered
     assert "denim" in lowered or "trousers" in lowered or "jeans" in lowered
-    assert "bag" in lowered or "carry on" in lowered or "accessor" not in lowered
+    assert "coffee cup" not in lowered
+    assert "carry on" not in lowered
 
 
 def test_environment_block_contains_realism_depth_and_light_only():
@@ -215,9 +218,10 @@ def test_mood_block_uses_controlled_emotional_vocabulary_only():
     package = _compose(scene)
     mood_block = package["final_prompt"].split("\n\n")[5]
 
-    assert mood_block.startswith("Mood: composed focus")
+    assert mood_block.startswith("Mood: ")
     assert "already happening by the time the camera catches it" in mood_block
-    assert "in-the-moment presence" not in mood_block
+    assert "composed focus" not in mood_block.lower()
+    assert "in-the-moment presence" not in mood_block.lower()
 
 
 def test_positive_prompt_contains_only_english_ascii_letters_from_scene_payload():
@@ -407,10 +411,12 @@ def test_airport_outfit_fallback_stays_travel_ready_and_contextual():
 
     package = composer.compose_package(context, scene, ".", "photo", ["top_1"])
     outfit_block = package["final_prompt"].split("\n\n")[3].lower()
+    scene_block = package["final_prompt"].split("\n\n")[2].lower()
 
-    assert "carry on" in outfit_block
+    assert "carry on" not in outfit_block
     assert "jacket" in outfit_block or "layer" in outfit_block or "coat" in outfit_block
     assert "sneakers" in outfit_block or "boots" in outfit_block
+    assert "carry on" in scene_block
 
 
 def test_validate_prompt_rejects_cyrillic():
@@ -469,9 +475,12 @@ def test_behavior_influences_prompt_with_movement_mood_and_objects():
 
 def test_scene_and_outfit_blocks_shift_from_description_to_in_the_moment_presence():
     package = _compose()
+    identity_block = package["final_prompt"].split("\n\n")[0].lower()
     scene_block = package["final_prompt"].split("\n\n")[2].lower()
     outfit_block = package["final_prompt"].split("\n\n")[3].lower()
 
+    assert ";" not in identity_block
+    assert "22-year-old woman with" in identity_block
     assert "before heading out" not in scene_block
     assert "door still a later problem" in scene_block or "camera cut in a second late" in scene_block or "nothing in it trying too hard" in scene_block
     assert ";" not in outfit_block
@@ -538,7 +547,7 @@ def test_imperfect_reality_layer_softens_explicit_detail_and_adds_micro_irregula
     assert "caught mid-thought with a little room left unsaid" in mood_body
 
 
-def test_imperfect_reality_layer_keeps_required_bag_visible_in_outfit_when_behavior_needs_it():
+def test_scene_props_are_removed_from_outfit_but_kept_in_scene():
     composer = PromptComposer(DummyState())
     context = dict(BASE_CONTEXT)
     context["behavioral_context"] = BehaviorState(
@@ -564,9 +573,49 @@ def test_imperfect_reality_layer_keeps_required_bag_visible_in_outfit_when_behav
         ["top_1"],
     )
     outfit_block = package["final_prompt"].split("\n\n")[3].lower()
+    scene_block = package["final_prompt"].split("\n\n")[2].lower()
 
-    assert "carry on" in outfit_block
     assert "bag" in outfit_block
+    assert "carry on" not in outfit_block
+    assert "carry on" in scene_block
+
+
+def test_final_prompt_rewrite_pass_removes_known_antipatterns():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["behavioral_context"] = BehaviorState(
+        energy_level="low",
+        social_mode="light_public",
+        emotional_arc="transition",
+        habit="coffee_moment",
+        place_anchor="kitchen_corner",
+        objects=["coffee_cup", "bag"],
+        self_presentation="composed",
+    )
+    scene = Scene()
+    scene.location = "home kitchen"
+    scene.scene_moment = "Slow first coffee in the kitchen corner before the day starts"
+    scene.description = "Slow first coffee in the kitchen corner before the day starts"
+    scene.activity = "waiting"
+
+    package = composer.compose_package(
+        context,
+        scene,
+        "soft knit top, straight trousers, comfortable sneakers, coffee cup, small everyday bag; grounded routine mood, natural drape",
+        "photo",
+        ["top_1"],
+    )
+    prompt = package["final_prompt"].lower()
+    diagnostics = package["rewrite_diagnostics"]
+    outfit_block = package["final_prompt"].split("\n\n")[3].lower()
+
+    assert diagnostics["passed"] is True
+    assert ";" not in package["final_prompt"].split("\n\n")[0]
+    assert "before the day starts" not in prompt
+    assert "daily pause" not in prompt
+    assert "grounded routine mood" not in prompt
+    assert "coffee cup" not in outfit_block
+    assert "coffee cup" in prompt
 
 
 def test_override_hint_pushes_presence_and_camera_distance():

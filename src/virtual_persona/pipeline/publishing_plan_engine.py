@@ -107,11 +107,19 @@ class PublishingPlanEngine:
                 outfit_sentence=canonical_outfit_sentence,
                 step="publishing_plan_generate",
             )
-            final_prompt = str(sanitized.get("prompt") or final_prompt).strip()
+            rewritten = prompt_validator.rewrite_canonical_prompt(
+                str(sanitized.get("prompt") or final_prompt).strip(),
+                scene,
+                validation_context,
+                shot_archetype=str(prompt_meta.get("shot_archetype") or ""),
+            )
+            final_prompt = str(rewritten.get("prompt") or sanitized.get("prompt") or final_prompt).strip()
             prompt_meta["final_prompt"] = final_prompt
             prompt_meta["duplicate_clauses"] = list(sanitized.get("duplicate_clauses", []))
             prompt_meta["sanitized_prompt_applied"] = bool(sanitized.get("sanitized_prompt_applied"))
-            prompt_meta["prompt_blocks"] = dict(sanitized.get("prompt_blocks", {}))
+            prompt_meta["rewrite_pass_applied"] = bool(rewritten.get("rewrite_pass_applied"))
+            prompt_meta["rewrite_diagnostics"] = dict(rewritten.get("rewrite_diagnostics") or {})
+            prompt_meta["prompt_blocks"] = dict(rewritten.get("prompt_blocks") or sanitized.get("prompt_blocks", {}))
             prompt_meta["final_prompt_length"] = len(final_prompt)
             prompt_meta["outfit_source"] = str(prompt_meta.get("outfit_source") or "publishing_plan.outfit_sentence")
             prompt_meta["scene_source"] = str(prompt_meta.get("scene_source") or scene.scene_source or scene.source or "scene_library")

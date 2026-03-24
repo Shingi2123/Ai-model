@@ -47,7 +47,8 @@ def test_generator_builds_contextual_realistic_airport_outfit():
         context=_context(day_type="travel_day", behavior_context=None, behavioral_context=behavior),
     )
 
-    assert "carry on" in outfit
+    assert "carry on" not in outfit
+    assert "bag" in outfit
     assert "sneakers" in outfit or "boots" in outfit
     assert "jacket" in outfit or "coat" in outfit or "layer" in outfit
     assert "." not in outfit

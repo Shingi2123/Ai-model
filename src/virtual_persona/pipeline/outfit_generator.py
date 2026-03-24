@@ -451,9 +451,6 @@ class OutfitGenerator:
             raise OutfitGenerationError("Warm-weather outfit is too heavy")
         if descriptor["is_cold"] and not any(token in lowered for token in ["jacket", "cardigan", "coat", "boots", "knit", "layer"]):
             raise OutfitGenerationError("Cold-weather outfit is missing layering")
-        if "carry on" in descriptor["objects"] and "carry on" not in lowered and descriptor["place_type"] == "airport":
-            raise OutfitGenerationError("Outfit is not aligned with airport objects")
-
         bundle.sentence = sentence
         bundle.outfit_sentence = sentence
         return bundle
@@ -561,15 +558,15 @@ class OutfitGenerator:
         social_presence = descriptor["social_presence"]
         enhance = descriptor["enhance_attractiveness"]
         if "carry on" in objects or place_type == "airport":
-            return "small crossbody bag and compact carry on"
+            return "small crossbody bag"
         if place_type == "hotel":
             if enhance >= 0.8:
                 return "small overnight bag set aside naturally"
             return "small overnight bag nearby"
         if "coffee cup" in objects or place_type == "cafe":
             if social_presence == "light_public":
-                return "small everyday bag and coffee cup"
-            return "small shoulder bag and coffee cup"
+                return "small everyday bag"
+            return "small shoulder bag"
         if enhance >= 0.6:
             return "small everyday bag and one understated piece of jewelry"
         return "small everyday bag"

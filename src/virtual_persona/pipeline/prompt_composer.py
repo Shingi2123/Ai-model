@@ -116,6 +116,40 @@ class PromptComposer:
         "to",
         "with",
     )
+    REWRITE_FORBIDDEN_SCENE_PHRASES: tuple[str, ...] = (
+        "before the day starts",
+        "during the morning routine",
+        "daily pause",
+        "natural pause moment",
+        "before heading out",
+        "before boarding",
+        "before breakfast",
+    )
+    REWRITE_FORBIDDEN_MOOD_PHRASES: tuple[str, ...] = (
+        "grounded routine mood",
+        "transitional mood",
+        "calm arrival mood",
+        "focused before-leaving mood",
+        "composed self-presentation",
+        "soft self-presentation",
+        "focused self-presentation",
+        "quiet confidence",
+        "composed focus",
+        "calm ease",
+    )
+    SCENE_PROP_TOKENS: tuple[str, ...] = (
+        "coffee cup",
+        "cup",
+        "mug",
+        "carry on",
+        "carry-on",
+        "luggage",
+        "suitcase",
+        "roller bag",
+        "boarding pass",
+        "passport",
+        "laptop",
+    )
 
     CAMERA_ARCHETYPES: Dict[str, Dict[str, str]] = None  # type: ignore[assignment]
     GENERATION_MODE_REGISTRY: Dict[str, Dict[str, Any]] = None  # type: ignore[assignment]
@@ -231,6 +265,17 @@ class PromptComposer:
         scene_action = self._scene_action(scene, scene_desc, scene_loc)
         outfit_bundle, outfit_source = self._resolve_outfit_bundle(context, scene, outfit_summary)
         normalized_outfit = self._normalize_outfit_sentence_for_prompt(outfit_bundle.outfit_sentence or outfit_bundle.sentence, scene, context)
+        outfit_scene_props = self._extract_scene_props_from_outfit_text(
+            " ".join(
+                part
+                for part in [
+                    str(outfit_bundle.outfit_sentence or ""),
+                    str(outfit_bundle.sentence or ""),
+                    str(outfit_summary or ""),
+                ]
+                if str(part or "").strip()
+            )
+        )
         presence_layer = self._presence_layer(context, scene, outfit_bundle, shot_archetype, platform_behavior)
         perceived_outfit = self._perceived_outfit_sentence(outfit_bundle, normalized_outfit, scene, context)
         imperfect_layer = self._imperfect_reality_layer(
@@ -331,6 +376,7 @@ class PromptComposer:
             device_identity=ordered_blocks["device_identity"],
             social_behavior=ordered_blocks["social_behavior"],
             scene_tags=scene_alignment.get("scene_tags", []),
+            outfit_scene_props=outfit_scene_props,
             presence_layer=presence_layer,
             imperfect_layer=imperfect_layer,
         )
@@ -352,6 +398,8 @@ class PromptComposer:
         ordered_blocks["behavior_source"] = str(getattr(behavior, "source", "none") or "none")
         ordered_blocks["duplicate_clauses"] = list(prompt_payload.get("duplicate_clauses", []))
         ordered_blocks["sanitized_prompt_applied"] = bool(prompt_payload.get("sanitized_prompt_applied"))
+        ordered_blocks["rewrite_pass_applied"] = bool(prompt_payload.get("rewrite_pass_applied"))
+        ordered_blocks["rewrite_diagnostics"] = dict(prompt_payload.get("rewrite_diagnostics") or {})
         ordered_blocks["final_prompt_length"] = len(final_prompt)
         ordered_blocks["objects_inserted"] = list(self._behavior_object_terms(context))
         ordered_blocks["prompt_block_names"] = ["Identity", "Framing", "Scene", "Outfit", "Environment", "Mood"]
@@ -670,13 +718,7 @@ class PromptComposer:
         return {}
 
     def _outfit_struct_from_sentence(self, outfit_sentence: str) -> Dict[str, str]:
-        clothing_text, _, detail_text = outfit_sentence.partition(";")
-        pieces = []
-        for chunk in re.split(r"\s*(?:,| and )\s*", clothing_text):
-            cleaned = self._clean_fragment(chunk)
-            if cleaned:
-                pieces.append(cleaned)
-
+        pieces, detail_parts, _ = self._split_outfit_scene_props(outfit_sentence)
         payload = {"top": "", "bottom": "", "outerwear": "", "shoes": "", "accessories": "", "fit": "", "fabric": "", "condition": "", "styling": ""}
         for piece in pieces:
             category = self._outfit_category(piece)
@@ -688,7 +730,6 @@ class PromptComposer:
                 continue
             payload[category] = payload.get(category, "") or piece
 
-        detail_parts = [self._clean_fragment(chunk) for chunk in detail_text.split(",") if self._clean_fragment(chunk)]
         for detail in detail_parts:
             lowered = detail.lower()
             if not payload["fit"] and any(token in lowered for token in ["fit", "fitted", "relaxed", "silhouette", "drape"]):
@@ -977,6 +1018,7 @@ class PromptComposer:
         device_identity: str,
         social_behavior: str,
         scene_tags: List[str],
+        outfit_scene_props: List[str],
         presence_layer: Dict[str, Any],
         imperfect_layer: Dict[str, Any],
     ) -> Dict[str, Any]:
@@ -985,7 +1027,7 @@ class PromptComposer:
         block_map = {
             "Identity": self._identity_block(identity_anchor=identity_anchor, body_anchor=body_anchor),
             "Framing": self._framing_block(framing_mode, shot_archetype, scene, presence_layer.get("camera_distance", "")),
-            "Scene": self._scene_block(context, scene, scene_desc, scene_loc, scene_tags, presence_layer),
+            "Scene": self._scene_block(context, scene, scene_desc, scene_loc, scene_tags, presence_layer, outfit_scene_props),
             "Outfit": self._outfit_block(outfit_sentence),
             "Environment": self._environment_block(context, scene, scene_loc, scene_tags, continuity_block),
             "Mood": self._mood_block(context, scene, continuity_block, presence_layer),
@@ -1013,27 +1055,17 @@ class PromptComposer:
             outfit_sentence=outfit_sentence,
             step="build_final_prompt",
         )
-        final_blocks = dict(sanitized.get("prompt_blocks") or {})
-        if final_blocks:
-            final_blocks = self._apply_in_the_moment_phrasing_layer(
-                final_blocks,
-                scene=scene,
-                context=context,
-                shot_archetype=shot_archetype,
-            )
-            sanitized["prompt_blocks"] = final_blocks
-            prompt = "\n\n".join(
-                [
-                    final_blocks["Identity"],
-                    final_blocks["Framing"],
-                    final_blocks["Scene"],
-                    final_blocks["Outfit"],
-                    final_blocks["Environment"],
-                    final_blocks["Mood"],
-                ]
-            )
-        else:
-            prompt = str(sanitized["prompt"])
+        rewritten = self.rewrite_canonical_prompt(
+            str(sanitized.get("prompt") or prompt),
+            scene,
+            context,
+            shot_archetype=shot_archetype,
+        )
+        final_blocks = dict(rewritten.get("prompt_blocks") or sanitized.get("prompt_blocks") or {})
+        prompt = str(rewritten.get("prompt") or sanitized.get("prompt") or prompt)
+        sanitized["prompt_blocks"] = final_blocks
+        sanitized["rewrite_pass_applied"] = bool(rewritten.get("rewrite_pass_applied"))
+        sanitized["rewrite_diagnostics"] = dict(rewritten.get("rewrite_diagnostics") or {})
         self._validate_canonical_prompt(prompt, scene, context)
         sanitized["prompt"] = prompt
         return sanitized
@@ -1240,6 +1272,40 @@ class PromptComposer:
         softened["Mood"] = f"Mood: {mood_body}."
         return softened
 
+    def rewrite_canonical_prompt(
+        self,
+        prompt: str,
+        scene: Any,
+        context: Dict[str, Any],
+        *,
+        shot_archetype: str = "",
+    ) -> Dict[str, Any]:
+        raw_blocks = [block.strip() for block in str(prompt or "").split("\n\n") if block.strip()]
+        if len(raw_blocks) != 6:
+            return {
+                "prompt": str(prompt or "").strip(),
+                "prompt_blocks": {},
+                "rewrite_pass_applied": False,
+                "rewrite_diagnostics": {},
+            }
+
+        block_names = ["Identity", "Framing", "Scene", "Outfit", "Environment", "Mood"]
+        block_map = {name: raw_blocks[idx] for idx, name in enumerate(block_names)}
+        resolved_shot = shot_archetype or self._resolve_shot_archetype(scene, context, context.get("recent_moment_memory") or [])
+        rewritten_blocks = self._apply_in_the_moment_phrasing_layer(
+            block_map,
+            scene=scene,
+            context=context,
+            shot_archetype=resolved_shot,
+        )
+        rewritten_prompt = "\n\n".join(rewritten_blocks[name] for name in block_names)
+        return {
+            "prompt": rewritten_prompt,
+            "prompt_blocks": rewritten_blocks,
+            "rewrite_pass_applied": True,
+            "rewrite_diagnostics": self._rewrite_pass_diagnostics(rewritten_blocks),
+        }
+
     def _apply_in_the_moment_phrasing_layer(
         self,
         block_map: Dict[str, str],
@@ -1250,11 +1316,13 @@ class PromptComposer:
     ) -> Dict[str, str]:
         transformed = dict(block_map)
 
+        identity_body = self._split_block_label(transformed["Identity"])[1]
         scene_body = self._split_block_label(transformed["Scene"])[1]
         outfit_body = self._split_block_label(transformed["Outfit"])[1]
         environment_body = self._split_block_label(transformed["Environment"])[1]
         mood_body = self._split_block_label(transformed["Mood"])[1]
 
+        transformed["Identity"] = f"Identity: {self._in_the_moment_identity_body(identity_body)}."
         transformed["Scene"] = f"Scene: {self._in_the_moment_scene_body(scene_body, scene)}."
         transformed["Environment"] = f"Environment: {self._in_the_moment_environment_body(environment_body)}."
         transformed["Mood"] = f"Mood: {self._in_the_moment_mood_body(mood_body)}."
@@ -1269,7 +1337,84 @@ class PromptComposer:
             transformed["Outfit"] = f"Outfit: {self.validate_outfit_sentence(in_the_moment_outfit)}."
         except PromptValidationError:
             transformed["Outfit"] = f"Outfit: {self._normalize_outfit_sentence_for_prompt(outfit_body, scene, context)}."
+
+        required_scene_objects = self._dedupe_phrases(
+            self._behavior_object_terms(context) + self._extract_scene_props_from_outfit_text(scene_body)
+        )
+        scene_rewritten_body = self._split_block_label(transformed["Scene"])[1]
+        missing_scene_phrases = [
+            self._object_scene_phrase(object_term, scene)
+            for object_term in required_scene_objects
+            if object_term and object_term.lower() not in scene_rewritten_body.lower()
+        ]
+        if missing_scene_phrases:
+            scene_rewritten_body = ", ".join(self._dedupe_phrases([scene_rewritten_body] + missing_scene_phrases))
+            transformed["Scene"] = f"Scene: {scene_rewritten_body}."
+
+        diagnostics = self._rewrite_pass_diagnostics(transformed)
+        if diagnostics.get("scene_banned_phrases"):
+            transformed["Scene"] = f"Scene: {self._scene_presence_lead(scene, scene_body)}."
+        if diagnostics.get("mood_banned_phrases") or diagnostics.get("mood_label_like"):
+            transformed["Mood"] = f"Mood: {self._fallback_mood_presence_phrase(scene, context)}."
+        if diagnostics.get("outfit_scene_props"):
+            cleaned_outfit = self._normalize_outfit_sentence_for_prompt(outfit_body, scene, context)
+            transformed["Outfit"] = f"Outfit: {self._in_the_moment_outfit_body(cleaned_outfit, scene=scene, context=context, shot_archetype=shot_archetype)}."
+        if diagnostics.get("identity_semicolons"):
+            transformed["Identity"] = f"Identity: {self._in_the_moment_identity_body(identity_body)}."
         return transformed
+
+    def _rewrite_pass_diagnostics(self, block_map: Dict[str, str]) -> Dict[str, Any]:
+        identity_body = self._split_block_label(block_map.get("Identity", ""))[1]
+        scene_body = self._split_block_label(block_map.get("Scene", ""))[1].lower()
+        outfit_body = self._split_block_label(block_map.get("Outfit", ""))[1].lower()
+        environment_body = self._split_block_label(block_map.get("Environment", ""))[1].lower()
+        mood_body = self._split_block_label(block_map.get("Mood", ""))[1].lower()
+        prompt_text = "\n\n".join(block_map.get(name, "") for name in ["Identity", "Framing", "Scene", "Outfit", "Environment", "Mood"])
+        scene_banned = [phrase for phrase in self.REWRITE_FORBIDDEN_SCENE_PHRASES if phrase in scene_body]
+        mood_banned = [phrase for phrase in self.REWRITE_FORBIDDEN_MOOD_PHRASES if phrase in mood_body]
+        outfit_scene_props = [prop for prop in self._extract_scene_props_from_outfit_text(outfit_body) if prop]
+        return {
+            "identity_semicolons": identity_body.count(";"),
+            "scene_banned_phrases": scene_banned,
+            "mood_banned_phrases": mood_banned,
+            "mood_label_like": " self-presentation" in mood_body or mood_body.endswith(" mood"),
+            "outfit_scene_props": outfit_scene_props,
+            "environment_semicolons": environment_body.count(";"),
+            "total_semicolons": prompt_text.count(";"),
+            "passed": (
+                not scene_banned
+                and not mood_banned
+                and not outfit_scene_props
+                and identity_body.count(";") == 0
+                and prompt_text.count(";") <= 2
+            ),
+        }
+
+    def _in_the_moment_identity_body(self, identity_body: str) -> str:
+        clauses = [self._clean_fragment(chunk) for chunk in re.split(r"\s*;\s*", identity_body) if self._clean_fragment(chunk)]
+        if not clauses or all(clause.lower() in {"stable", "same", "recognizable"} or len(clause.split()) <= 2 for clause in clauses):
+            return "a 22-year-old woman with a recognizable face, relaxed shoulders, and an easy upright posture"
+        age = next((clause for clause in clauses if re.search(r"\b\d{2}(?:-year-old)?\b", clause)), "22-year-old")
+        if age.isdigit():
+            age = f"{age}-year-old"
+        face_bits = [
+            clause
+            for clause in clauses
+            if clause != age and clause.lower() != "woman" and not any(token in clause.lower() for token in ["hair", "makeup", "build", "height", "shoulders", "posture"])
+        ]
+        body_bits = [
+            clause
+            for clause in clauses
+            if any(token in clause.lower() for token in ["hair", "makeup", "build", "height", "shoulders", "posture"])
+        ]
+        primary_face = self._human_join(face_bits[:6])
+        secondary = self._human_join(body_bits[:4])
+        lead = f"a {age} woman"
+        if primary_face:
+            lead = f"{lead} with {primary_face}"
+        if secondary:
+            lead = f"{lead}, {secondary}"
+        return self._clean_fragment(lead)
 
     def _detect_perfection_patterns(self, block_map: Dict[str, str]) -> Dict[str, bool]:
         scene_body = self._split_block_label(block_map.get("Scene", ""))[1]
@@ -1296,12 +1441,15 @@ class PromptComposer:
 
     def _in_the_moment_scene_body(self, scene_body: str, scene: Any) -> str:
         clauses = [clause["text"] for clause in self._extract_semantic_clauses("Scene", scene_body)]
+        lead = self._scene_presence_lead(scene, scene_body)
         rewritten_raw: List[str] = []
+        if lead:
+            rewritten_raw.append(lead)
         for clause in clauses:
             rewritten_clause = self._rewrite_scene_clause_for_presence(clause, scene)
             if rewritten_clause:
                 rewritten_raw.append(rewritten_clause)
-        rewritten = self._dedupe_phrases(rewritten_raw)
+        rewritten = self._dedupe_semantic_phrases(rewritten_raw)
         joined = " ".join(rewritten).lower()
         if len(rewritten) >= 4:
             tail = self._stable_choice(
@@ -1319,6 +1467,30 @@ class PromptComposer:
                 rewritten.append(tail)
         return ", ".join(rewritten[:6]) if rewritten else self._minimal_scene_body(scene)
 
+    def _scene_presence_lead(self, scene: Any, scene_body: str) -> str:
+        source = self._clean_fragment(
+            str(getattr(scene, "scene_moment", "") or getattr(scene, "description", "") or scene_body)
+        )
+        cleaned = self._grounded_phrase(source)
+        replacements = [
+            (
+                r"\bslow first coffee in the kitchen corner before the day starts\b",
+                "first coffee in the kitchen corner, the light still low, nothing rushed yet",
+            ),
+            (r"\bbefore the day starts\b", "the light still low, nothing rushed yet"),
+            (r"\bduring the morning routine\b", "the routine already in motion"),
+            (r"\bdaily pause\b", "a pause already underway"),
+            (r"\bnatural pause moment\b", "a pause already underway"),
+            (r"\bbefore heading out\b", "the door still a later problem"),
+            (r"\bbefore boarding\b", "boarding still ahead"),
+            (r"\bbefore breakfast\b", "before anything feels fully started"),
+        ]
+        for pattern, replacement in replacements:
+            cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*,\s*at [a-z ]+$", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,")
+        return self._decapitalize_fragment(cleaned)
+
     def _rewrite_scene_clause_for_presence(self, clause: str, scene: Any) -> str:
         cleaned = self._grounded_phrase(clause)
         if not cleaned:
@@ -1329,8 +1501,8 @@ class PromptComposer:
             return ""
 
         replacements = [
-            (r"\bbefore the day starts\b", "with the day not fully started yet"),
-            (r"\bduring the morning routine\b", "with the morning still settling"),
+            (r"\bbefore the day starts\b", "the light still low, nothing rushed yet"),
+            (r"\bduring the morning routine\b", "the routine already in motion"),
             (r"\bin a calm moment\b", "with the quiet still hanging there"),
             (r"\bbefore heading out\b", "with the door still a later problem"),
             (r"\bbefore boarding\b", "with boarding still ahead"),
@@ -1355,6 +1527,7 @@ class PromptComposer:
 
         if cleaned.lower().startswith("with the quiet still hanging there"):
             cleaned = cleaned.replace("with the quiet still hanging there", "quiet still hanging there", 1)
+        cleaned = re.sub(r"\b(daily pause|natural pause moment)\b", "a pause already underway", cleaned, flags=re.IGNORECASE)
         return self._decapitalize_fragment(cleaned)
 
     def _in_the_moment_environment_body(self, environment_body: str) -> str:
@@ -1382,7 +1555,7 @@ class PromptComposer:
             if rewritten_clause:
                 rewritten_raw.append(rewritten_clause)
         rewritten = self._dedupe_phrases(rewritten_raw)
-        return ", ".join(rewritten[:4]) if rewritten else "quiet confidence"
+        return ", ".join(rewritten[:3]) if rewritten else "already happening by the time the camera catches it"
 
     def _rewrite_mood_clause_for_presence(self, clause: str) -> str:
         cleaned = self._grounded_phrase(clause)
@@ -1396,6 +1569,10 @@ class PromptComposer:
             "in-the-moment presence": "already happening by the time the camera catches it",
             "unposed asymmetry kept in the frame": "small imbalance left in the frame",
             "soft observational restraint": "more observant than expressive",
+            "quiet confidence": "held together without turning it into a pose",
+            "composed focus": "focused without tightening up for the frame",
+            "calm ease": "calm in a way that reads lived-in",
+            "quiet curiosity": "curious without playing it outward",
         }
         if lowered in exact:
             return exact[lowered]
@@ -1416,7 +1593,18 @@ class PromptComposer:
             return "quiet confidence without the posed part"
         if "natural body language with no posed look" in lowered:
             return "natural body language with nothing performed for the camera"
+        if lowered.endswith(" mood"):
+            return ""
         return cleaned
+
+    def _fallback_mood_presence_phrase(self, scene: Any, context: Dict[str, Any]) -> str:
+        behavior = context.get("behavioral_context")
+        self_presentation = str(getattr(behavior, "self_presentation", "") or "").lower() if behavior is not None else ""
+        if self_presentation == "transitional":
+            return "like she is between one thing and the next, already happening by the time the camera catches it"
+        if "focused" in str(getattr(scene, "mood", "") or "").lower() or self_presentation == "focused":
+            return "focused without tightening up for the frame, already happening by the time the camera catches it"
+        return "held together without turning it into a pose, already happening by the time the camera catches it"
 
     def _in_the_moment_outfit_body(
         self,
@@ -1426,16 +1614,16 @@ class PromptComposer:
         context: Dict[str, Any],
         shot_archetype: str,
     ) -> str:
-        clothing_text, _, detail_text = self._clean_fragment(outfit_body).partition(";")
-        details = self._dedupe_phrases([chunk for chunk in re.split(r"\s*,\s*", detail_text) if self._clean_fragment(chunk)])
-        clothing: List[str] = []
-        for chunk in [chunk for chunk in re.split(r"\s*(?:,| and )\s*", clothing_text) if self._clean_fragment(chunk)]:
+        clothing, details, _ = self._split_outfit_scene_props(outfit_body)
+        promoted_details: List[str] = []
+        retained_clothing: List[str] = []
+        for chunk in clothing:
             if self._is_outfit_detail_only_clause(chunk):
-                details.append(chunk)
+                promoted_details.append(chunk)
             else:
-                clothing.append(chunk)
-        clothing = self._dedupe_phrases(clothing)
-        details = self._dedupe_phrases(details)
+                retained_clothing.append(chunk)
+        clothing = self._dedupe_phrases(retained_clothing)
+        details = self._dedupe_phrases(details + promoted_details)
 
         if shot_archetype not in {"front_selfie", "mirror_selfie"} and len(clothing) > 4:
             clothing = self._drop_nonessential_outfit_item(clothing, context, scene)
@@ -1455,6 +1643,8 @@ class PromptComposer:
     def _rewrite_outfit_item_for_presence(self, item: str) -> str:
         cleaned = self._grounded_phrase(item)
         lowered = cleaned.lower()
+        if self._is_scene_prop_phrase(cleaned):
+            return ""
         clothing_tokens = (
             "dress",
             "jeans",
@@ -1485,8 +1675,6 @@ class PromptComposer:
             "tank",
             "tee",
             "bag",
-            "carry on",
-            "carry-on",
         )
         if len(lowered.split()) <= 3 and not any(token in lowered for token in clothing_tokens):
             return ""
@@ -1686,7 +1874,6 @@ class PromptComposer:
             protected = (
                 category == "shoes"
                 or ("bag" in lowered and "bag" in required_objects)
-                or (("carry on" in lowered or "carry-on" in lowered) and "carry on" in required_objects)
             )
             if protected:
                 continue
@@ -1770,12 +1957,13 @@ class PromptComposer:
         scene_loc: str,
         scene_tags: List[str],
         presence_layer: Dict[str, Any] | None = None,
+        outfit_scene_props: List[str] | None = None,
     ) -> str:
         lowered = self._scene_text(scene).lower()
         visual_focus = self._strip_scene_noise(str(getattr(scene, "visual_focus", "") or "").strip())
         tag_prefix = self._scene_tag_prefix(scene_tags)
         behavior = context.get("behavioral_context")
-        object_terms = self._behavior_object_terms(context)
+        object_terms = self._dedupe_phrases(self._behavior_object_terms(context) + list(outfit_scene_props or []))
         movement, interaction, expression = self._behavior_scene_cues(context, scene)
         micro_detail = self._scene_micro_detail(scene, behavior, object_terms, visual_focus)
         scene_presence = list((presence_layer or {}).get("scene_cues") or [])
@@ -2186,6 +2374,22 @@ class PromptComposer:
             result.append(cleaned)
         return result
 
+    def _dedupe_semantic_phrases(self, phrases: List[str]) -> List[str]:
+        result: List[str] = []
+        seen_entries: List[Dict[str, Any]] = []
+        for phrase in self._dedupe_phrases(phrases):
+            clause = {
+                "block": "Scene",
+                "text": phrase,
+                "key": self._normalize_phrase_key(phrase),
+                "tokens": self._semantic_tokens(phrase),
+            }
+            if any(self._clauses_overlap(clause, existing) for existing in seen_entries):
+                continue
+            seen_entries.append(clause)
+            result.append(phrase)
+        return result
+
     @staticmethod
     def _human_join(parts: List[str]) -> str:
         cleaned = [PromptComposer._clean_fragment(part) for part in parts if PromptComposer._clean_fragment(part)]
@@ -2411,16 +2615,49 @@ class PromptComposer:
             return self._minimal_scene_body(scene)
         return self._clean_fragment(original_body)
 
+    def _split_outfit_scene_props(self, outfit_text: str) -> tuple[List[str], List[str], List[str]]:
+        cleaned = self._clean_fragment(outfit_text)
+        clothing_text, _, detail_text = cleaned.partition(";")
+        clothing_chunks = [self._clean_fragment(chunk) for chunk in re.split(r"\s*(?:,| and )\s*", clothing_text) if self._clean_fragment(chunk)]
+        detail_chunks = [self._clean_fragment(chunk) for chunk in re.split(r"\s*,\s*", detail_text) if self._clean_fragment(chunk)]
+        clothing: List[str] = []
+        props: List[str] = []
+        for chunk in clothing_chunks:
+            if self._is_scene_prop_phrase(chunk):
+                props.append(self._canonical_scene_prop_phrase(chunk))
+            else:
+                clothing.append(chunk)
+        return self._dedupe_phrases(clothing), self._dedupe_phrases(detail_chunks), self._dedupe_phrases(props)
+
+    def _extract_scene_props_from_outfit_text(self, outfit_text: str) -> List[str]:
+        return self._split_outfit_scene_props(outfit_text)[2]
+
+    def _is_scene_prop_phrase(self, text: str) -> bool:
+        lowered = self._clean_fragment(text).lower()
+        if not lowered:
+            return False
+        if "bag" in lowered and not any(token in lowered for token in ["carry on", "carry-on", "roller bag", "suitcase", "luggage"]):
+            return False
+        return any(token in lowered for token in self.SCENE_PROP_TOKENS)
+
+    def _canonical_scene_prop_phrase(self, text: str) -> str:
+        lowered = self._clean_fragment(text).lower()
+        if any(token in lowered for token in ["carry on", "carry-on", "suitcase", "luggage", "roller bag"]):
+            return "carry on"
+        if any(token in lowered for token in ["coffee cup", "cup", "mug"]):
+            return "coffee cup"
+        if "boarding pass" in lowered:
+            return "boarding pass"
+        if "passport" in lowered:
+            return "passport"
+        if "laptop" in lowered:
+            return "laptop"
+        return self._clean_fragment(text)
+
     def _normalize_outfit_sentence_for_prompt(self, outfit_sentence: str, scene: Any | None = None, context: Dict[str, Any] | None = None) -> str:
         cleaned = self._clean_fragment(outfit_sentence)
         if cleaned and not self._is_invalid_outfit_value(cleaned):
-            clothing_text, _, detail_text = cleaned.partition(";")
-            clothing = self._dedupe_phrases(
-                [chunk for chunk in re.split(r"\s*(?:,| and )\s*", clothing_text) if self._clean_fragment(chunk)]
-            )
-            details = self._dedupe_phrases(
-                [chunk for chunk in re.split(r"\s*,\s*", detail_text) if self._clean_fragment(chunk)]
-            )
+            clothing, details, _ = self._split_outfit_scene_props(cleaned)
             rebuilt = ", ".join(clothing)
             if details:
                 rebuilt = f"{rebuilt}; {', '.join(details)}" if rebuilt else ", ".join(details)
@@ -2465,8 +2702,6 @@ class PromptComposer:
             "tank",
             "tee",
             "bag",
-            "carry on",
-            "carry-on",
         )
         has_clothing = any(token in lowered for token in clothing_tokens)
         has_detail = any(token in lowered for token in PromptComposer.OUTFIT_DETAIL_KEYWORDS)
@@ -2494,11 +2729,11 @@ class PromptComposer:
         if any(token in lowered for token in ["airport", "terminal", "gate", "boarding"]) or place_anchor == "terminal_gate":
             if any(token in lowered for token in ["waiting", "coffee", "seated", "window"]) or str(getattr(scene, "scene_moment_type", "") or "").lower() == "waiting_before_boarding":
                 return (
-                    "soft layered knitwear, relaxed straight trousers, comfortable sneakers, and an everyday bag or carry on nearby; "
+                    "soft layered knitwear, relaxed straight trousers, comfortable sneakers, and an everyday bag; "
                     "travel-ready seated airport fit with natural fabric folds"
                 )
             return (
-                "light knit top, practical straight trousers, comfortable sneakers, and a compact everyday bag or carry on; "
+                "light knit top, practical straight trousers, comfortable sneakers, and a compact everyday bag; "
                 "travel-ready fit with soft layers and natural fabric folds"
             )
         if "hotel" in lowered or place_anchor == "hotel_window":
@@ -2648,7 +2883,7 @@ class PromptComposer:
             units.add("bottom_or_dress")
         if any(struct.get(key) for key in ("shoes",)) or any(token in lowered for token in ["sneakers", "boots", "loafers", "sandals", "slides", "heels", "shoes", "trainers"]):
             units.add("shoes")
-        if any(struct.get(key) for key in ("accessories",)) or any(token in lowered for token in ["bag", "tote", "scarf", "watch", "glasses", "sunglasses", "jewelry", "necklace", "earrings", "belt", "carry on"]):
+        if any(struct.get(key) for key in ("accessories",)) or any(token in lowered for token in ["bag", "tote", "scarf", "watch", "glasses", "sunglasses", "jewelry", "necklace", "earrings", "belt"]):
             units.add("accessory")
         if any(struct.get(key) for key in ("fit", "fabric", "condition", "styling")) or any(token in lowered for token in cls.OUTFIT_DETAIL_KEYWORDS):
             units.add("detail")
@@ -2719,7 +2954,7 @@ class PromptComposer:
             return "shoes"
         if any(token in lowered for token in ["coat", "jacket", "blazer", "cardigan", "hoodie", "trench"]):
             return "outerwear"
-        if any(token in lowered for token in ["bag", "tote", "scarf", "watch", "glasses", "sunglasses", "jewelry", "necklace", "earrings", "cap", "belt", "carry on", "carry-on"]):
+        if any(token in lowered for token in ["bag", "tote", "scarf", "watch", "glasses", "sunglasses", "jewelry", "necklace", "earrings", "cap", "belt"]):
             return "accessory"
         return "top"
 
@@ -2733,7 +2968,11 @@ class PromptComposer:
 
     @staticmethod
     def _natural_object_term(obj: str) -> str:
-        return {"carry_on": "carry on", "coffee_cup": "coffee cup"}.get(str(obj or "").strip().lower(), str(obj or "").replace("_", " ").strip())
+        return {
+            "carry_on": "carry on",
+            "coffee_cup": "coffee cup",
+            "shoulder_bag": "bag",
+        }.get(str(obj or "").strip().lower(), str(obj or "").replace("_", " ").strip())
 
     def _behavior_object_terms(self, context: Dict[str, Any]) -> List[str]:
         behavior = context.get("behavioral_context")
@@ -2831,6 +3070,19 @@ class PromptComposer:
         for phrase in self.BANNED_SYNTHETIC_PATTERNS + self.FORBIDDEN_POSITIVE_PHRASES:
             if phrase in lowered:
                 raise PromptValidationError(f"Forbidden phrase in positive prompt: {phrase}")
+
+        rewrite_diagnostics = self._rewrite_pass_diagnostics(
+            {
+                "Identity": blocks[0],
+                "Framing": blocks[1],
+                "Scene": blocks[2],
+                "Outfit": blocks[3],
+                "Environment": blocks[4],
+                "Mood": blocks[5],
+            }
+        )
+        if not rewrite_diagnostics.get("passed"):
+            raise PromptValidationError("Rewrite pass failed to remove prompt anti-patterns")
 
         duplicate_clauses = self._find_duplicate_clauses(prompt)
         if duplicate_clauses:
