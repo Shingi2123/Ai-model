@@ -408,6 +408,12 @@ class LocalStateStore:
             "artifact_flags": trace_fields.get("artifact_flags", ""),
             "prompt_mode": trace_fields.get("prompt_mode", ""),
             "reference_pack_used": trace_fields.get("reference_pack_used", ""),
+            "outfit_source": trace_fields.get("outfit_source", ""),
+            "scene_source": trace_fields.get("scene_source", ""),
+            "behavior_source": trace_fields.get("behavior_source", ""),
+            "duplicate_clauses": trace_fields.get("duplicate_clauses", ""),
+            "sanitized_prompt_applied": trace_fields.get("sanitized_prompt_applied", ""),
+            "final_prompt_length": trace_fields.get("final_prompt_length", ""),
         }
         logs.append(
             {
@@ -453,6 +459,7 @@ class GoogleSheetsStateStore:
         self.last_error = ""
         self._sheet_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._ws_cache: Dict[str, Any] = {}
+        self._header_cache: Dict[str, List[str]] = {}
         self._headers_ensured: set[str] = set()
         self._worksheet_fetch_count = 0
 
@@ -544,6 +551,8 @@ class GoogleSheetsStateStore:
 
     def _invalidate_sheet_cache(self, title: str) -> None:
         self._sheet_cache.pop(title, None)
+        if hasattr(self, "_header_cache"):
+            self._header_cache.pop(title, None)
 
     def _log_ws_fetch_stats(self) -> None:
         logger.info("Google Sheets worksheet fetch count for this run: %s", self._worksheet_fetch_count)
@@ -567,11 +576,19 @@ class GoogleSheetsStateStore:
         return [normalized_row.get(self._normalize_header(header), "") for header in headers]
 
     def _sheet_headers(self, title: str, fallback_headers: List[str]) -> List[str]:
+        if not hasattr(self, "_header_cache"):
+            self._header_cache = {}
+        cached = self._header_cache.get(title)
+        if cached:
+            return list(cached)
         ws = self._get_ws(title)
         existing = self._with_retry(lambda: ws.row_values(1), operation_name=f"read header {title}") or []
         if not existing:
+            self._header_cache[title] = list(fallback_headers)
             return list(fallback_headers)
-        return [str(header) for header in existing if str(header).strip()]
+        normalized = [str(header) for header in existing if str(header).strip()]
+        self._header_cache[title] = list(normalized)
+        return normalized
 
     def _append_dict_row(self, title: str, headers: List[str], row: Dict[str, Any], *, prefer_sheet_header_order: bool = False) -> None:
         if not self.available():
@@ -609,18 +626,26 @@ class GoogleSheetsStateStore:
             return
         if title in self._headers_ensured:
             return
+        if not hasattr(self, "_header_cache"):
+            self._header_cache = {}
         try:
             ws = self._get_ws(title)
-            existing = self._with_retry(lambda: ws.row_values(1), operation_name=f"read header {title}")
+            existing = self._header_cache.get(title)
+            if existing is None:
+                existing = self._with_retry(lambda: ws.row_values(1), operation_name=f"read header {title}")
             if not existing:
                 self._with_retry(lambda: ws.append_row(required_headers), operation_name=f"write header {title}")
                 self._invalidate_sheet_cache(title)
+                self._header_cache[title] = list(required_headers)
                 self._headers_ensured.add(title)
                 return
             missing = [h for h in required_headers if h not in existing]
             if missing:
                 self._with_retry(lambda: ws.update("1:1", [existing + missing]), operation_name=f"extend header {title}")
                 self._invalidate_sheet_cache(title)
+                self._header_cache[title] = list(existing + missing)
+            else:
+                self._header_cache[title] = list(existing)
             self._headers_ensured.add(title)
         except Exception as exc:
             logger.error("Google Sheets header sync failed for '%s': %s", title, exc)
@@ -1110,7 +1135,30 @@ class GoogleSheetsStateStore:
         if not self.available():
             return
 
-        headers = ["timestamp", "status", "message", "device_profile", "camera_behavior_used", "framing_style_used", "favorite_location_used", "social_behavior_mode", "anti_synthetic_cleaner_applied", "face_similarity", "scene_logic_score", "hand_integrity_flag", "body_consistency_flag", "artifact_flags", "prompt_mode", "reference_pack_used"]
+        headers = [
+            "timestamp",
+            "status",
+            "message",
+            "device_profile",
+            "camera_behavior_used",
+            "framing_style_used",
+            "favorite_location_used",
+            "social_behavior_mode",
+            "anti_synthetic_cleaner_applied",
+            "face_similarity",
+            "scene_logic_score",
+            "hand_integrity_flag",
+            "body_consistency_flag",
+            "artifact_flags",
+            "prompt_mode",
+            "reference_pack_used",
+            "outfit_source",
+            "scene_source",
+            "behavior_source",
+            "duplicate_clauses",
+            "sanitized_prompt_applied",
+            "final_prompt_length",
+        ]
         self._ensure_headers("run_log", headers)
         self._append_dict_row(
             "run_log",
@@ -1132,6 +1180,12 @@ class GoogleSheetsStateStore:
                 "artifact_flags": trace_fields.get("artifact_flags", ""),
                 "prompt_mode": trace_fields.get("prompt_mode", ""),
                 "reference_pack_used": trace_fields.get("reference_pack_used", ""),
+                "outfit_source": trace_fields.get("outfit_source", ""),
+                "scene_source": trace_fields.get("scene_source", ""),
+                "behavior_source": trace_fields.get("behavior_source", ""),
+                "duplicate_clauses": trace_fields.get("duplicate_clauses", ""),
+                "sanitized_prompt_applied": trace_fields.get("sanitized_prompt_applied", ""),
+                "final_prompt_length": trace_fields.get("final_prompt_length", ""),
             },
             prefer_sheet_header_order=True,
         )

@@ -300,6 +300,25 @@ def test_compose_package_uses_canonical_outfit_sentence_from_context_without_reb
     assert package["final_prompt"].split("\n\n")[3] == f"Outfit: {context['outfit_sentence']}."
 
 
+def test_canonical_outfit_sentence_wins_over_legacy_summary_in_final_prompt(monkeypatch):
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["outfit_sentence"] = "soft knit top, relaxed straight trousers, comfortable sneakers, small crossbody bag; slightly relaxed fit with natural drape"
+    legacy_summary = "old glossy trench summary, old glossy trench summary, pointed heels"
+
+    def _fail_generate_bundle(*args, **kwargs):
+        raise AssertionError("legacy summary must not rebuild prompt outfit when canonical outfit_sentence already exists")
+
+    monkeypatch.setattr(composer.outfit_generator, "generate_bundle", _fail_generate_bundle)
+
+    package = composer.compose_package(context, Scene(), legacy_summary, "photo", ["top_1"])
+    prompt = package["final_prompt"].lower()
+
+    assert "old glossy trench summary" not in prompt
+    assert "pointed heels" not in prompt
+    assert context["outfit_sentence"] in package["final_prompt"]
+
+
 @pytest.mark.parametrize("placeholder", ["placeholder", "outfit", "same outfit", "n/a"])
 def test_placeholder_outfit_uses_safe_fallback(placeholder: str):
     package = _compose(outfit_summary=placeholder)
@@ -425,3 +444,4 @@ def test_behavior_influences_prompt_with_movement_mood_and_objects():
     assert "checking the boarding screen occasionally" in prompt
     assert "transitional mood" in prompt
     assert "soft background people only" in prompt
+    assert composer._find_duplicate_clauses(package["final_prompt"]) == []

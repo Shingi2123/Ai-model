@@ -9,6 +9,7 @@ class FakeWS:
         self.updated = None
         self.rows = []
         self.header = []
+        self.header_reads = 0
 
     def clear(self):
         self.cleared = True
@@ -29,6 +30,7 @@ class FakeWS:
 
     def row_values(self, idx):
         if idx == 1:
+            self.header_reads += 1
             return list(self.header)
         return []
 
@@ -151,6 +153,19 @@ def test_google_store_reuses_cached_worksheet_handle():
     assert ws_1 is ws_2
     assert store.sheet.calls == 1
     assert store._worksheet_fetch_count == 1
+
+
+def test_google_store_caches_sheet_headers_between_reads():
+    store = HelperGoogleStore()
+    ws = store._ws_map["publishing_plan"]
+    ws.header = ["publication_id", "prompt_text"]
+
+    first = store._sheet_headers("publishing_plan", ["publication_id"])
+    second = store._sheet_headers("publishing_plan", ["publication_id"])
+
+    assert first == ["publication_id", "prompt_text"]
+    assert second == ["publication_id", "prompt_text"]
+    assert ws.header_reads == 1
 
 
 def test_telegram_state_view_proxies_base_store_methods_needed_for_generation():

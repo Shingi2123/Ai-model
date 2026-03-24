@@ -49,6 +49,27 @@ class ContentGenerator:
             return self.templates[fallback_key]
         return ""
 
+    def _canonical_outfit_sentence(self, context: Dict[str, Any], scene: DayScene | None, legacy_summary: str) -> str:
+        canonical = str(context.get("outfit_sentence") or "").strip()
+        if canonical:
+            return self.prompt_composer._normalize_outfit_sentence_for_prompt(canonical, scene, context)
+
+        struct = context.get("outfit_struct") or {}
+        structured_sentence = str(struct.get("outfit_sentence") or struct.get("sentence") or "").strip() if isinstance(struct, dict) else ""
+        if structured_sentence:
+            return self.prompt_composer._normalize_outfit_sentence_for_prompt(structured_sentence, scene, context)
+
+        cleaned_legacy = str(legacy_summary or "").strip()
+        if cleaned_legacy:
+            return self.prompt_composer._normalize_outfit_sentence_for_prompt(cleaned_legacy, scene, context)
+
+        if scene is not None:
+            return self.prompt_composer._contextual_outfit_fallback_sentence(scene, context)
+        return self.prompt_composer._contextual_outfit_fallback_sentence(
+            DayScene(block="", location=str(context.get("city") or ""), description="daily moment", mood="calm", time_of_day="day"),
+            context,
+        )
+
     def generate(self, context: Dict, scenes: List[DayScene], outfit_summary: str, outfit_item_ids: List[str] | None = None) -> GeneratedContent:
         char = context["character"]
         weather = context["weather"]
@@ -66,7 +87,7 @@ class ContentGenerator:
         weather_text = f"{weather.condition}, {weather.temp_c}C"
         short_story = " → ".join((scene.scene_moment or scene.description) for scene in scenes)
         outfit_item_ids = outfit_item_ids or []
-        canonical_outfit_sentence = str(context.get("outfit_sentence") or outfit_summary or "").strip()
+        canonical_outfit_sentence = self._canonical_outfit_sentence(context, scenes[0] if scenes else None, outfit_summary)
         if canonical_outfit_sentence:
             outfit_summary = canonical_outfit_sentence
 
@@ -91,8 +112,8 @@ class ContentGenerator:
                 "weather": self._safe(weather_text),
                 "weather_description": self._safe(weather_text),
                 "temperature": self._safe(weather.temp_c),
-                "outfit": self._safe(canonical_outfit_sentence or outfit_summary),
-                "outfit_summary": self._safe(canonical_outfit_sentence or outfit_summary),
+                "outfit": self._safe(canonical_outfit_sentence),
+                "outfit_summary": self._safe(canonical_outfit_sentence),
                 "outfit_item_ids": self._safe(",".join(outfit_item_ids)),
                 "activity": self._safe(getattr(scene, "activity", "")),
                 "scene_source": self._safe(getattr(scene, "scene_source", getattr(scene, "source", "library"))),
@@ -106,7 +127,7 @@ class ContentGenerator:
                 "activity_context": self._safe(scene_description),
                 "continuity_hints": self._safe(getattr(scene, "moment_signature", "")),
                 "location_context": self._safe(city),
-                "wardrobe_context": self._safe(canonical_outfit_sentence or outfit_summary),
+                "wardrobe_context": self._safe(canonical_outfit_sentence),
                 "mood_context": self._safe(mood),
                 "time_context": self._safe(time_of_day),
                 "short_story": self._safe(scene_description),
@@ -155,9 +176,9 @@ class ContentGenerator:
             if not story_template:
                 story_template = "{story_line}"
 
-            photo_package = self.prompt_composer.compose_package(context, scene, canonical_outfit_sentence or outfit_summary, 'photo', outfit_item_ids)
-            video_package = self.prompt_composer.compose_package(context, scene, canonical_outfit_sentence or outfit_summary, 'video', outfit_item_ids)
-            story_package = self.prompt_composer.compose_package(context, scene, canonical_outfit_sentence or outfit_summary, 'story', outfit_item_ids)
+            photo_package = self.prompt_composer.compose_package(context, scene, canonical_outfit_sentence, 'photo', outfit_item_ids)
+            video_package = self.prompt_composer.compose_package(context, scene, canonical_outfit_sentence, 'video', outfit_item_ids)
+            story_package = self.prompt_composer.compose_package(context, scene, canonical_outfit_sentence, 'story', outfit_item_ids)
 
             photo_prompt_text = photo_package["final_prompt"]
             video_prompt_text = video_package["final_prompt"]

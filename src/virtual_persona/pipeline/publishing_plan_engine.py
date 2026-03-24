@@ -83,31 +83,79 @@ class PublishingPlanEngine:
             canonical_outfit_sentence = str(
                 prompt_meta.get("outfit_sentence")
                 or package.outfit.prompt_sentence()
-                or package.outfit.summary
                 or ""
             ).strip()
+            canonical_outfit_sentence = prompt_validator._normalize_outfit_sentence_for_prompt(
+                canonical_outfit_sentence,
+                scene,
+                validation_context,
+            )
             prompt_meta["outfit_sentence"] = canonical_outfit_sentence
-            prompt_meta["outfit_summary"] = str(prompt_meta.get("outfit_summary") or package.outfit.summary or canonical_outfit_sentence)
+            prompt_meta["outfit_summary"] = str(prompt_meta.get("outfit_summary") or canonical_outfit_sentence)
             prompt_meta["outfit_struct"] = prompt_meta.get("outfit_struct") or package.outfit.structured_payload()
             prompt_meta["outfit_struct_json"] = str(
                 prompt_meta.get("outfit_struct_json")
                 or json.dumps(prompt_meta["outfit_struct"], ensure_ascii=False)
             )
 
-            final_prompt = PromptComposer.repair_outfit_block(str(prompt_meta.get("final_prompt") or "").strip(), canonical_outfit_sentence) if canonical_outfit_sentence else str(prompt_meta.get("final_prompt") or "").strip()
+            raw_prompt = str(prompt_meta.get("final_prompt") or "").strip()
+            final_prompt = PromptComposer.repair_outfit_block(raw_prompt, canonical_outfit_sentence) if canonical_outfit_sentence else raw_prompt
+            sanitized = prompt_validator.sanitize_canonical_prompt(
+                final_prompt,
+                scene,
+                validation_context,
+                outfit_sentence=canonical_outfit_sentence,
+                step="publishing_plan_generate",
+            )
+            final_prompt = str(sanitized.get("prompt") or final_prompt).strip()
             prompt_meta["final_prompt"] = final_prompt
+            prompt_meta["duplicate_clauses"] = list(sanitized.get("duplicate_clauses", []))
+            prompt_meta["sanitized_prompt_applied"] = bool(sanitized.get("sanitized_prompt_applied"))
+            prompt_meta["prompt_blocks"] = dict(sanitized.get("prompt_blocks", {}))
+            prompt_meta["final_prompt_length"] = len(final_prompt)
+            prompt_meta["outfit_source"] = str(prompt_meta.get("outfit_source") or "publishing_plan.outfit_sentence")
+            prompt_meta["scene_source"] = str(prompt_meta.get("scene_source") or scene.scene_source or scene.source or "scene_library")
+            prompt_meta["behavior_source"] = str(prompt_meta.get("behavior_source") or getattr(behavior, "source", "none") or "none")
+            prompt_meta["objects_inserted"] = list(prompt_meta.get("objects_inserted") or prompt_validator._behavior_object_terms(validation_context))
             try:
                 if not final_prompt:
                     raise PromptValidationError("Final prompt is empty")
                 prompt_validator._validate_canonical_prompt(final_prompt, scene, validation_context)
             except PromptValidationError as exc:
+                duplicate_clauses = ", ".join(prompt_meta.get("duplicate_clauses", []) or []) or "-"
                 logger.error(
-                    "publishing_plan prompt_validation_failed publication_id=%s scene=%s reason=%s",
+                    "publishing_plan prompt_validation_failed publication_id=%s scene=%s reason=%s outfit_source=%s scene_source=%s behavior_source=%s duplicate_clauses=%s sanitized_prompt_applied=%s final_prompt_length=%s prompt_mode=%s objects=%s",
                     f"{package.date.isoformat()}-{idx+1:02d}",
                     scene.scene_moment or scene.description or "unknown_scene",
                     str(exc),
+                    prompt_meta.get("outfit_source", ""),
+                    prompt_meta.get("scene_source", ""),
+                    prompt_meta.get("behavior_source", ""),
+                    duplicate_clauses,
+                    prompt_meta.get("sanitized_prompt_applied", False),
+                    prompt_meta.get("final_prompt_length", 0),
+                    prompt_meta.get("prompt_mode", ""),
+                    ", ".join(prompt_meta.get("objects_inserted", []) or []),
                 )
+                if hasattr(self.state, "save_run_log"):
+                    self.state.save_run_log(
+                        "error",
+                        (
+                            f"prompt_validation_failed publication_id={package.date.isoformat()}-{idx+1:02d} "
+                            f"reason={exc} outfit_source={prompt_meta.get('outfit_source', '')} "
+                            f"scene_source={prompt_meta.get('scene_source', '')} behavior_source={prompt_meta.get('behavior_source', '')} "
+                            f"duplicate_clauses={duplicate_clauses} sanitized_prompt_applied={prompt_meta.get('sanitized_prompt_applied', False)}"
+                        ),
+                        outfit_source=prompt_meta.get("outfit_source", ""),
+                        scene_source=prompt_meta.get("scene_source", ""),
+                        behavior_source=prompt_meta.get("behavior_source", ""),
+                        duplicate_clauses=duplicate_clauses,
+                        sanitized_prompt_applied=prompt_meta.get("sanitized_prompt_applied", False),
+                        final_prompt_length=prompt_meta.get("final_prompt_length", 0),
+                        prompt_mode=prompt_meta.get("prompt_mode", ""),
+                    )
                 raise
+            prompt_meta["prompt_mode"] = prompt_validator._prompt_mode(final_prompt)
             caption = package.content.post_caption
             selection_reason = self._selection_reason(scene)
             item = PublishingPlanItem(

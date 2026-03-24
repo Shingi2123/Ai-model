@@ -196,7 +196,7 @@ class PipelineOrchestrator:
                 scene=scenes[0],
                 context=context,
             )
-            outfit.summary = outfit_bundle.sentence
+            outfit.summary = outfit.summary or outfit_bundle.sentence
             outfit.sentence = outfit_bundle.sentence
             outfit.outfit_sentence = outfit_bundle.outfit_sentence or outfit_bundle.sentence
             outfit.top = outfit_bundle.top
@@ -223,13 +223,18 @@ class PipelineOrchestrator:
             context["outfit_struct"] = outfit_bundle.to_dict()
             context["outfit_struct_json"] = json.dumps(outfit_bundle.to_dict(), ensure_ascii=False)
             context["outfit_sentence"] = outfit.outfit_sentence
-            context["outfit_summary"] = outfit.summary
+            context["outfit_summary"] = outfit.summary or outfit.outfit_sentence
         else:
             context["outfit_struct"] = outfit.structured_payload()
             context["outfit_struct_json"] = json.dumps(outfit.structured_payload(), ensure_ascii=False)
             context["outfit_sentence"] = outfit.prompt_sentence()
             context["outfit_summary"] = outfit.summary or outfit.prompt_sentence()
-        content = self.content_generator.generate(context, scenes, outfit.summary, outfit.item_ids)
+        if not str(context.get("outfit_sentence") or "").strip():
+            context["outfit_sentence"] = self.content_generator.prompt_composer._contextual_outfit_fallback_sentence(
+                scenes[0] if scenes else type("FallbackScene", (), {"block": "", "location": context.get("city", ""), "description": "daily moment", "mood": "calm", "time_of_day": "day"})(),
+                context,
+            )
+        content = self.content_generator.generate(context, scenes, outfit.prompt_sentence(), outfit.item_ids)
         if hasattr(self.state, "save_run_log"):
             self.state.save_run_log("debug", "[BEHAVIOR] applied_to_prompt: yes")
         issues = self.checker.run(context, scenes, outfit)
@@ -335,7 +340,13 @@ class PipelineOrchestrator:
             f"face_signature_used={short_text(str(prompt_meta.get('face_consistency', '-')), 56)} "
             f"platform_intent={prompt_meta.get('platform_intent', getattr(primary, 'platform_intent', '-')) if primary else '-'} "
             f"city_context={package.city}:{continuity.get('arc_hint', 'stable_routine')} "
-            f"outfit_items={','.join(package.outfit.item_ids)} {tone}",
+            f"outfit_items={','.join(package.outfit.item_ids)} "
+            f"outfit_source={prompt_meta.get('outfit_source', '-') or '-'} "
+            f"scene_source={prompt_meta.get('scene_source', '-') or '-'} "
+            f"behavior_source={prompt_meta.get('behavior_source', '-') or '-'} "
+            f"duplicate_clauses={','.join(prompt_meta.get('duplicate_clauses', []) or []) or '-'} "
+            f"sanitized_prompt_applied={prompt_meta.get('sanitized_prompt_applied', False)} "
+            f"final_prompt_length={prompt_meta.get('final_prompt_length', 0)} {tone}",
             device_profile=short_text(str(prompt_meta.get("device_identity", "")), 84),
             camera_behavior_used=short_text(str(prompt_meta.get("camera_behavior_memory", "")), 72),
             framing_style_used=short_text(str(prompt_meta.get("framing_style", "")), 60),
@@ -349,6 +360,12 @@ class PipelineOrchestrator:
             artifact_flags=", ".join(sanity.get("artifact_flags", [])),
             prompt_mode=prompt_meta.get("prompt_mode", ""),
             reference_pack_used=prompt_meta.get("reference_bundle", ""),
+            outfit_source=prompt_meta.get("outfit_source", ""),
+            scene_source=prompt_meta.get("scene_source", ""),
+            behavior_source=prompt_meta.get("behavior_source", ""),
+            duplicate_clauses=", ".join(prompt_meta.get("duplicate_clauses", []) or []),
+            sanitized_prompt_applied=prompt_meta.get("sanitized_prompt_applied", False),
+            final_prompt_length=prompt_meta.get("final_prompt_length", 0),
         )
 
     def send_latest(self, package: DailyPackage) -> bool:

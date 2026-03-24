@@ -37,7 +37,7 @@ class DummyState:
     def load_publishing_plan(self, target_date=None):
         return self.existing_posts
 
-    def save_run_log(self, status, message):
+    def save_run_log(self, status, message, **kwargs):
         self.logs.append((status, message))
 
 
@@ -372,3 +372,30 @@ def test_publishing_plan_uses_default_rules_when_store_has_none():
 
     assert rows
     assert all(row.platform == "Instagram" for row in rows)
+
+
+def test_publishing_plan_sanitizes_duplicate_clauses_before_persisting():
+    state = DummyState()
+    engine = PublishingPlanEngine(state)
+    package = _build_package(day_type="travel_day", phase="transition_phase")
+    package.scenes = [package.scenes[0]]
+    package.content.prompt_packages = [package.content.prompt_packages[0]]
+    package.content.publish_windows = ["09:00"]
+    package.content.prompt_packages[0]["photo"]["final_prompt"] = (
+        "Identity: stable.\n\n"
+        "candid 3/4 body shot\n\n"
+        "Scene: coffee before work at airport terminal, carry on placed nearby, coffee cup in hand, phone kept close.\n\n"
+        "Outfit: soft knit top, straight jeans, white sneakers, small shoulder bag and compact carry on; slightly relaxed fit with natural drape.\n\n"
+        "Environment: photorealistic airport terminal; carry on placed nearby; accurate perspective and scale; soft morning daylight behaving as natural available light.\n\n"
+        "Mood: quiet confidence."
+    )
+
+    rows = engine.generate(package)
+
+    assert rows
+    first = rows[0]
+    prompt_meta = json.loads(first.prompt_package_json)
+    assert prompt_meta["sanitized_prompt_applied"] is True
+    assert prompt_meta["duplicate_clauses"]
+    assert first.prompt_text.count("carry on placed nearby") == 1
+    assert "Duplicate clauses detected in prompt" not in first.prompt_text
