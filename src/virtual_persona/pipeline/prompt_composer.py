@@ -1,11 +1,12 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 from virtual_persona.pipeline.identity import CharacterIdentityManager
-from virtual_persona.pipeline.outfit_generator import ManualOutfitValidationError, OutfitGenerationError, OutfitGenerator
+from virtual_persona.pipeline.outfit_generator import ManualOutfitValidationError, OutfitBundle, OutfitGenerationError, OutfitGenerator
 
 
 class PromptValidationError(ValueError):
@@ -39,6 +40,30 @@ class PromptComposer:
         "outfit",
         "look",
         "look here",
+    )
+    OUTFIT_DETAIL_KEYWORDS: tuple[str, ...] = (
+        "fit",
+        "fitted",
+        "relaxed",
+        "silhouette",
+        "drape",
+        "fabric",
+        "fabrics",
+        "texture",
+        "textures",
+        "fold",
+        "folds",
+        "wrinkle",
+        "wrinkles",
+        "worn",
+        "layering",
+        "layered",
+        "matte",
+        "bunching",
+        "crease",
+        "creases",
+        "everyday",
+        "natural",
     )
     FORBIDDEN_POSITIVE_PHRASES: tuple[str, ...] = (
         "no plastic skin",
@@ -174,29 +199,8 @@ class PromptComposer:
         body_anchor_shot = "full_body" if generation_mode == "full-body_mode" and shot_archetype == "friend_shot" else shot_archetype
         body_anchor = identity_manager.body_anchor(body_anchor_shot, context, identity_pack)
         scene_action = self._scene_action(scene, scene_desc, scene_loc)
-        try:
-            outfit_bundle = self.outfit_generator.generate_bundle(outfit_summary=outfit_summary, scene=scene, context=context)
-        except ManualOutfitValidationError as exc:
-            raise PromptValidationError(str(exc)) from exc
-        except OutfitGenerationError:
-            fallback_outfit = self.generate_default_outfit(
-                scene,
-                str(context.get("city", "") or ""),
-                context.get("weather"),
-                day_type=str(context.get("day_type", "") or ""),
-                behavior_mode=str(
-                    getattr(context.get("behavioral_context"), "outfit_behavior_mode", "")
-                    or getattr(context.get("behavioral_context"), "self_presentation", "")
-                    or getattr(getattr(context.get("behavioral_context"), "daily_state", None), "self_presentation_mode", "")
-                    or ""
-                ),
-            )
-            outfit_bundle = self.outfit_generator.generate_bundle(
-                outfit_summary=", ".join(fallback_outfit),
-                scene=scene,
-                context=context,
-            )
-        normalized_outfit = outfit_bundle.sentence
+        outfit_bundle = self._resolve_outfit_bundle(context, scene, outfit_summary)
+        normalized_outfit = outfit_bundle.outfit_sentence or outfit_bundle.sentence
         wardrobe_block = self._wardrobe_context(outfit_bundle, shot_archetype, item_ids_text)
         camera_block = self._camera_context(shot_archetype, context)
         realism_block = self._realism_cues(shot_archetype, scene_loc)
@@ -216,6 +220,10 @@ class PromptComposer:
             "scene_action": scene_action,
             "wardrobe_block": wardrobe_block,
             "outfit_structured": outfit_bundle.to_dict(),
+            "outfit_struct": outfit_bundle.to_dict(),
+            "outfit_struct_json": json.dumps(outfit_bundle.to_dict(), ensure_ascii=False),
+            "outfit_sentence": normalized_outfit,
+            "outfit_summary": normalized_outfit,
             "camera_block": camera_block,
             "realism_block": realism_block,
             "continuity_block": continuity_block,
@@ -271,7 +279,7 @@ class PromptComposer:
             scene=scene,
             scene_desc=scene_desc,
             scene_loc=scene_loc,
-            wardrobe_block=wardrobe_block,
+            outfit_sentence=normalized_outfit,
             realism_block=realism_block,
             continuity_block=continuity_block,
             device_identity=ordered_blocks["device_identity"],
@@ -297,8 +305,6 @@ class PromptComposer:
         normalized = (prompt or "").strip()
         blocks = [block.strip() for block in normalized.split("\n\n") if block.strip()]
         framing_block = blocks[1].lower() if len(blocks) > 1 else ""
-        if "selfie" in framing_block and len(normalized) < 1000:
-            return "compact"
         if len(normalized) > PromptComposer.COMPACT_PROMPT_THRESHOLD:
             return "dense"
         expanded_blocks = 0
@@ -314,6 +320,8 @@ class PromptComposer:
 
         if len(normalized) >= PromptComposer.DENSE_PROMPT_MIN_LENGTH and expanded_blocks >= PromptComposer.DENSE_PROMPT_EXPANDED_BLOCKS:
             return "dense"
+        if "selfie" in framing_block and len(normalized) < 1000:
+            return "compact"
         return "compact"
 
     def _resolve_generation_mode(self, scene: Any, shot_archetype: str) -> str:
@@ -458,8 +466,170 @@ class PromptComposer:
     @staticmethod
     def _wardrobe_context(outfit_bundle: Any, shot_archetype: str, outfit_item_ids: str) -> str:
         visible_scope = "upper-body focus" if shot_archetype in {"front_selfie", "close_portrait", "mirror_selfie", "seated_table_shot", "waist_up"} else "full outfit coherence"
-        sentence = str(getattr(outfit_bundle, "sentence", "") or "")
+        sentence = str(getattr(outfit_bundle, "outfit_sentence", "") or getattr(outfit_bundle, "sentence", "") or "")
         return f"outfit: {sentence} || {visible_scope}; item_ids={outfit_item_ids}."
+
+    def _resolve_outfit_bundle(self, context: Dict[str, Any], scene: Any, outfit_summary: str) -> OutfitBundle:
+        manual_override = self.outfit_generator._resolve_manual_override(scene, context)
+        canonical_sentence = self._clean_fragment(str(context.get("outfit_sentence") or ""))
+        canonical_struct = self._coerce_outfit_struct(context.get("outfit_struct"), context.get("outfit_struct_json"))
+
+        if manual_override:
+            return self._generate_outfit_bundle(context, scene, outfit_summary)
+
+        if canonical_sentence:
+            try:
+                return self._bundle_from_canonical_sentence(
+                    canonical_sentence,
+                    canonical_struct,
+                    scene=scene,
+                    context=context,
+                    fallback_summary=outfit_summary,
+                )
+            except PromptValidationError:
+                pass
+
+        if canonical_struct:
+            structured_sentence = self._clean_fragment(
+                str(canonical_struct.get("outfit_sentence") or canonical_struct.get("sentence") or canonical_struct.get("outfit_summary") or "")
+            )
+            if structured_sentence:
+                try:
+                    return self._bundle_from_canonical_sentence(
+                        structured_sentence,
+                        canonical_struct,
+                        scene=scene,
+                        context=context,
+                        fallback_summary=outfit_summary,
+                    )
+                except PromptValidationError:
+                    pass
+
+        return self._generate_outfit_bundle(context, scene, outfit_summary)
+
+    def _generate_outfit_bundle(self, context: Dict[str, Any], scene: Any, outfit_summary: str) -> OutfitBundle:
+        try:
+            bundle = self.outfit_generator.generate_bundle(outfit_summary=outfit_summary, scene=scene, context=context)
+        except ManualOutfitValidationError as exc:
+            raise PromptValidationError(str(exc)) from exc
+        except OutfitGenerationError:
+            fallback_outfit = self.generate_default_outfit(
+                scene,
+                str(context.get("city", "") or ""),
+                context.get("weather"),
+                day_type=str(context.get("day_type", "") or ""),
+                behavior_mode=str(
+                    getattr(context.get("behavioral_context"), "outfit_behavior_mode", "")
+                    or getattr(context.get("behavioral_context"), "self_presentation", "")
+                    or getattr(getattr(context.get("behavioral_context"), "daily_state", None), "self_presentation_mode", "")
+                    or ""
+                ),
+            )
+            try:
+                bundle = self.outfit_generator.generate_bundle(
+                    outfit_summary=", ".join(fallback_outfit),
+                    scene=scene,
+                    context=context,
+                )
+            except (ManualOutfitValidationError, OutfitGenerationError) as exc:
+                raise PromptValidationError("Outfit validation failed after fallback recovery") from exc
+        return self._bundle_from_canonical_sentence(
+            str(bundle.outfit_sentence or bundle.sentence or ""),
+            bundle.to_dict(),
+            scene=scene,
+            context=context,
+            fallback_summary=outfit_summary,
+        )
+
+    def _bundle_from_canonical_sentence(
+        self,
+        outfit_sentence: str,
+        outfit_struct: Mapping[str, Any] | None,
+        *,
+        scene: Any,
+        context: Dict[str, Any],
+        fallback_summary: str,
+    ) -> OutfitBundle:
+        struct = self._coerce_outfit_struct(outfit_struct)
+        normalized_sentence = self.validate_outfit_sentence(outfit_sentence, outfit_struct=struct)
+        derived_struct = self._outfit_struct_from_sentence(normalized_sentence)
+        payload = {
+            "top": str(struct.get("top") or derived_struct.get("top") or ""),
+            "bottom": str(struct.get("bottom") or derived_struct.get("bottom") or ""),
+            "outerwear": str(struct.get("outerwear") or derived_struct.get("outerwear") or ""),
+            "shoes": str(struct.get("shoes") or derived_struct.get("shoes") or ""),
+            "accessories": str(struct.get("accessories") or derived_struct.get("accessories") or ""),
+            "fit": str(struct.get("fit") or derived_struct.get("fit") or ""),
+            "fabric": str(struct.get("fabric") or derived_struct.get("fabric") or ""),
+            "condition": str(struct.get("condition") or derived_struct.get("condition") or ""),
+            "styling": str(struct.get("styling") or derived_struct.get("styling") or ""),
+            "sentence": normalized_sentence,
+            "outfit_sentence": normalized_sentence,
+            "style_profile": list(struct.get("style_profile") or context.get("outfit_style_profile") or []),
+            "place": str(struct.get("place") or getattr(scene, "location", "") or context.get("city", "") or ""),
+            "activity": str(struct.get("activity") or getattr(scene, "activity", "") or ""),
+            "time_of_day": str(struct.get("time_of_day") or getattr(scene, "time_of_day", "") or ""),
+            "weather_context": str(struct.get("weather_context") or ""),
+            "social_presence": str(struct.get("social_presence") or getattr(scene, "social_presence", "") or ""),
+            "energy": str(struct.get("energy") or ""),
+            "habit": str(struct.get("habit") or ""),
+            "style_intensity": float(struct.get("style_intensity") or 0.0),
+            "outfit_style": str(struct.get("outfit_style") or context.get("outfit_style") or ""),
+            "enhance_attractiveness": float(struct.get("enhance_attractiveness") or 0.0),
+            "outfit_override_used": str(struct.get("outfit_override_used") or ""),
+        }
+        if not payload["style_profile"]:
+            payload["style_profile"] = list((context.get("outfit_struct") or {}).get("style_profile") or [])
+        if not any(payload[key] for key in ("top", "bottom", "outerwear", "shoes", "accessories")) and fallback_summary:
+            regenerated = self._generate_outfit_bundle(context, scene, fallback_summary)
+            return regenerated
+        return OutfitBundle(**payload)
+
+    @staticmethod
+    def _coerce_outfit_struct(*candidates: Any) -> Dict[str, Any]:
+        for candidate in candidates:
+            if isinstance(candidate, Mapping):
+                return dict(candidate)
+            if isinstance(candidate, str) and candidate.strip():
+                try:
+                    parsed = json.loads(candidate)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if isinstance(parsed, Mapping):
+                    return dict(parsed)
+        return {}
+
+    def _outfit_struct_from_sentence(self, outfit_sentence: str) -> Dict[str, str]:
+        clothing_text, _, detail_text = outfit_sentence.partition(";")
+        pieces = []
+        for chunk in re.split(r"\s*(?:,| and )\s*", clothing_text):
+            cleaned = self._clean_fragment(chunk)
+            if cleaned:
+                pieces.append(cleaned)
+
+        payload = {"top": "", "bottom": "", "outerwear": "", "shoes": "", "accessories": "", "fit": "", "fabric": "", "condition": "", "styling": ""}
+        for piece in pieces:
+            category = self._outfit_category(piece)
+            if category == "dress":
+                payload["top"] = payload["top"] or piece
+                continue
+            if category == "accessory":
+                payload["accessories"] = payload["accessories"] or piece
+                continue
+            payload[category] = payload.get(category, "") or piece
+
+        detail_parts = [self._clean_fragment(chunk) for chunk in detail_text.split(",") if self._clean_fragment(chunk)]
+        for detail in detail_parts:
+            lowered = detail.lower()
+            if not payload["fit"] and any(token in lowered for token in ["fit", "fitted", "relaxed", "silhouette", "drape"]):
+                payload["fit"] = detail
+            elif not payload["fabric"] and any(token in lowered for token in ["fabric", "fabrics", "texture", "textures", "matte", "cotton", "knit", "linen", "wool"]):
+                payload["fabric"] = detail
+            elif not payload["condition"] and any(token in lowered for token in ["fold", "folds", "worn", "wrinkle", "wrinkles", "crease", "creases", "bunching"]):
+                payload["condition"] = detail
+            elif not payload["styling"]:
+                payload["styling"] = detail
+        return payload
 
     def _camera_context(self, shot_archetype: str, context: Dict[str, Any]) -> str:
         camera_profile = self.CAMERA_ARCHETYPES.get(shot_archetype, self.CAMERA_ARCHETYPES["friend_shot"])
@@ -729,7 +899,7 @@ class PromptComposer:
         scene: Any,
         scene_desc: str,
         scene_loc: str,
-        wardrobe_block: str,
+        outfit_sentence: str,
         realism_block: str,
         continuity_block: str,
         device_identity: str,
@@ -741,7 +911,7 @@ class PromptComposer:
         identity_block = self._identity_block(identity_anchor=identity_anchor, body_anchor=body_anchor)
         framing_block = self._framing_block(framing_mode, shot_archetype, scene)
         scene_block = self._scene_block(context, scene, scene_desc, scene_loc, scene_tags)
-        outfit_block = self._outfit_block(wardrobe_block)
+        outfit_block = self._outfit_block(outfit_sentence)
         environment_block = self._environment_block(context, scene, scene_loc, scene_tags, continuity_block)
         mood_block = self._mood_block(context, scene, continuity_block)
 
@@ -868,19 +1038,9 @@ class PromptComposer:
                 pieces.append(self._object_scene_phrase(object_term, scene))
         return f"Scene: {', '.join(self._dedupe_phrases(pieces))}."
 
-    def _outfit_block(self, wardrobe_block: str) -> str:
-        cleaned = wardrobe_block.replace("outfit: ", "").strip()
-        cleaned = cleaned.split("||")[0].strip().rstrip(".")
-        items = re.split(r"\s*(?:,|\+|/|;)\s*", cleaned)
-        normalized = [
-            self._ensure_english_fragment(self._clean_fragment(item), "")
-            for item in items
-            if self._clean_fragment(item) and not self._is_invalid_outfit_value(item)
-        ]
-        normalized = [item for item in normalized if item]
-        if not normalized:
-            raise PromptValidationError("Outfit block is empty")
-        return f"Outfit: {', '.join(self._dedupe_phrases(normalized))}."
+    def _outfit_block(self, outfit_sentence: str) -> str:
+        cleaned = self.validate_outfit_sentence(outfit_sentence)
+        return f"Outfit: {cleaned}."
 
     def _environment_block(self, context: Dict[str, Any], scene: Any, scene_loc: str, scene_tags: List[str], continuity_block: str) -> str:
         del continuity_block, scene_tags
@@ -1022,7 +1182,8 @@ class PromptComposer:
             or ""
         )
         try:
-            return self.outfit_generator.generate_bundle(outfit_summary=outfit_summary, scene=scene, context=context).sentence
+            bundle = self.outfit_generator.generate_bundle(outfit_summary=outfit_summary, scene=scene, context=context)
+            return bundle.outfit_sentence or bundle.sentence
         except ManualOutfitValidationError as exc:
             raise PromptValidationError(str(exc)) from exc
         except OutfitGenerationError:
@@ -1105,6 +1266,82 @@ class PromptComposer:
         if all(char in ".-_/" for char in cleaned):
             return True
         return False
+
+    @classmethod
+    def outfit_semantic_units(cls, outfit_sentence: str, outfit_struct: Mapping[str, Any] | None = None) -> set[str]:
+        lowered = " ".join(str(outfit_sentence or "").lower().split())
+        struct = dict(outfit_struct or {})
+        units: set[str] = set()
+
+        if any(struct.get(key) for key in ("top",)) or any(token in lowered for token in ["top", "blouse", "shirt", "sweater", "knit", "tank", "tee", "camisole"]):
+            units.add("top")
+        if any(struct.get(key) for key in ("outerwear",)) or any(token in lowered for token in ["coat", "jacket", "cardigan", "blazer", "hoodie", "trench", "layer"]):
+            units.add("layer")
+        if any(struct.get(key) for key in ("bottom",)) or any(token in lowered for token in ["jeans", "trousers", "pants", "skirt", "shorts", "denim", "joggers", "leggings"]):
+            units.add("bottom_or_dress")
+        if any(token in lowered for token in ["dress"]) and not any(struct.get(key) for key in ("bottom",)):
+            units.add("bottom_or_dress")
+        if any(struct.get(key) for key in ("shoes",)) or any(token in lowered for token in ["sneakers", "boots", "loafers", "sandals", "slides", "heels", "shoes", "trainers"]):
+            units.add("shoes")
+        if any(struct.get(key) for key in ("accessories",)) or any(token in lowered for token in ["bag", "tote", "scarf", "watch", "glasses", "sunglasses", "jewelry", "necklace", "earrings", "belt", "carry on"]):
+            units.add("accessory")
+        if any(struct.get(key) for key in ("fit", "fabric", "condition", "styling")) or any(token in lowered for token in cls.OUTFIT_DETAIL_KEYWORDS):
+            units.add("detail")
+        return units
+
+    @classmethod
+    def validate_outfit_sentence(cls, outfit_sentence: str, outfit_struct: Mapping[str, Any] | None = None) -> str:
+        cleaned = " ".join(str(outfit_sentence or "").replace("_", " ").split()).strip(" ,;:")
+        lowered = cleaned.lower()
+        if not cleaned:
+            raise PromptValidationError("Outfit block is empty")
+        if cls.CYRILLIC_RE.search(cleaned):
+            raise PromptValidationError("Outfit block must be English only")
+        if lowered in cls.INVALID_OUTFIT_TOKENS or re.fullmatch(r"[.\-_/]+", lowered or ""):
+            raise PromptValidationError("Outfit block is empty")
+        if lowered in {".", "..", "...", "{}", "[]"}:
+            raise PromptValidationError("Outfit block is empty")
+        if lowered in {"none", "null"}:
+            raise PromptValidationError("Outfit block is empty")
+        if not re.search(r"[A-Za-z]", cleaned):
+            raise PromptValidationError("Outfit block must contain English clothing text")
+
+        units = cls.outfit_semantic_units(cleaned, outfit_struct=outfit_struct)
+        if len(units) < 3:
+            raise PromptValidationError("Outfit block must contain at least three meaningful clothing units")
+        if "shoes" not in units:
+            raise PromptValidationError("Outfit block must include shoes")
+        if "bottom_or_dress" not in units and "top" not in units:
+            raise PromptValidationError("Outfit block must describe actual clothing pieces")
+        return cleaned.rstrip(".")
+
+    @classmethod
+    def extract_outfit_sentence(cls, prompt: str) -> str:
+        blocks = [block.strip() for block in str(prompt or "").split("\n\n") if block.strip()]
+        if len(blocks) < 4 or not blocks[3].startswith("Outfit: "):
+            return ""
+        return blocks[3].replace("Outfit: ", "", 1).strip().rstrip(".")
+
+    @classmethod
+    def prompt_has_invalid_outfit(cls, prompt: str) -> bool:
+        outfit_sentence = cls.extract_outfit_sentence(prompt)
+        try:
+            cls.validate_outfit_sentence(outfit_sentence)
+        except PromptValidationError:
+            return True
+        return False
+
+    @classmethod
+    def repair_outfit_block(cls, prompt: str, outfit_sentence: str) -> str:
+        normalized_prompt = str(prompt or "").strip()
+        if not normalized_prompt:
+            return normalized_prompt
+        cleaned_sentence = cls.validate_outfit_sentence(outfit_sentence)
+        blocks = [block.strip() for block in normalized_prompt.split("\n\n") if block.strip()]
+        if len(blocks) < 4 or not blocks[3].startswith("Outfit: "):
+            return normalized_prompt
+        blocks[3] = f"Outfit: {cleaned_sentence}."
+        return "\n\n".join(blocks)
 
     @staticmethod
     def _outfit_category(item: str) -> str:
@@ -1218,16 +1455,12 @@ class PromptComposer:
             if index != 1 and not body.strip():
                 raise PromptValidationError("Canonical prompt contains an empty block body")
             if self._is_placeholder_body(body_text):
+                if index == 3:
+                    raise PromptValidationError("Outfit block is empty")
                 raise PromptValidationError("Canonical prompt contains a placeholder block body")
 
         outfit_body = blocks[3].replace("Outfit: ", "").strip().rstrip(".")
-        if not outfit_body or self._is_invalid_outfit_value(outfit_body):
-            raise PromptValidationError("Outfit block is empty")
-        outfit_categories = {self._outfit_category(item) for item in outfit_body.split(",")}
-        if "dress" not in outfit_categories and ("top" not in outfit_categories or "bottom" not in outfit_categories):
-            raise PromptValidationError("Outfit must include a top and a bottom or a dress")
-        if "shoes" not in outfit_categories:
-            raise PromptValidationError("Outfit must include shoes")
+        self.validate_outfit_sentence(outfit_body)
 
         lowered = prompt.lower()
         for phrase in self.BANNED_SYNTHETIC_PATTERNS + self.FORBIDDEN_POSITIVE_PHRASES:

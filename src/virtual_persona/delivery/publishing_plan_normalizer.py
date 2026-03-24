@@ -29,6 +29,9 @@ PUBLISHING_PLAN_HEADERS = [
     "visual_focus",
     "activity_type",
     "outfit_ids",
+    "outfit_sentence",
+    "outfit_struct_json",
+    "outfit_summary",
     "prompt_type",
     "prompt_text",
     "negative_prompt",
@@ -98,6 +101,7 @@ REQUIRED_PUBLISHING_PLAN_HEADERS = [
     "prompt_mode",
     "platform",
     "moment",
+    "outfit_sentence",
     "prompt",
     "negative_prompt",
 ]
@@ -234,6 +238,28 @@ def load_prompt_meta(source: Mapping[str, Any] | PublishingPlanItem | Any) -> di
     return parsed if isinstance(parsed, dict) else {}
 
 
+def resolve_outfit_sentence(
+    source: Mapping[str, Any] | PublishingPlanItem | Any,
+    *,
+    prompt_meta: Mapping[str, Any] | None = None,
+) -> tuple[str, str]:
+    row = _to_mapping(source)
+    meta = dict(prompt_meta or load_prompt_meta(row))
+    row_value = _extract_value(row, "outfit_sentence")
+    if row_value:
+        try:
+            return PromptComposer.validate_outfit_sentence(row_value), "outfit_sentence"
+        except Exception:
+            pass
+    meta_value = _extract_value(meta, "outfit_sentence")
+    if meta_value:
+        try:
+            return PromptComposer.validate_outfit_sentence(meta_value), "prompt_package_json.outfit_sentence"
+        except Exception:
+            pass
+    return "", "missing"
+
+
 def is_legacy_prompt(text: str, *, row: Mapping[str, Any] | None = None, prompt_meta: Mapping[str, Any] | None = None) -> bool:
     lowered = " ".join(str(text or "").lower().split())
     if not lowered:
@@ -261,6 +287,7 @@ def resolve_canonical_prompt(
 ) -> tuple[str, str, bool, str]:
     row = _to_mapping(source)
     prompt_meta = load_prompt_meta(row)
+    outfit_sentence, outfit_source = resolve_outfit_sentence(row, prompt_meta=prompt_meta)
     meta_prompt = _extract_value(prompt_meta, "final_prompt")
     meta_version = _extract_value(prompt_meta, "prompt_format_version") or ("v6" if meta_prompt else "")
     meta_legacy = is_legacy_prompt(meta_prompt, row=row, prompt_meta=prompt_meta)
@@ -277,6 +304,15 @@ def resolve_canonical_prompt(
         prompt_source = "prompt_package_json.final_prompt"
     else:
         resolved_prompt = default
+
+    if resolved_prompt and outfit_sentence:
+        try:
+            repaired_prompt = PromptComposer.repair_outfit_block(resolved_prompt, outfit_sentence)
+        except Exception:
+            repaired_prompt = resolved_prompt
+        if repaired_prompt != resolved_prompt:
+            prompt_source = f"{prompt_source}+{outfit_source}"
+            resolved_prompt = repaired_prompt
 
     return resolved_prompt, prompt_source, meta_legacy, meta_version or ("v6" if resolved_prompt == meta_prompt and resolved_prompt else "")
 
@@ -410,6 +446,7 @@ def normalize_publishing_plan_payload(
     )
 
     resolved_prompt, _, _, _ = resolve_canonical_prompt(row)
+    outfit_sentence, _ = resolve_outfit_sentence(row, prompt_meta=prompt_meta)
     prompt_mode = resolve_prompt_mode(row, resolved_prompt=resolved_prompt, prompt_meta=prompt_meta)
 
     return {
@@ -428,6 +465,22 @@ def normalize_publishing_plan_payload(
         "visual_focus": _extract_value(row, "visual_focus"),
         "activity_type": _extract_value(row, "activity_type"),
         "outfit_ids": outfit_ids,
+        "outfit_sentence": outfit_sentence,
+        "outfit_struct_json": _resolve_field(
+            row,
+            prompt_meta,
+            field_name="outfit_struct_json",
+            row_keys=("outfit_struct_json",),
+            meta_keys=("outfit_struct_json",),
+        ),
+        "outfit_summary": _resolve_field(
+            row,
+            prompt_meta,
+            field_name="outfit_summary",
+            row_keys=("outfit_summary",),
+            meta_keys=("outfit_summary",),
+            default=outfit_sentence,
+        ),
         "prompt_type": _extract_value(row, "prompt_type"),
         "prompt_text": resolved_prompt,
         "negative_prompt": _resolve_field(

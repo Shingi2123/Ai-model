@@ -10,9 +10,11 @@ from virtual_persona.delivery.publishing_plan_normalizer import (
     item_from_payload,
     load_prompt_meta,
     resolve_canonical_prompt,
+    resolve_outfit_sentence,
     resolve_prompt_mode,
 )
 from virtual_persona.models.domain import PublishingPlanItem
+from virtual_persona.pipeline.prompt_composer import PromptComposer, PromptValidationError
 
 
 logger = logging.getLogger(__name__)
@@ -278,12 +280,22 @@ def format_post_screen(context: PlanScreenContext, item: PublishingPlanItem, pos
 
 def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
     prompt_value, prompt_source, legacy_detected, prompt_format_version = resolve_canonical_prompt(item)
+    outfit_sentence, outfit_source = resolve_outfit_sentence(item)
     prompt = (prompt_value or "").strip()
     if not prompt:
         prompt_meta = load_prompt_meta(item)
         prompt = str(prompt_meta.get("final_prompt") or "").strip()
         if prompt:
             prompt_source = "prompt_package_json.final_prompt_fallback"
+    if prompt and PromptComposer.prompt_has_invalid_outfit(prompt):
+        if outfit_sentence:
+            try:
+                prompt = PromptComposer.repair_outfit_block(prompt, outfit_sentence)
+                prompt_source = f"{prompt_source}+{outfit_source}"
+            except PromptValidationError:
+                prompt = "Prompt is unavailable because outfit validation failed"
+        else:
+            prompt = "Prompt is unavailable because outfit validation failed"
     prompt = _display_value(prompt, "Промпт для этого поста не сохранён.")
     caption = _display_value(item.caption_text, "Подпись не сохранена.")
     short_caption = _display_value(item.short_caption or item.caption_text, "Короткая подпись не сохранена.")
@@ -293,7 +305,7 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
     primary_anchors = _display_value(format_reference_aliases(item.primary_anchors), "Нет основных референсов")
     secondary_anchors = _display_value(format_reference_aliases(item.secondary_anchors), "Нет дополнительных референсов")
     manual_generation_step = _format_manual_generation_step(item.manual_generation_step)
-    prompt_mode = _display_value(resolve_prompt_mode(item, resolved_prompt=prompt_value or prompt), prompt_mode)
+    prompt_mode = _display_value(resolve_prompt_mode(item, resolved_prompt=prompt), prompt_mode)
 
     logger.info(
         "telegram_detail_render publication_id=%s prompt_source=%s prompt_format_version=%s legacy_prompt_detected=%s",
@@ -449,6 +461,9 @@ def serialize_context(context: PlanScreenContext, items: list[PublishingPlanItem
                 "visual_focus": item.visual_focus,
                 "activity_type": item.activity_type,
                 "outfit_ids": item.outfit_ids,
+                "outfit_sentence": item.outfit_sentence,
+                "outfit_struct_json": item.outfit_struct_json,
+                "outfit_summary": item.outfit_summary,
                 "prompt_type": item.prompt_type,
                 "prompt_text": item.prompt_text,
                 "negative_prompt": item.negative_prompt,

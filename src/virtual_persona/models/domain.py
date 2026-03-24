@@ -487,9 +487,10 @@ class OutfitSelection:
     enhance_attractiveness: float = 0.0
     outfit_override_used: str = ""
     style_profile: List[str] = field(default_factory=list)
+    outfit_sentence: str = ""
 
     def prompt_sentence(self) -> str:
-        return self.sentence or self.summary
+        return self.outfit_sentence or self.sentence or self.summary
 
     def structured_payload(self) -> dict:
         return {
@@ -503,6 +504,8 @@ class OutfitSelection:
             "condition": self.condition,
             "styling": self.styling,
             "sentence": self.prompt_sentence(),
+            "outfit_sentence": self.prompt_sentence(),
+            "outfit_summary": self.summary or self.prompt_sentence(),
             "place": self.place,
             "activity": self.activity,
             "time_of_day": self.time_of_day,
@@ -548,6 +551,9 @@ class PublishingPlanItem:
     outfit_ids: List[str]
     prompt_type: str
     prompt_text: str
+    outfit_sentence: str = ""
+    outfit_struct_json: str = ""
+    outfit_summary: str = ""
     negative_prompt: str = ""
     prompt_package_json: str = ""
     shot_archetype: str = ""

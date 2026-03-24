@@ -7,6 +7,7 @@ from datetime import date, datetime
 from typing import Any, Dict, List
 
 from virtual_persona.models.domain import DailyPackage, DayScene, PublishingPlanItem
+from virtual_persona.pipeline.prompt_composer import PromptComposer, PromptValidationError
 
 
 DEFAULT_POSTING_RULES = [
@@ -67,11 +68,46 @@ class PublishingPlanEngine:
         self._annotate_moment_decisions(package, ranked, selected, initial_selected_count, fallback_meta)
 
         items: List[PublishingPlanItem] = []
+        prompt_validator = PromptComposer(None)
+        validation_context = {
+            "city": package.city,
+            "day_type": package.day_type,
+            "weather": package.weather,
+            "life_state": package.life_state,
+            "behavioral_context": package.behavioral_context,
+        }
         for idx, ranked_moment in enumerate(selected):
             scene = ranked_moment.scene
             content_type = content_types[idx]
-            prompt_meta = self._pick_prompt_package(package, scene, content_type)
-            final_prompt = str(prompt_meta.get("final_prompt") or "").strip()
+            prompt_meta = dict(self._pick_prompt_package(package, scene, content_type))
+            canonical_outfit_sentence = str(
+                prompt_meta.get("outfit_sentence")
+                or package.outfit.prompt_sentence()
+                or package.outfit.summary
+                or ""
+            ).strip()
+            prompt_meta["outfit_sentence"] = canonical_outfit_sentence
+            prompt_meta["outfit_summary"] = str(prompt_meta.get("outfit_summary") or package.outfit.summary or canonical_outfit_sentence)
+            prompt_meta["outfit_struct"] = prompt_meta.get("outfit_struct") or package.outfit.structured_payload()
+            prompt_meta["outfit_struct_json"] = str(
+                prompt_meta.get("outfit_struct_json")
+                or json.dumps(prompt_meta["outfit_struct"], ensure_ascii=False)
+            )
+
+            final_prompt = PromptComposer.repair_outfit_block(str(prompt_meta.get("final_prompt") or "").strip(), canonical_outfit_sentence) if canonical_outfit_sentence else str(prompt_meta.get("final_prompt") or "").strip()
+            prompt_meta["final_prompt"] = final_prompt
+            try:
+                if not final_prompt:
+                    raise PromptValidationError("Final prompt is empty")
+                prompt_validator._validate_canonical_prompt(final_prompt, scene, validation_context)
+            except PromptValidationError as exc:
+                logger.error(
+                    "publishing_plan prompt_validation_failed publication_id=%s scene=%s reason=%s",
+                    f"{package.date.isoformat()}-{idx+1:02d}",
+                    scene.scene_moment or scene.description or "unknown_scene",
+                    str(exc),
+                )
+                raise
             caption = package.content.post_caption
             selection_reason = self._selection_reason(scene)
             item = PublishingPlanItem(
@@ -92,6 +128,9 @@ class PublishingPlanEngine:
                 outfit_ids=list(package.outfit.item_ids),
                 prompt_type=content_type,
                 prompt_text="",
+                outfit_sentence=canonical_outfit_sentence,
+                outfit_struct_json=str(prompt_meta.get("outfit_struct_json") or ""),
+                outfit_summary=str(prompt_meta.get("outfit_summary") or canonical_outfit_sentence),
                 negative_prompt=str(prompt_meta.get("negative_prompt", "")),
                 prompt_package_json=json.dumps(prompt_meta, ensure_ascii=False),
                 shot_archetype=str(prompt_meta.get("shot_archetype", "")),

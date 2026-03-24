@@ -25,6 +25,7 @@ class OutfitBundle:
     condition: str = ""
     styling: str = ""
     sentence: str = ""
+    outfit_sentence: str = ""
     style_profile: List[str] | None = None
     place: str = ""
     activity: str = ""
@@ -41,6 +42,8 @@ class OutfitBundle:
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
         payload["style_profile"] = list(self.style_profile or [])
+        payload["sentence"] = self.outfit_sentence or self.sentence
+        payload["outfit_sentence"] = self.outfit_sentence or self.sentence
         return payload
 
 
@@ -92,7 +95,8 @@ class OutfitGenerator:
     )
 
     def generate(self, *, outfit_summary: str, scene: Any, context: Dict[str, Any]) -> str:
-        return self.generate_bundle(outfit_summary=outfit_summary, scene=scene, context=context).sentence
+        bundle = self.generate_bundle(outfit_summary=outfit_summary, scene=scene, context=context)
+        return bundle.outfit_sentence or bundle.sentence
 
     def generate_bundle(self, *, outfit_summary: str, scene: Any, context: Dict[str, Any]) -> OutfitBundle:
         manual_outfit = self._resolve_manual_override(scene, context)
@@ -301,6 +305,7 @@ class OutfitGenerator:
             condition=condition,
             styling=styling,
             sentence=sentence,
+            outfit_sentence=sentence,
             style_profile=list(descriptor["style_profile"]),
             place=str(descriptor["place"]),
             activity=str(descriptor["activity"]),
@@ -348,6 +353,17 @@ class OutfitGenerator:
                 condition=condition,
                 styling=styling,
             ),
+            outfit_sentence=self._sentence_from_structure(
+                top=top,
+                bottom=bottom,
+                outerwear=outerwear,
+                shoes=shoes,
+                accessories=accessories,
+                fit=fit,
+                fabric=fabric,
+                condition=condition,
+                styling=styling,
+            ),
             style_profile=list(descriptor["style_profile"]),
             place=str(descriptor["place"]),
             activity=str(descriptor["activity"]),
@@ -383,6 +399,7 @@ class OutfitGenerator:
             shoes=mapped["shoes"],
             accessories=mapped["accessories"],
             sentence=manual_outfit,
+            outfit_sentence=manual_outfit,
             style_profile=list(descriptor["style_profile"]),
             place=str(descriptor["place"]),
             activity=str(descriptor["activity"]),
@@ -398,7 +415,7 @@ class OutfitGenerator:
         )
 
     def _validate_bundle(self, bundle: OutfitBundle, descriptor: Dict[str, Any]) -> OutfitBundle:
-        sentence = self._clean_text(bundle.sentence)
+        sentence = self._clean_text(bundle.outfit_sentence or bundle.sentence)
         if self._is_invalid_value(sentence):
             raise OutfitGenerationError("Generated outfit is empty")
         if self.CYRILLIC_RE.search(sentence):
@@ -431,6 +448,7 @@ class OutfitGenerator:
             raise OutfitGenerationError("Outfit is not aligned with airport objects")
 
         bundle.sentence = sentence
+        bundle.outfit_sentence = sentence
         return bundle
 
     def _choose_top(self, descriptor: Dict[str, Any], source_map: Dict[str, str], memory_map: Dict[str, str]) -> str:

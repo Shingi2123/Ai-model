@@ -91,7 +91,16 @@ def _build_package(day_type: str = "work_day", phase: str = "growth", scenes=Non
         summary="day",
         weather=WeatherSnapshot(city="Prague", temp_c=20, condition="clear", humidity=10, wind_speed=1, cloudiness=0),
         sun=SunSnapshot(sunrise_local=datetime.utcnow(), sunset_local=datetime.utcnow()),
-        outfit=OutfitSelection(item_ids=["look_1", "jeans"], summary="look"),
+        outfit=OutfitSelection(
+            item_ids=["look_1", "jeans"],
+            summary="soft knit top, straight jeans, white sneakers, small shoulder bag and compact carry on",
+            outfit_sentence="soft knit top, straight jeans, white sneakers, small shoulder bag and compact carry on; slightly relaxed fit with natural drape",
+            top="soft knit top",
+            bottom="straight jeans",
+            shoes="white sneakers",
+            accessories="small shoulder bag and compact carry on",
+            fit="slightly relaxed fit with natural drape",
+        ),
         scenes=scenes,
         content=GeneratedContent(
             post_caption="caption text",
@@ -101,9 +110,9 @@ def _build_package(day_type: str = "work_day", phase: str = "growth", scenes=Non
             publish_windows=["09:00", "09:00", "09:00"],
             creative_notes=[],
             prompt_packages=[
-                {"photo": {"final_prompt": "photo-1", "negative_prompt": "bad anatomy", "shot_archetype": "friend_shot", "platform_intent": "instagram_feed", "generation_mode": "full-body_mode", "framing_mode": "friend-shot, 3/4 body", "prompt_mode": "dense", "identity_mode": "reference_manifest", "reference_pack_type": "full_body", "reference_type": "full_body", "primary_anchors": "ref/a.png, ref/b.png", "secondary_anchors": "ref/c.png", "manual_generation_step": "Attach 2-3 primary anchors, add 1 secondary anchor only if needed."}},
-                {"photo": {"final_prompt": "photo-2", "negative_prompt": "bad anatomy", "shot_archetype": "mirror_selfie", "platform_intent": "instagram_feed", "generation_mode": "mirror_selfie_mode", "framing_mode": "mirror selfie, head-and-shoulders", "prompt_mode": "compact", "identity_mode": "reference_manifest", "reference_pack_type": "selfie", "reference_type": "selfie", "primary_anchors": "ref/selfie.png", "secondary_anchors": "ref/lock.png", "manual_generation_step": "Attach the main primary anchor, then add 1-2 supporting anchors if needed."}},
-                {"photo": {"final_prompt": "photo-3", "negative_prompt": "bad anatomy", "shot_archetype": "candid_handheld", "platform_intent": "instagram_feed", "generation_mode": "lifestyle_mode", "framing_mode": "candid handheld, 3/4 body", "prompt_mode": "dense", "identity_mode": "reference_manifest", "reference_pack_type": "lifestyle", "reference_type": "lifestyle", "primary_anchors": "ref/life.png", "secondary_anchors": "", "manual_generation_step": "Attach the main primary anchor, then add 1-2 supporting anchors if needed."}},
+                {"photo": {"final_prompt": "Identity: stable.\n\ncandid 3/4 body shot\n\nScene: coffee before work with a carry on, shoulder bag, and phone kept close.\n\nOutfit: soft knit top, straight jeans, white sneakers, small shoulder bag and compact carry on; slightly relaxed fit with natural drape.\n\nEnvironment: photorealistic cafe; lived-in environmental detail; accurate perspective and scale.\n\nMood: quiet confidence.", "negative_prompt": "bad anatomy", "shot_archetype": "friend_shot", "platform_intent": "instagram_feed", "generation_mode": "full-body_mode", "framing_mode": "friend-shot, 3/4 body", "prompt_mode": "dense", "identity_mode": "reference_manifest", "reference_pack_type": "full_body", "reference_type": "full_body", "primary_anchors": "ref/a.png, ref/b.png", "secondary_anchors": "ref/c.png", "manual_generation_step": "Attach 2-3 primary anchors, add 1 secondary anchor only if needed.", "outfit_sentence": "soft knit top, straight jeans, white sneakers, small shoulder bag and compact carry on; slightly relaxed fit with natural drape", "outfit_summary": "soft knit top, straight jeans, white sneakers, small shoulder bag and compact carry on; slightly relaxed fit with natural drape", "outfit_struct_json": "{\"top\": \"soft knit top\", \"bottom\": \"straight jeans\", \"shoes\": \"white sneakers\", \"accessories\": \"small shoulder bag and compact carry on\", \"fit\": \"slightly relaxed fit with natural drape\"}"}},
+                {"photo": {"final_prompt": "Identity: stable.\n\nmirror selfie head-and-shoulders shot\n\nScene: arriving at terminal with a carry on, shoulder bag, and phone ready beside her.\n\nOutfit: soft knit top, straight jeans, white sneakers, small shoulder bag and compact carry on; slightly relaxed fit with natural drape.\n\nEnvironment: photorealistic terminal; accurate perspective and scale.\n\nMood: quiet confidence.", "negative_prompt": "bad anatomy", "shot_archetype": "mirror_selfie", "platform_intent": "instagram_feed", "generation_mode": "mirror_selfie_mode", "framing_mode": "mirror selfie, head-and-shoulders", "prompt_mode": "compact", "identity_mode": "reference_manifest", "reference_pack_type": "selfie", "reference_type": "selfie", "primary_anchors": "ref/selfie.png", "secondary_anchors": "ref/lock.png", "manual_generation_step": "Attach the main primary anchor, then add 1-2 supporting anchors if needed.", "outfit_sentence": "soft knit top, straight jeans, white sneakers, small shoulder bag and compact carry on; slightly relaxed fit with natural drape", "outfit_summary": "soft knit top, straight jeans, white sneakers, small shoulder bag and compact carry on; slightly relaxed fit with natural drape", "outfit_struct_json": "{\"top\": \"soft knit top\", \"bottom\": \"straight jeans\", \"shoes\": \"white sneakers\", \"accessories\": \"small shoulder bag and compact carry on\", \"fit\": \"slightly relaxed fit with natural drape\"}"}},
+                {"photo": {"final_prompt": "Identity: stable.\n\ncandid 3/4 body shot\n\nScene: golden hour river walk with a carry on, shoulder bag, and phone kept nearby.\n\nOutfit: soft knit top, straight jeans, white sneakers, small shoulder bag and compact carry on; slightly relaxed fit with natural drape.\n\nEnvironment: photorealistic river walk; accurate perspective and scale.\n\nMood: quiet confidence.", "negative_prompt": "bad anatomy", "shot_archetype": "candid_handheld", "platform_intent": "instagram_feed", "generation_mode": "lifestyle_mode", "framing_mode": "candid handheld, 3/4 body", "prompt_mode": "dense", "identity_mode": "reference_manifest", "reference_pack_type": "lifestyle", "reference_type": "lifestyle", "primary_anchors": "ref/life.png", "secondary_anchors": "", "manual_generation_step": "Attach the main primary anchor, then add 1-2 supporting anchors if needed.", "outfit_sentence": "soft knit top, straight jeans, white sneakers, small shoulder bag and compact carry on; slightly relaxed fit with natural drape", "outfit_summary": "soft knit top, straight jeans, white sneakers, small shoulder bag and compact carry on; slightly relaxed fit with natural drape", "outfit_struct_json": "{\"top\": \"soft knit top\", \"bottom\": \"straight jeans\", \"shoes\": \"white sneakers\", \"accessories\": \"small shoulder bag and compact carry on\", \"fit\": \"slightly relaxed fit with natural drape\"}"}},
             ],
         ),
         life_state=LifeState(
@@ -296,6 +305,10 @@ def test_publishing_plan_row_contains_timezone_and_decision_metadata():
     assert first.prompt_mode
     assert first.reference_type
     assert first.primary_anchors
+    assert first.outfit_sentence
+    assert first.outfit_struct_json
+    assert first.outfit_summary
+    assert json.loads(first.prompt_package_json)["outfit_sentence"] == first.outfit_sentence
 
 
 def test_publishing_plan_keeps_required_text_fields_non_empty_even_with_empty_caption():
@@ -331,7 +344,7 @@ def test_publishing_plan_uses_prompt_package_final_prompt_as_canonical_source():
 
 
 def test_publishing_plan_normalizer_prefers_only_prompt_package_final_prompt():
-    from virtual_persona.delivery.publishing_plan_normalizer import resolve_canonical_prompt
+    from virtual_persona.delivery.publishing_plan_normalizer import resolve_canonical_prompt, resolve_outfit_sentence
 
     item = engine_item = _build_package(day_type="travel_day", phase="transition_phase").content.prompt_packages[0]["photo"]
     resolved, source, legacy, version = resolve_canonical_prompt(
@@ -341,11 +354,14 @@ def test_publishing_plan_normalizer_prefers_only_prompt_package_final_prompt():
             "prompt_package_json": json.dumps(engine_item, ensure_ascii=False),
         }
     )
+    outfit_sentence, outfit_source = resolve_outfit_sentence({"prompt_package_json": json.dumps(engine_item, ensure_ascii=False)})
 
     assert resolved == engine_item["final_prompt"]
     assert source == "prompt_package_json.final_prompt"
     assert legacy is False
     assert version
+    assert outfit_sentence == engine_item["outfit_sentence"]
+    assert outfit_source == "prompt_package_json.outfit_sentence"
 
 
 def test_publishing_plan_uses_default_rules_when_store_has_none():

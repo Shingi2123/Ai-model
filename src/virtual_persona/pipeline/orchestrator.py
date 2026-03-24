@@ -198,6 +198,7 @@ class PipelineOrchestrator:
             )
             outfit.summary = outfit_bundle.sentence
             outfit.sentence = outfit_bundle.sentence
+            outfit.outfit_sentence = outfit_bundle.outfit_sentence or outfit_bundle.sentence
             outfit.top = outfit_bundle.top
             outfit.bottom = outfit_bundle.bottom
             outfit.outerwear = outfit_bundle.outerwear
@@ -219,6 +220,15 @@ class PipelineOrchestrator:
             outfit.enhance_attractiveness = outfit_bundle.enhance_attractiveness
             outfit.outfit_override_used = outfit_bundle.outfit_override_used
             outfit.style_profile = list(outfit_bundle.style_profile or [])
+            context["outfit_struct"] = outfit_bundle.to_dict()
+            context["outfit_struct_json"] = json.dumps(outfit_bundle.to_dict(), ensure_ascii=False)
+            context["outfit_sentence"] = outfit.outfit_sentence
+            context["outfit_summary"] = outfit.summary
+        else:
+            context["outfit_struct"] = outfit.structured_payload()
+            context["outfit_struct_json"] = json.dumps(outfit.structured_payload(), ensure_ascii=False)
+            context["outfit_sentence"] = outfit.prompt_sentence()
+            context["outfit_summary"] = outfit.summary or outfit.prompt_sentence()
         content = self.content_generator.generate(context, scenes, outfit.summary, outfit.item_ids)
         if hasattr(self.state, "save_run_log"):
             self.state.save_run_log("debug", "[BEHAVIOR] applied_to_prompt: yes")

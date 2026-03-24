@@ -275,6 +275,31 @@ def test_empty_outfit_uses_default_outfit_instead_of_blank_block():
     assert outfit_block != "Outfit: ."
 
 
+def test_compose_package_uses_canonical_outfit_sentence_from_context_without_rebuilding(monkeypatch):
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["outfit_sentence"] = "soft knit top, relaxed straight trousers, comfortable sneakers, small crossbody bag; slightly relaxed fit with natural drape"
+    context["outfit_struct"] = {
+        "top": "soft knit top",
+        "bottom": "relaxed straight trousers",
+        "shoes": "comfortable sneakers",
+        "accessories": "small crossbody bag",
+        "fit": "slightly relaxed fit with natural drape",
+        "outfit_sentence": context["outfit_sentence"],
+    }
+
+    def _fail_generate_bundle(*args, **kwargs):
+        raise AssertionError("compose_package should use canonical outfit_sentence from context")
+
+    monkeypatch.setattr(composer.outfit_generator, "generate_bundle", _fail_generate_bundle)
+
+    package = composer.compose_package(context, Scene(), "ignored summary", "photo", ["top_1"])
+
+    assert package["outfit_sentence"] == context["outfit_sentence"]
+    assert package["outfit_summary"] == context["outfit_sentence"]
+    assert package["final_prompt"].split("\n\n")[3] == f"Outfit: {context['outfit_sentence']}."
+
+
 @pytest.mark.parametrize("placeholder", ["placeholder", "outfit", "same outfit", "n/a"])
 def test_placeholder_outfit_uses_safe_fallback(placeholder: str):
     package = _compose(outfit_summary=placeholder)
@@ -356,6 +381,16 @@ def test_validate_prompt_rejects_cyrillic():
     with pytest.raises(PromptValidationError, match="Cyrillic detected in prompt"):
         composer._validate_canonical_prompt(
             "Identity: Овальная face.\n\nmirror selfie head-and-shoulders shot\n\nScene: morning routine.\n\nOutfit: knit top, jeans, white sneakers.\n\nEnvironment: photorealistic room; accurate perspective.\n\nMood: calm ease.",
+            Scene(),
+            BASE_CONTEXT,
+        )
+
+
+def test_validate_prompt_rejects_empty_outfit_placeholder():
+    composer = PromptComposer(DummyState())
+    with pytest.raises(PromptValidationError, match="Outfit block is empty"):
+        composer._validate_canonical_prompt(
+            "Identity: soft oval face.\n\nmirror selfie head-and-shoulders shot\n\nScene: morning routine.\n\nOutfit: .\n\nEnvironment: photorealistic room; accurate perspective.\n\nMood: calm ease.",
             Scene(),
             BASE_CONTEXT,
         )

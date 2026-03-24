@@ -39,11 +39,33 @@ def _item(index: int = 1, publication_id: str | None = None) -> PublishingPlanIt
         visual_focus="door",
         activity_type="packing",
         outfit_ids=["o1"],
+        outfit_sentence="soft knit top, straight jeans, white sneakers, small shoulder bag; slightly relaxed fit with natural drape",
+        outfit_struct_json=json.dumps(
+            {
+                "top": "soft knit top",
+                "bottom": "straight jeans",
+                "shoes": "white sneakers",
+                "accessories": "small shoulder bag",
+                "fit": "slightly relaxed fit with natural drape",
+            }
+        ),
+        outfit_summary="soft knit top, straight jeans, white sneakers, small shoulder bag; slightly relaxed fit with natural drape",
         prompt_type="photo",
         prompt_text="A cinematic candid in warm morning light",
         prompt_package_json=json.dumps(
             {
                 "final_prompt": "Identity: stable.\n\nmirror selfie head-and-shoulders shot\n\nScene: final room check with luggage ready by the door.\n\nOutfit: soft knit top, straight jeans, white sneakers.\n\nEnvironment: photorealistic hotel room; lived-in environmental detail; accurate perspective and scale.\n\nMood: quiet confidence.",
+                "outfit_sentence": "soft knit top, straight jeans, white sneakers, small shoulder bag; slightly relaxed fit with natural drape",
+                "outfit_struct_json": json.dumps(
+                    {
+                        "top": "soft knit top",
+                        "bottom": "straight jeans",
+                        "shoes": "white sneakers",
+                        "accessories": "small shoulder bag",
+                        "fit": "slightly relaxed fit with natural drape",
+                    }
+                ),
+                "outfit_summary": "soft knit top, straight jeans, white sneakers, small shoulder bag; slightly relaxed fit with natural drape",
                 "negative_prompt": "extra fingers, plastic skin",
                 "shot_archetype": "mirror_selfie",
                 "platform_intent": "instagram_feed",
@@ -216,6 +238,21 @@ def test_prompt_screen_falls_back_to_final_prompt_from_prompt_package_json():
     assert "A realistic candid friend-shot walking through the terminal." in prompt_text
 
 
+def test_prompt_screen_repairs_invalid_outfit_block_from_canonical_outfit_sentence():
+    item = _item()
+    item.prompt_package_json = json.dumps(
+        {
+            "final_prompt": "Identity: stable.\n\nmirror selfie head-and-shoulders shot\n\nScene: final room check with luggage ready by the door.\n\nOutfit: .\n\nEnvironment: photorealistic hotel room; lived-in environmental detail; accurate perspective and scale.\n\nMood: quiet confidence.",
+            "outfit_sentence": item.outfit_sentence,
+        }
+    )
+
+    text = format_prompt_screen(item, 0)
+
+    assert "Outfit: ." not in text
+    assert item.outfit_sentence in text
+
+
 def test_prompt_screen_localizes_ui_and_keeps_generation_blocks_english():
     text = format_prompt_screen(_item(), 0)
 
@@ -318,6 +355,8 @@ def test_serialize_context_preserves_detail_screen_metadata():
     assert items[0].emotional_arc == "quiet_settling"
     assert items[0].habit_used == "window_pause"
     assert items[0].habit_family == "quiet_pause"
+    assert items[0].outfit_sentence == item.outfit_sentence
+    assert items[0].outfit_struct_json == item.outfit_struct_json
 
 
 def test_item_from_row_recovers_detail_fields_from_canonical_snapshot_keys():

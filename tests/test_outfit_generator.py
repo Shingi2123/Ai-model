@@ -82,5 +82,7 @@ def test_manual_override_is_returned_as_is_when_valid():
     scene = _scene(outfit_override="soft knit top, straight jeans, white sneakers, small shoulder bag")
 
     outfit = generator.generate(outfit_summary="", scene=scene, context=_context())
+    bundle = generator.generate_bundle(outfit_summary="", scene=scene, context=_context())
 
     assert outfit == "soft knit top, straight jeans, white sneakers, small shoulder bag"
+    assert bundle.outfit_sentence == outfit
