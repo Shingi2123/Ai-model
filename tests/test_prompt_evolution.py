@@ -867,6 +867,8 @@ def test_finalize_canonical_prompt_softens_terminal_outfit_phrase_overlap_instea
     )
 
     final_prompt = diagnostics["prompt"].lower()
+    identity_block = final_prompt.split("\n\n")[0]
+    scene_block = final_prompt.split("\n\n")[2]
     outfit_block = final_prompt.split("\n\n")[3]
 
     assert diagnostics["post_sanitize_validation_result"] in {"passed", "passed_with_fallback"}
@@ -874,10 +876,67 @@ def test_finalize_canonical_prompt_softens_terminal_outfit_phrase_overlap_instea
     assert diagnostics["finalization_path"] in {"sanitized", "fallback"}
     assert diagnostics["prompt_blocker_demoted_to_warning"] is True or diagnostics["safe_fallback_used"] is True
     assert diagnostics["garment_phrase_compaction_applied"] is True or diagnostics["safe_fallback_used"] is True
+    assert diagnostics["quality_floor_met"] is True
     assert "a a" not in final_prompt
     assert "and and" not in final_prompt
+    assert composer._identity_floor_cue_count(identity_block) >= composer.IDENTITY_FLOOR_MIN_CUES
+    assert "recognizable face" not in identity_block
     assert "that fall straight without trying too hard" not in outfit_block
     assert "worn crossbody with the strap cutting diagonally through the frame" not in outfit_block
+    assert "a straight trousers" not in outfit_block
+    assert outfit_block.count("trousers") == 1
+    assert "waiting at the terminal gate" in scene_block
+    assert ", boarding still ahead" in scene_block or "with boarding still ahead" in scene_block
+
+
+def test_outfit_normalizer_keeps_single_grammar_safe_garment_anchor():
+    composer = PromptComposer(DummyState())
+    normalized = composer._normalize_outfit_sentence_for_prompt(
+        "soft knit top, a straight trousers, relaxed straight trousers, comfortable sneakers, small crossbody bag",
+        Scene(),
+        BASE_CONTEXT,
+    ).lower()
+
+    assert "a straight trousers" not in normalized
+    assert normalized.count("trousers") == 1
+    assert "relaxed straight trousers" in normalized or "straight trousers" in normalized
+
+
+def test_terminal_gate_prompt_mode_stays_dense_when_final_prompt_remains_structured():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["day_type"] = "travel_day"
+    context["behavioral_context"] = BehaviorState(
+        energy_level="low",
+        social_mode="light_public",
+        emotional_arc="transition",
+        habit="coffee_moment",
+        place_anchor="terminal_gate",
+        objects=["coffee_cup", "carry_on", "bag"],
+        self_presentation="transitional",
+    )
+    scene = Scene()
+    scene.location = "airport terminal"
+    scene.activity = "waiting"
+    scene.scene_moment = "Calm waiting at the terminal gate before boarding"
+    scene.description = "Calm waiting at the terminal gate before boarding"
+    scene.time_of_day = "morning"
+    scene.visual_focus = "coffee cup, departure board"
+    scene.camera_archetype = "seated_table_shot"
+
+    package = composer.compose_package(
+        context,
+        scene,
+        "soft knit top, relaxed straight trousers, comfortable sneakers, small crossbody bag",
+        "photo",
+        ["top_1"],
+    )
+    prompt = package["final_prompt"].lower()
+
+    assert package["prompt_mode"] == "dense"
+    assert composer._identity_floor_cue_count(prompt.split("\n\n")[0]) >= composer.IDENTITY_FLOOR_MIN_CUES
+    assert "a straight trousers" not in prompt
+    assert "waiting at the terminal gate" in prompt.split("\n\n")[2]
 
 
 def test_override_hint_pushes_presence_and_camera_distance():

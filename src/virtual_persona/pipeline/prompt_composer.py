@@ -39,7 +39,11 @@ class PromptComposer:
     COMPACT_PROMPT_THRESHOLD = 740
     DENSE_PROMPT_MIN_LENGTH = 728
     DENSE_PROMPT_EXPANDED_BLOCKS = 4
+    STRUCTURED_DENSE_PROMPT_MIN_LENGTH = 560
+    STRUCTURED_DENSE_EXPANDED_BLOCKS = 3
     EXPANDED_BLOCK_BODY_THRESHOLD = 28
+    IDENTITY_FLOOR_MIN_CUES = 6
+    IDENTITY_FLOOR_ORDER: tuple[str, ...] = ("face", "jawline", "nose", "eyes", "lips", "skin", "hair")
     CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
     PLACEHOLDER_TOKENS: tuple[str, ...] = (
         "n/a",
@@ -230,6 +234,23 @@ class PromptComposer:
         "passport",
         "laptop",
     )
+    OUTFIT_PLURAL_NOUNS: tuple[str, ...] = (
+        "trousers",
+        "pants",
+        "jeans",
+        "shorts",
+        "joggers",
+        "leggings",
+        "sneakers",
+        "boots",
+        "loafers",
+        "sandals",
+        "slides",
+        "trainers",
+        "shoes",
+        "glasses",
+        "earrings",
+    )
 
     CAMERA_ARCHETYPES: Dict[str, Dict[str, str]] = None  # type: ignore[assignment]
     GENERATION_MODE_REGISTRY: Dict[str, Dict[str, Any]] = None  # type: ignore[assignment]
@@ -376,6 +397,7 @@ class PromptComposer:
         primary_anchors = ", ".join(reference_selection.get("primary_anchors", []))
         secondary_anchors = ", ".join(reference_selection.get("secondary_anchors", []))
         manual_step = self._manual_generation_step(reference_selection)
+        stored_outfit_sentence = self._clean_fragment(str(context.get("outfit_sentence") or "")) or normalized_outfit
 
         # backward-compatible keys (v3)
         ordered_blocks = {
@@ -387,8 +409,8 @@ class PromptComposer:
             "outfit_structured": outfit_bundle.to_dict(),
             "outfit_struct": outfit_bundle.to_dict(),
             "outfit_struct_json": json.dumps(outfit_bundle.to_dict(), ensure_ascii=False),
-            "outfit_sentence": normalized_outfit,
-            "outfit_summary": normalized_outfit,
+            "outfit_sentence": stored_outfit_sentence,
+            "outfit_summary": stored_outfit_sentence,
             "outfit_perceived_sentence": perceived_outfit,
             "camera_block": camera_block,
             "realism_block": realism_block,
@@ -517,7 +539,88 @@ class PromptComposer:
             return "dense"
         if len(normalized) >= PromptComposer.DENSE_PROMPT_MIN_LENGTH and expanded_blocks >= PromptComposer.DENSE_PROMPT_EXPANDED_BLOCKS:
             return "dense"
+        if len(blocks) == 6 and len(normalized) >= PromptComposer.STRUCTURED_DENSE_PROMPT_MIN_LENGTH and expanded_blocks >= PromptComposer.STRUCTURED_DENSE_EXPANDED_BLOCKS:
+            return "dense"
         return "compact"
+
+    def _identity_floor_defaults(self, context: Dict[str, Any]) -> Dict[str, str]:
+        profile = context.get("character_profile") or {}
+        age = self._ensure_english_fragment(profile.get("age", "22"), "22")
+
+        face = self._ensure_english_fragment(
+            profile.get("appearance_face_shape") or profile.get("face_shape") or "soft oval face",
+            "soft oval face",
+        )
+        if "face" not in face.lower():
+            face = f"{face} face"
+
+        jawline = self._ensure_english_fragment(profile.get("jawline") or "gentle defined jawline", "gentle defined jawline")
+
+        nose = self._ensure_english_fragment(profile.get("nose") or profile.get("nose_bridge") or "straight natural nose", "straight natural nose")
+        if "nose" not in nose.lower():
+            nose = f"{nose} natural nose"
+
+        eyes = self._ensure_english_fragment(profile.get("eyes") or profile.get("appearance_eye_color") or "green almond eyes", "green almond eyes")
+        if "eye" not in eyes.lower():
+            eyes = f"{eyes} almond eyes"
+
+        lips = self._ensure_english_fragment(profile.get("lips") or profile.get("lip_fullness") or "natural medium lips", "natural medium lips")
+        if "lip" not in lips.lower():
+            lips = f"{lips} lips"
+
+        skin = self._ensure_english_fragment(profile.get("skin_realism_profile") or profile.get("skin") or "natural skin texture", "natural skin texture")
+        if "skin" not in skin.lower() and "texture" not in skin.lower() and "freckle" not in skin.lower():
+            skin = f"{skin} skin texture"
+
+        hair = self._ensure_english_fragment(profile.get("hair") or profile.get("appearance_hair_color") or "light chestnut medium-length hair", "light chestnut medium-length hair")
+        if "hair" not in hair.lower():
+            hair = f"{hair} medium-length hair"
+
+        return {
+            "age": age,
+            "face": face,
+            "jawline": jawline,
+            "nose": nose,
+            "eyes": eyes,
+            "lips": lips,
+            "skin": skin,
+            "hair": hair,
+        }
+
+    def _identity_floor_cue_count(self, identity_body: str) -> int:
+        lowered = self._clean_fragment(identity_body).lower()
+        patterns = {
+            "face": r"\b(face|oval|round|square|heart-shaped|cheek contour|cheekbone)\b",
+            "jawline": r"\bjaw(line)?\b",
+            "nose": r"\bnose\b",
+            "eyes": r"\beye|eyes|brow|brows\b",
+            "lips": r"\blip|lips\b",
+            "skin": r"\bskin|texture|freckle|complexion\b",
+            "hair": r"\bhair\b",
+        }
+        return sum(1 for pattern in patterns.values() if re.search(pattern, lowered))
+
+    def _recover_identity_body(self, identity_body: str, context: Dict[str, Any], *, force_floor: bool = False) -> str:
+        repaired = self._repair_duplicate_sequences_in_text(identity_body, aggressive=True)
+        if repaired and not force_floor and self._identity_floor_cue_count(repaired) >= self.IDENTITY_FLOOR_MIN_CUES:
+            return repaired
+
+        defaults = self._identity_floor_defaults(context)
+        age = next((match.group(0) for match in [re.search(r"\b\d{2}(?:-year-old)?\b", repaired)] if match), defaults["age"])
+        if age.isdigit():
+            age = f"{age}-year-old"
+
+        cues = [defaults[key] for key in self.IDENTITY_FLOOR_ORDER if defaults.get(key)]
+        lead = f"a {age} woman with {self._human_join(cues)}"
+
+        support_cues: List[str] = []
+        if "shoulder" in repaired.lower():
+            support_cues.append("relaxed shoulders")
+        if "posture" in repaired.lower():
+            support_cues.append("natural upright posture")
+        if support_cues:
+            lead = f"{lead}, {self._human_join(support_cues[:2])}"
+        return self._clean_fragment(lead)
 
     def _resolve_generation_mode(self, scene: Any, shot_archetype: str) -> str:
         explicit = getattr(scene, "generation_mode", "")
@@ -550,6 +653,8 @@ class PromptComposer:
             ]
         ).lower()
         lowered_moment_type = str(getattr(scene, "scene_moment_type", "") or "").lower()
+        explicit_shot = str(getattr(scene, "camera_archetype", "") or getattr(scene, "shot_archetype", "") or "")
+        explicit_camera_locked = explicit_shot in self.CAMERA_ARCHETYPES
         is_travel = any(token in lowered for token in ["airport", "terminal", "travel", "flight", "layover", "boarding"])
         has_luggage = any(token in lowered for token in ["luggage", "suitcase", "carry-on", "carry on", "roller bag", "shoulder bag"])
         is_walking = any(token in lowered for token in ["walking", "walk", "stroll", "moving through", "crossing"])
@@ -557,7 +662,11 @@ class PromptComposer:
         is_selfie = (
             "selfie" in lowered_core
             or "mirror" in lowered_core
-            or (lowered_moment_type in {"selfie", "diary_mirror"} and not (is_travel and is_walking and has_luggage))
+            or (
+                lowered_moment_type in {"selfie", "diary_mirror"}
+                and not explicit_camera_locked
+                and not (is_travel and is_walking and has_luggage)
+            )
         )
 
         aligned_shot = shot_archetype
@@ -1665,7 +1774,7 @@ class PromptComposer:
             (r"\bmeasured expression and upright posture\b", "held together without looking posed"),
             (r"\bgentle expression and relaxed shoulders\b", "relaxed shoulders and an expression left soft"),
             (r"\bnatural pause moment\b", "a pause already underway"),
-            (r"\bstill posture\b", "still for a second, not frozen"),
+            (r"\bstill posture\b", "a pause already underway"),
             (r"\bslow relaxed movement\b", "movement just slow enough to still be in it"),
             (r"\bsmall detail:\s*", ""),
         ]
@@ -1680,6 +1789,188 @@ class PromptComposer:
             cleaned = cleaned.replace("with the quiet still hanging there", "quiet still hanging there", 1)
         cleaned = re.sub(r"\b(daily pause|natural pause moment)\b", "a pause already underway", cleaned, flags=re.IGNORECASE)
         return self._decapitalize_fragment(cleaned)
+
+    def _smooth_scene_clause(self, clause: str) -> str:
+        cleaned = self._repair_duplicate_sequences_in_text(self._grounded_phrase(clause), aggressive=True)
+        if not cleaned:
+            return ""
+        cleaned = re.sub(
+            r"^(?:calm|quiet|soft|slow)\s+(waiting|walking|standing|sitting)\b",
+            r"\1",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        if "boarding still ahead" in cleaned.lower() and ", boarding still ahead" not in cleaned.lower() and "with boarding still ahead" not in cleaned.lower():
+            cleaned = re.sub(r"\s+boarding still ahead\b", ", boarding still ahead", cleaned, flags=re.IGNORECASE, count=1)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        return self._clean_fragment(cleaned)
+
+    def _scene_quality_ok(self, scene_body: str) -> bool:
+        lowered = self._clean_fragment(scene_body).lower()
+        if len(lowered.split()) < 5:
+            return False
+        if re.match(r"^(?:calm|quiet|soft|slow)\s+(waiting|walking|standing|sitting)\b", lowered):
+            return False
+        if "boarding still ahead" in lowered and ", boarding still ahead" not in lowered and "with boarding still ahead" not in lowered:
+            return False
+        return True
+
+    def _quality_recover_scene_body(self, scene_body: str, scene: Any, context: Dict[str, Any]) -> str:
+        clauses = [clause["text"] for clause in self._extract_semantic_clauses("Scene", scene_body)]
+        if not clauses:
+            clauses = [self._scene_presence_lead(scene, scene_body) or self._minimal_scene_body(scene)]
+        smoothed = [self._smooth_scene_clause(clause) for clause in clauses]
+        smoothed = [clause for clause in smoothed if clause]
+
+        required_objects = self._behavior_object_terms(context, scene)
+        for object_term in required_objects:
+            phrase = self._object_scene_phrase(object_term, scene, context=context)
+            if phrase and phrase.lower() not in " ".join(smoothed).lower():
+                smoothed.append(self._smooth_scene_clause(phrase))
+
+        lowered_scene = self._scene_text(scene).lower()
+        if (
+            any(token in lowered_scene for token in ["waiting", "pause", "coffee", "gate"])
+            and not any("pause already underway" in clause.lower() or "still for a second, not frozen" in clause.lower() for clause in smoothed)
+        ):
+            smoothed.append("a pause already underway")
+
+        recovered = self._dedupe_semantic_phrases(smoothed)
+        if not recovered:
+            recovered = [self._smooth_scene_clause(self._scene_presence_lead(scene, scene_body) or self._minimal_scene_body(scene))]
+        return ", ".join([clause for clause in recovered if clause][:6])
+
+    def _environment_quality_ok(self, environment_body: str) -> bool:
+        clauses = self._extract_semantic_clauses("Environment", environment_body)
+        lowered = self._clean_fragment(environment_body).lower()
+        return len(clauses) >= 3 and "photorealistic" in lowered and "perspective" in lowered and "light" in lowered
+
+    def _mood_quality_ok(self, mood_body: str) -> bool:
+        lowered = self._clean_fragment(mood_body).lower()
+        if len(lowered.split()) < 6:
+            return False
+        return not lowered.endswith(" mood") and "self-presentation" not in lowered
+
+    def _prompt_quality_floor_diagnostics(self, prompt: str, scene: Any, context: Dict[str, Any]) -> Dict[str, Any]:
+        block_map = self._prompt_block_map(prompt)
+        if not block_map:
+            return {
+                "passed": False,
+                "failed_checks": ["block_structure"],
+                "identity_cue_count": 0,
+                "outfit_grammar_ok": False,
+                "scene_natural": False,
+                "environment_rich": False,
+                "mood_rich": False,
+            }
+
+        identity_body = self._split_block_label(block_map["Identity"])[1]
+        scene_body = self._split_block_label(block_map["Scene"])[1]
+        outfit_body = self._split_block_label(block_map["Outfit"])[1]
+        environment_body = self._split_block_label(block_map["Environment"])[1]
+        mood_body = self._split_block_label(block_map["Mood"])[1]
+
+        identity_cue_count = self._identity_floor_cue_count(identity_body)
+        outfit_grammar_ok = True
+        try:
+            self.validate_outfit_sentence(outfit_body)
+        except PromptValidationError:
+            outfit_grammar_ok = False
+        if self._has_invalid_plural_article(outfit_body):
+            outfit_grammar_ok = False
+        clothing, _, _ = self._split_outfit_scene_props(outfit_body)
+        normalized_clothing = self._normalize_outfit_clothing_items(clothing)
+        if len(normalized_clothing) != len(self._dedupe_phrases(clothing)):
+            outfit_grammar_ok = False
+
+        scene_natural = self._scene_quality_ok(scene_body)
+        environment_rich = self._environment_quality_ok(environment_body)
+        mood_rich = self._mood_quality_ok(mood_body)
+
+        failed_checks: List[str] = []
+        if identity_cue_count < self.IDENTITY_FLOOR_MIN_CUES:
+            failed_checks.append("identity_floor")
+        if not outfit_grammar_ok:
+            failed_checks.append("outfit_grammar")
+        if not scene_natural:
+            failed_checks.append("scene_naturalness")
+        if not environment_rich:
+            failed_checks.append("environment_floor")
+        if not mood_rich:
+            failed_checks.append("mood_floor")
+        return {
+            "passed": not failed_checks,
+            "failed_checks": failed_checks,
+            "identity_cue_count": identity_cue_count,
+            "outfit_grammar_ok": outfit_grammar_ok,
+            "scene_natural": scene_natural,
+            "environment_rich": environment_rich,
+            "mood_rich": mood_rich,
+        }
+
+    def _recover_canonical_prompt_quality(
+        self,
+        prompt: str,
+        scene: Any,
+        context: Dict[str, Any],
+        *,
+        outfit_sentence: str = "",
+        shot_archetype: str = "",
+    ) -> Dict[str, Any]:
+        block_map = self._prompt_block_map(prompt)
+        if not block_map:
+            return {
+                "prompt": str(prompt or "").strip(),
+                "prompt_blocks": {},
+                "quality_recovery_applied": False,
+                "quality_diagnostics": self._prompt_quality_floor_diagnostics(prompt, scene, context),
+            }
+
+        diagnostics = self._prompt_quality_floor_diagnostics(prompt, scene, context)
+        updated = dict(block_map)
+        changed = False
+        outfit_recovered = False
+
+        if diagnostics["identity_cue_count"] < self.IDENTITY_FLOOR_MIN_CUES:
+            identity_body = self._split_block_label(updated["Identity"])[1]
+            recovered_identity = self._recover_identity_body(identity_body, context, force_floor=True)
+            updated["Identity"] = f"Identity: {recovered_identity}."
+            changed = True
+
+        current_outfit = self._split_block_label(updated["Outfit"])[1] or self._clean_fragment(outfit_sentence)
+        recovered_outfit = self._normalize_outfit_sentence_for_prompt(current_outfit, scene, context)
+        if recovered_outfit != self._clean_fragment(current_outfit):
+            changed = True
+            outfit_recovered = True
+        updated["Outfit"] = f"Outfit: {recovered_outfit}."
+
+        scene_body = self._split_block_label(updated["Scene"])[1]
+        if not diagnostics["scene_natural"]:
+            recovered_scene = self._quality_recover_scene_body(scene_body, scene, context)
+            updated["Scene"] = f"Scene: {recovered_scene}."
+            changed = True
+
+        if not diagnostics["environment_rich"]:
+            coherence = self._resolve_place_coherence(context, scene, environment_body=self._split_block_label(updated["Environment"])[1])
+            recovered_environment = self._in_the_moment_environment_body(self._coherent_environment_seed(scene, context, coherence))
+            updated["Environment"] = f"Environment: {recovered_environment}."
+            changed = True
+
+        if not diagnostics["mood_rich"]:
+            updated["Mood"] = f"Mood: {self._fallback_mood_presence_phrase(scene, context)}."
+            changed = True
+
+        recovered_prompt = "\n\n".join(
+            updated[name]
+            for name in ["Identity", "Framing", "Scene", "Outfit", "Environment", "Mood"]
+        )
+        return {
+            "prompt": recovered_prompt,
+            "prompt_blocks": updated,
+            "quality_recovery_applied": changed,
+            "outfit_recovered": outfit_recovered,
+            "quality_diagnostics": self._prompt_quality_floor_diagnostics(recovered_prompt, scene, context),
+        }
 
     def _in_the_moment_environment_body(self, environment_body: str) -> str:
         clauses = [clause["text"] for clause in self._extract_semantic_clauses("Environment", environment_body)]
@@ -1706,6 +1997,8 @@ class PromptComposer:
             if rewritten_clause:
                 rewritten_raw.append(rewritten_clause)
         rewritten = self._dedupe_phrases(rewritten_raw)
+        if not any("already happening by the time the camera catches it" in clause.lower() for clause in rewritten):
+            rewritten.append("already happening by the time the camera catches it")
         return ", ".join(rewritten[:3]) if rewritten else "already happening by the time the camera catches it"
 
     def _rewrite_mood_clause_for_presence(self, clause: str) -> str:
@@ -1923,6 +2216,10 @@ class PromptComposer:
         for idx, clause in enumerate(cleaned):
             lowered = clause.lower()
             is_required = idx == 0 or any(obj in lowered for obj in required_objects)
+            if "bag" in required_objects and "travel items nearby" in lowered:
+                is_required = True
+            if "pause already underway" in lowered or "still for a second" in lowered:
+                is_required = True
             is_micro = any(
                 token in lowered
                 for token in ["slight", "slightly", "fraction", "uneven", "loose", "mid-thought", "finger tension", "grip", "wrist"]
@@ -2145,11 +2442,15 @@ class PromptComposer:
                 pieces.append(expression)
             if micro_detail:
                 pieces.append(micro_detail)
+            if (
+                any(token in lowered for token in ["waiting", "pause", "coffee", "gate"])
+                and not any("pause already underway" in piece.lower() or "still for a second" in piece.lower() for piece in pieces)
+            ):
+                pieces.append("a pause already underway")
             for object_term in object_terms:
-                if object_term.lower() not in " ".join(pieces).lower():
-                    phrase = self._object_scene_phrase(object_term, scene, context=context, coherence=coherence)
-                    if phrase:
-                        pieces.append(phrase)
+                phrase = self._object_scene_phrase(object_term, scene, context=context, coherence=coherence)
+                if phrase and phrase.lower() not in " ".join(pieces).lower():
+                    pieces.append(phrase)
             for cue in scene_presence:
                 if cue.lower() not in " ".join(pieces).lower():
                     pieces.append(cue)
@@ -2179,11 +2480,15 @@ class PromptComposer:
             pieces.append(expression)
         if micro_detail and micro_detail.lower() not in " ".join(pieces).lower():
             pieces.append(micro_detail)
+        if (
+            any(token in lowered for token in ["waiting", "pause", "coffee", "gate"])
+            and not any("pause already underway" in piece.lower() or "still for a second" in piece.lower() for piece in pieces)
+        ):
+            pieces.append("a pause already underway")
         for object_term in object_terms:
-            if object_term.lower() not in " ".join(pieces).lower():
-                phrase = self._object_scene_phrase(object_term, scene, context=context, coherence=coherence)
-                if phrase:
-                    pieces.append(phrase)
+            phrase = self._object_scene_phrase(object_term, scene, context=context, coherence=coherence)
+            if phrase and phrase.lower() not in " ".join(pieces).lower():
+                pieces.append(phrase)
         for cue in scene_presence:
             if cue.lower() not in " ".join(pieces).lower():
                 pieces.append(cue)
@@ -2232,6 +2537,7 @@ class PromptComposer:
         behavior = context.get("behavioral_context")
         mood_presence = list((presence_layer or {}).get("mood_cues") or [])
         time_of_day = str(getattr(scene, "time_of_day", "") or "").lower()
+        outfit_override = str(context.get("outfit_override") or "").lower()
         canonical = {
             "curious": "quiet curiosity",
             "focused": "composed focus",
@@ -2243,6 +2549,8 @@ class PromptComposer:
             "happy": "light warmth",
         }
         base = canonical.get(mood, "quiet confidence")
+        if outfit_override == "slightly_sexy":
+            return "Mood: quietly intimate body language, a little more open through the posture."
         if coherence.private_scene and time_of_day in {"early_morning", "morning", "late_morning"}:
             return "Mood: already happening by the time the camera catches it."
         if behavior is not None:
@@ -2336,12 +2644,14 @@ class PromptComposer:
         outerwear = self._clean_fragment(getattr(outfit_bundle, "outerwear", "") or "")
         shoes = self._clean_fragment(getattr(outfit_bundle, "shoes", "") or "")
         accessories = self._clean_fragment(getattr(outfit_bundle, "accessories", "") or "")
+        if shoes and any(token in shoes.lower() for token in ["sneakers", "trainers"]) and "worn" not in shoes.lower():
+            shoes = f"{shoes} worn in"
 
         clothing: List[str] = []
-        if top and bottom:
-            clothing.append(f"{top} worn with {bottom}")
-        elif top:
+        if top:
             clothing.append(top)
+        if bottom:
+            clothing.append(bottom)
         for piece in [outerwear, shoes, accessories]:
             if piece:
                 clothing.append(piece)
@@ -2357,9 +2667,10 @@ class PromptComposer:
         )
 
         if clothing:
-            rebuilt = self._human_join(clothing)
-            if details:
-                rebuilt = f"{rebuilt}; {', '.join(details)}"
+            rebuilt = ", ".join(self._normalize_outfit_clothing_items(clothing))
+            detail_phrase = self._grounded_outfit_detail_phrase(details)
+            if detail_phrase:
+                rebuilt = f"{rebuilt}, {detail_phrase}"
             try:
                 return self.validate_outfit_sentence(rebuilt)
             except PromptValidationError:
@@ -2839,6 +3150,11 @@ class PromptComposer:
         sequence = self._clean_fragment(str(entry.get("sequence") or ""))
         if not sequence:
             return False
+        content_words = self._sequence_content_words(sequence)
+        if len(content_words) < 3:
+            return False
+        if any(token in sequence.lower() for token in ["a little off", "little off", "off center", "a little higher"]):
+            return False
         if self._garment_phrase_family(sequence) and int(entry.get("count") or 0) <= 2:
             return False
         return True
@@ -3070,13 +3386,7 @@ class PromptComposer:
         if not framing_block:
             framing_block = self._framing_block(self._framing_mode(resolved_shot, self._resolve_generation_mode(scene, resolved_shot)), resolved_shot, scene)
 
-        identity_text = (
-            self._clean_fragment(identity_body.split(";")[0])
-            if identity_body
-            else "a 22-year-old woman with a recognizable face, relaxed shoulders, and an easy upright posture"
-        )
-        if not identity_text:
-            identity_text = "a 22-year-old woman with a recognizable face, relaxed shoulders, and an easy upright posture"
+        identity_text = self._recover_identity_body(identity_body, context, force_floor=True)
 
         preferred_outfit = self._clean_fragment(outfit_sentence) or self.extract_outfit_sentence(prompt) or self._contextual_outfit_fallback_sentence(scene, context)
         scene_anchor = self._scene_presence_lead(scene, self._minimal_scene_body(scene)) or self._minimal_scene_body(scene)
@@ -3100,7 +3410,7 @@ class PromptComposer:
             and "checking the boarding screen occasionally" not in " ".join(scene_objects).lower()
         ):
             scene_objects.append("checking the boarding screen occasionally")
-        scene_text = ", ".join(self._dedupe_semantic_phrases([scene_anchor] + scene_objects)[:6]) or scene_anchor
+        scene_text = ", ".join(self._dedupe_semantic_phrases([self._smooth_scene_clause(scene_anchor)] + [self._smooth_scene_clause(obj) for obj in scene_objects])[:6]) or self._smooth_scene_clause(scene_anchor)
 
         compacted = self._compact_outfit_phrase_clusters(preferred_outfit, aggressive=True)
         coherent_outfit = self._coherent_outfit_sentence(
@@ -3450,6 +3760,107 @@ class PromptComposer:
             return "laptop"
         return self._clean_fragment(text)
 
+    @classmethod
+    def _has_invalid_plural_article(cls, text: str) -> bool:
+        lowered = cls._clean_fragment(text).lower()
+        if not lowered:
+            return False
+        plural_pattern = "|".join(re.escape(token) for token in cls.OUTFIT_PLURAL_NOUNS)
+        return bool(
+            re.search(
+                rf"\b(?:a|an)\s+(?:[a-z-]+\s+){{0,4}}(?:{plural_pattern})\b",
+                lowered,
+            )
+        )
+
+    @classmethod
+    def _strip_invalid_outfit_article(cls, text: str) -> str:
+        cleaned = cls._clean_fragment(text)
+        if not cleaned:
+            return ""
+        plural_pattern = "|".join(re.escape(token) for token in cls.OUTFIT_PLURAL_NOUNS)
+        cleaned = re.sub(
+            rf"^(?:a|an)\s+(?=(?:[a-z-]+\s+){{0,4}}(?:{plural_pattern})\b)",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        return cls._clean_fragment(cleaned)
+
+    def _garment_anchor_token(self, text: str) -> str:
+        lowered = self._clean_fragment(text).lower()
+        best = ""
+        for tokens in self.GARMENT_CATEGORY_TOKENS.values():
+            for token in tokens:
+                if re.search(rf"\b{re.escape(token)}\b", lowered) and len(token) > len(best):
+                    best = token
+        return best
+
+    def _same_garment_anchor(self, left: str, right: str) -> bool:
+        left_clean = self._clean_fragment(left)
+        right_clean = self._clean_fragment(right)
+        if not left_clean or not right_clean:
+            return False
+        if self._outfit_category(left_clean) != self._outfit_category(right_clean):
+            return False
+        left_anchor = self._garment_anchor_token(left_clean)
+        right_anchor = self._garment_anchor_token(right_clean)
+        if left_anchor and right_anchor and left_anchor == right_anchor:
+            return True
+        return self._token_overlap_ratio(self._semantic_tokens(left_clean), self._semantic_tokens(right_clean)) >= 0.72
+
+    def _prefer_outfit_phrase(self, left: str, right: str) -> str:
+        if self._same_garment_anchor(left, right) and self._outfit_category(left) == "shoes":
+            left_worn = "worn in" in left.lower()
+            right_worn = "worn in" in right.lower()
+            if left_worn != right_worn:
+                return left if left_worn else right
+
+        def _score(text: str) -> tuple[int, int, int]:
+            lowered = self._clean_fragment(text).lower()
+            tokens = re.findall(r"[a-z-]+", lowered)
+            modifiers = sum(
+                1
+                for token in [
+                    "relaxed",
+                    "straight",
+                    "soft",
+                    "light",
+                    "comfortable",
+                    "fitted",
+                    "tailored",
+                    "structured",
+                    "compact",
+                    "small",
+                    "everyday",
+                    "breathable",
+                    "knit",
+                    "linen",
+                    "crossbody",
+                    "white",
+                    "leather",
+                ]
+                if token in lowered
+            )
+            relation_penalty = int(bool(re.search(r"\b(with|that|worn|left|looking|falling|moving|kept)\b", lowered)))
+            grammar_bonus = 0 if self._has_invalid_plural_article(lowered) else 2
+            return (grammar_bonus + modifiers + min(len(tokens), 6) - relation_penalty, -len(tokens), -len(lowered))
+
+        return left if _score(left) >= _score(right) else right
+
+    def _normalize_outfit_clothing_items(self, clothing: List[str]) -> List[str]:
+        normalized: List[str] = []
+        for item in self._dedupe_phrases(clothing):
+            cleaned = self._strip_invalid_outfit_article(self._repair_duplicate_sequences_in_text(item, aggressive=True))
+            if not cleaned:
+                continue
+            overlap_index = next((idx for idx, existing in enumerate(normalized) if self._same_garment_anchor(existing, cleaned)), None)
+            if overlap_index is None:
+                normalized.append(cleaned)
+                continue
+            normalized[overlap_index] = self._prefer_outfit_phrase(normalized[overlap_index], cleaned)
+        return self._dedupe_phrases(normalized)
+
     def _compact_outfit_item_phrase(self, text: str, *, aggressive: bool) -> str:
         cleaned = self._clean_fragment(text)
         if not cleaned:
@@ -3537,9 +3948,13 @@ class PromptComposer:
             compacted = self._compact_outfit_phrase_clusters(cleaned, aggressive=False)
             cleaned = self._clean_fragment(str(compacted.get("outfit_sentence") or cleaned))
             clothing, details, _ = self._split_outfit_scene_props(cleaned)
+            clothing = self._normalize_outfit_clothing_items(clothing)
+            details, _ = self._compact_outfit_details(details, aggressive=False)
             rebuilt = ", ".join(clothing)
+            if "sneakers" in rebuilt.lower() and "worn in" not in rebuilt.lower():
+                rebuilt = re.sub(r"\bcomfortable sneakers\b", "comfortable sneakers worn in", rebuilt, flags=re.IGNORECASE)
             if details:
-                rebuilt = f"{rebuilt}; {', '.join(details)}" if rebuilt else ", ".join(details)
+                rebuilt = f"{rebuilt}; {', '.join(self._dedupe_phrases(details))}" if rebuilt else ", ".join(self._dedupe_phrases(details))
             try:
                 return self.validate_outfit_sentence(rebuilt)
             except PromptValidationError:
@@ -3643,7 +4058,11 @@ class PromptComposer:
             outfit_body = self._contextual_outfit_fallback_sentence(scene, context)
         if aggressive and ";" in outfit_body:
             head, _, tail = outfit_body.partition(";")
-            detail = self._clean_fragment(tail.split(",", 1)[0])
+            detail = self._grounded_outfit_detail_phrase(
+                [chunk for chunk in re.split(r"\s*,\s*", tail) if self._clean_fragment(chunk)]
+            )
+            if not detail:
+                detail = self._clean_fragment(tail.split(",", 1)[0])
             if detail:
                 outfit_body = f"{self._clean_fragment(head)}, {detail}"
             else:
@@ -3669,7 +4088,20 @@ class PromptComposer:
             [clause["text"] for clause in self._extract_semantic_clauses("Mood", self._split_block_label(updated_blocks["Mood"])[1])]
         )
         if mood_clauses:
-            updated_blocks["Mood"] = f"Mood: {', '.join(mood_clauses[:2 if aggressive else 2])}."
+            selected_mood = mood_clauses[:2]
+            already_happening = next(
+                (clause for clause in mood_clauses if "already happening by the time the camera catches it" in clause.lower()),
+                "",
+            )
+            transitional_clause = next(
+                (clause for clause in mood_clauses if "like she is between one thing and the next" in clause.lower()),
+                "",
+            )
+            if transitional_clause:
+                selected_mood = self._dedupe_phrases([transitional_clause] + selected_mood)
+            if already_happening and already_happening not in selected_mood:
+                selected_mood = self._dedupe_phrases(selected_mood[:1] + [already_happening])
+            updated_blocks["Mood"] = f"Mood: {', '.join(selected_mood)}."
 
         updated_prompt = "\n\n".join(
             updated_blocks[name]
@@ -3918,6 +4350,8 @@ class PromptComposer:
             raise PromptValidationError("Outfit block is empty")
         if not re.search(r"[A-Za-z]", cleaned):
             raise PromptValidationError("Outfit block must contain English clothing text")
+        if cls._has_invalid_plural_article(cleaned):
+            raise PromptValidationError("Outfit block contains invalid article for plural garment")
 
         units = cls.outfit_semantic_units(cleaned, outfit_struct=outfit_struct)
         if len(units) < 3:
@@ -4394,6 +4828,9 @@ class PromptComposer:
             "softened_duplicate_sequences_count": 0,
             "prompt_blocker_demoted_to_warning": False,
             "safe_fallback_used": False,
+            "quality_recovery_applied": False,
+            "quality_floor_met": False,
+            "quality_recovery_reasons": [],
             "validation_severity": "pending",
             "post_sanitize_prompt_length": len(normalized_prompt),
             "post_sanitize_validation_result": "pending",
@@ -4496,12 +4933,76 @@ class PromptComposer:
             if simplified.get("prompt_blocks"):
                 diagnostics["prompt_blocks"] = dict(simplified.get("prompt_blocks") or diagnostics["prompt_blocks"])
 
+            quality_before = self._prompt_quality_floor_diagnostics(candidate_prompt, scene, context)
+            if not quality_before.get("passed"):
+                diagnostics["quality_recovery_reasons"] = self._dedupe_phrases(
+                    diagnostics["quality_recovery_reasons"] + list(quality_before.get("failed_checks", []))
+                )
+                quality_recovered = self._recover_canonical_prompt_quality(
+                    candidate_prompt,
+                    scene,
+                    context,
+                    outfit_sentence=preferred_outfit,
+                    shot_archetype=resolved_shot,
+                )
+                candidate_prompt = str(quality_recovered.get("prompt") or candidate_prompt).strip()
+                diagnostics["quality_recovery_applied"] = (
+                    diagnostics["quality_recovery_applied"]
+                    or bool(quality_recovered.get("quality_recovery_applied"))
+                )
+                diagnostics["garment_phrase_compaction_applied"] = (
+                    diagnostics["garment_phrase_compaction_applied"]
+                    or bool(quality_recovered.get("outfit_recovered"))
+                )
+                if quality_recovered.get("prompt_blocks"):
+                    diagnostics["prompt_blocks"] = dict(quality_recovered.get("prompt_blocks") or diagnostics["prompt_blocks"])
+                if quality_recovered.get("quality_recovery_applied"):
+                    diagnostics["sanitized_prompt_applied"] = True
+
+                recovery_sanitized = self._sanitize_duplicate_sequences_in_canonical_prompt(
+                    candidate_prompt,
+                    scene,
+                    context,
+                    aggressive=False,
+                    outfit_sentence=preferred_outfit,
+                    step=f"{step or 'finalize'}:quality_recovery_duplicate_sequence_{attempt_index}",
+                )
+                candidate_prompt = str(recovery_sanitized.get("prompt") or candidate_prompt).strip()
+                diagnostics["duplicate_sequence_candidates"] = self._dedupe_phrases(
+                    diagnostics["duplicate_sequence_candidates"] + list(recovery_sanitized.get("duplicate_sequence_candidates", []))
+                )
+                diagnostics["duplicate_sequence_removed"] = self._dedupe_phrases(
+                    diagnostics["duplicate_sequence_removed"] + list(recovery_sanitized.get("duplicate_sequence_removed", []))
+                )
+                diagnostics["duplicate_sequence_kept_reason"] = self._dedupe_phrases(
+                    diagnostics["duplicate_sequence_kept_reason"] + list(recovery_sanitized.get("duplicate_sequence_kept_reason", []))
+                )
+                diagnostics["sanitized_prompt_applied"] = (
+                    diagnostics["sanitized_prompt_applied"]
+                    or bool(recovery_sanitized.get("sanitized_prompt_applied"))
+                )
+                if recovery_sanitized.get("prompt_blocks"):
+                    diagnostics["prompt_blocks"] = dict(recovery_sanitized.get("prompt_blocks") or diagnostics["prompt_blocks"])
+
             try:
                 self._validate_canonical_prompt_core(candidate_prompt, scene, context)
+                quality_after = self._prompt_quality_floor_diagnostics(candidate_prompt, scene, context)
+                diagnostics["quality_recovery_reasons"] = self._dedupe_phrases(
+                    diagnostics["quality_recovery_reasons"] + list(quality_after.get("failed_checks", []))
+                )
+                if not quality_after.get("passed"):
+                    raise PromptValidationError(
+                        "Quality floor not met: " + ", ".join(quality_after.get("failed_checks", []))
+                    )
                 diagnostics["prompt"] = candidate_prompt
                 diagnostics["post_sanitize_prompt_length"] = len(candidate_prompt)
                 diagnostics["post_sanitize_validation_result"] = "passed"
                 diagnostics["prompt_blocks"] = self._prompt_block_map(candidate_prompt) or diagnostics["prompt_blocks"]
+                diagnostics["quality_floor_met"] = True
+                diagnostics["garment_phrase_compaction_applied"] = (
+                    diagnostics["garment_phrase_compaction_applied"]
+                    or self.extract_outfit_sentence(candidate_prompt) != self.extract_outfit_sentence(normalized_prompt)
+                )
                 diagnostics["sanitized_prompt_applied"] = (
                     diagnostics["sanitized_prompt_applied"]
                     or candidate_prompt != normalized_prompt
@@ -4513,7 +5014,12 @@ class PromptComposer:
                     for entry in self._detect_duplicate_sequence_candidates(candidate_prompt)
                     if not self._is_fatal_duplicate_sequence(entry)
                 ]
-                if soft_duplicate_entries or softened_sequences:
+                had_blocker = bool(
+                    diagnostics["duplicate_clauses"]
+                    or diagnostics["duplicate_sequence_candidates"]
+                    or diagnostics["duplicate_sequence_removed"]
+                )
+                if soft_duplicate_entries or softened_sequences or had_blocker:
                     diagnostics["prompt_blocker_demoted_to_warning"] = True
                     diagnostics["validation_severity"] = "warning"
                 else:
@@ -4572,6 +5078,29 @@ class PromptComposer:
                 aggressive=True,
             )
             fallback_prompt = str(fallback_simplified.get("prompt") or fallback_prompt).strip()
+            fallback_quality = self._prompt_quality_floor_diagnostics(fallback_prompt, scene, context)
+            if not fallback_quality.get("passed"):
+                diagnostics["quality_recovery_reasons"] = self._dedupe_phrases(
+                    diagnostics["quality_recovery_reasons"] + list(fallback_quality.get("failed_checks", []))
+                )
+                recovered_fallback = self._recover_canonical_prompt_quality(
+                    fallback_prompt,
+                    scene,
+                    context,
+                    outfit_sentence=preferred_outfit,
+                    shot_archetype=resolved_shot,
+                )
+                fallback_prompt = str(recovered_fallback.get("prompt") or fallback_prompt).strip()
+                diagnostics["quality_recovery_applied"] = (
+                    diagnostics["quality_recovery_applied"]
+                    or bool(recovered_fallback.get("quality_recovery_applied"))
+                )
+                diagnostics["garment_phrase_compaction_applied"] = (
+                    diagnostics["garment_phrase_compaction_applied"]
+                    or bool(recovered_fallback.get("outfit_recovered"))
+                )
+                if recovered_fallback.get("prompt_blocks"):
+                    diagnostics["prompt_blocks"] = dict(recovered_fallback.get("prompt_blocks") or diagnostics["prompt_blocks"])
             diagnostics["duplicate_sequence_candidates"] = self._dedupe_phrases(
                 diagnostics["duplicate_sequence_candidates"] + list(fallback_sanitized.get("duplicate_sequence_candidates", []))
             )
@@ -4597,6 +5126,14 @@ class PromptComposer:
             )
             try:
                 self._validate_canonical_prompt_core(fallback_prompt, scene, context)
+                fallback_quality = self._prompt_quality_floor_diagnostics(fallback_prompt, scene, context)
+                diagnostics["quality_recovery_reasons"] = self._dedupe_phrases(
+                    diagnostics["quality_recovery_reasons"] + list(fallback_quality.get("failed_checks", []))
+                )
+                if not fallback_quality.get("passed"):
+                    raise PromptValidationError(
+                        "Quality floor not met: " + ", ".join(fallback_quality.get("failed_checks", []))
+                    )
                 diagnostics["prompt"] = fallback_prompt
                 diagnostics["prompt_blocks"] = (
                     dict(fallback_simplified.get("prompt_blocks") or {})
@@ -4609,6 +5146,11 @@ class PromptComposer:
                 diagnostics["finalization_path"] = "fallback"
                 diagnostics["safe_fallback_used"] = True
                 diagnostics["validation_severity"] = "hard_fallback"
+                diagnostics["quality_floor_met"] = True
+                diagnostics["garment_phrase_compaction_applied"] = (
+                    diagnostics["garment_phrase_compaction_applied"]
+                    or self.extract_outfit_sentence(fallback_prompt) != self.extract_outfit_sentence(normalized_prompt)
+                )
                 diagnostics["post_sanitize_prompt_length"] = len(fallback_prompt)
                 diagnostics["post_sanitize_validation_result"] = "passed_with_fallback"
                 logger.warning(
@@ -4692,6 +5234,9 @@ class PromptComposer:
             "softened_duplicate_sequences_count": 0,
             "prompt_blocker_demoted_to_warning": False,
             "safe_fallback_used": False,
+            "quality_recovery_applied": False,
+            "quality_floor_met": True,
+            "quality_recovery_reasons": [],
             "validation_severity": "clean",
             "post_sanitize_prompt_length": len(str(prompt or "").strip()),
             "post_sanitize_validation_result": "passed",
