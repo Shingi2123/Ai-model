@@ -100,29 +100,34 @@ class PublishingPlanEngine:
 
             raw_prompt = str(prompt_meta.get("final_prompt") or "").strip()
             final_prompt = PromptComposer.repair_outfit_block(raw_prompt, canonical_outfit_sentence) if canonical_outfit_sentence else raw_prompt
-            sanitized = prompt_validator.sanitize_canonical_prompt(
+            finalized = prompt_validator.finalize_canonical_prompt(
                 final_prompt,
                 scene,
                 validation_context,
                 outfit_sentence=canonical_outfit_sentence,
                 step="publishing_plan_generate",
-            )
-            rewritten = prompt_validator.rewrite_canonical_prompt(
-                str(sanitized.get("prompt") or final_prompt).strip(),
-                scene,
-                validation_context,
                 shot_archetype=str(prompt_meta.get("shot_archetype") or ""),
+                apply_rewrite=not (
+                    str(prompt_meta.get("prompt_style_version") or "") == PromptComposer.expected_prompt_style_version()
+                ),
+                allow_fallback=True,
             )
-            final_prompt = str(rewritten.get("prompt") or sanitized.get("prompt") or final_prompt).strip()
+            final_prompt = str(finalized.get("prompt") or final_prompt).strip()
             prompt_meta["final_prompt"] = final_prompt
             prompt_meta["prompt_style_version"] = str(
                 prompt_meta.get("prompt_style_version") or PromptComposer.expected_prompt_style_version()
             )
-            prompt_meta["duplicate_clauses"] = list(sanitized.get("duplicate_clauses", []))
-            prompt_meta["sanitized_prompt_applied"] = bool(sanitized.get("sanitized_prompt_applied"))
-            prompt_meta["rewrite_pass_applied"] = bool(rewritten.get("rewrite_pass_applied"))
-            prompt_meta["rewrite_diagnostics"] = dict(rewritten.get("rewrite_diagnostics") or {})
-            prompt_meta["prompt_blocks"] = dict(rewritten.get("prompt_blocks") or sanitized.get("prompt_blocks", {}))
+            prompt_meta["duplicate_clauses"] = list(finalized.get("duplicate_clauses", []))
+            prompt_meta["duplicate_sequence_candidates"] = list(finalized.get("duplicate_sequence_candidates", []))
+            prompt_meta["duplicate_sequence_removed"] = list(finalized.get("duplicate_sequence_removed", []))
+            prompt_meta["duplicate_sequence_kept_reason"] = list(finalized.get("duplicate_sequence_kept_reason", []))
+            prompt_meta["sanitized_prompt_applied"] = bool(finalized.get("sanitized_prompt_applied"))
+            prompt_meta["rewrite_pass_applied"] = bool(finalized.get("rewrite_pass_applied"))
+            prompt_meta["rewrite_diagnostics"] = dict(finalized.get("rewrite_diagnostics") or {})
+            prompt_meta["fallback_prompt_applied"] = bool(finalized.get("fallback_prompt_applied"))
+            prompt_meta["post_sanitize_prompt_length"] = int(finalized.get("post_sanitize_prompt_length") or len(final_prompt))
+            prompt_meta["post_sanitize_validation_result"] = str(finalized.get("post_sanitize_validation_result") or "")
+            prompt_meta["prompt_blocks"] = dict(finalized.get("prompt_blocks") or {})
             prompt_meta["final_prompt_length"] = len(final_prompt)
             prompt_meta["outfit_source"] = str(prompt_meta.get("outfit_source") or "publishing_plan.outfit_sentence")
             prompt_meta["scene_source"] = str(prompt_meta.get("scene_source") or scene.scene_source or scene.source or "scene_library")
@@ -131,11 +136,47 @@ class PublishingPlanEngine:
             try:
                 if not final_prompt:
                     raise PromptValidationError("Final prompt is empty")
-                prompt_validator._validate_canonical_prompt(final_prompt, scene, validation_context)
+                validation_result = prompt_validator._validate_canonical_prompt(
+                    final_prompt,
+                    scene,
+                    validation_context,
+                    allow_repair=True,
+                    allow_fallback=True,
+                    step="publishing_plan_post_finalize_validate",
+                )
+                final_prompt = str(validation_result.get("prompt") or final_prompt).strip()
+                prompt_meta["final_prompt"] = final_prompt
+                prompt_meta["duplicate_clauses"] = list(
+                    dict.fromkeys(list(prompt_meta.get("duplicate_clauses", [])) + list(validation_result.get("duplicate_clauses", [])))
+                )
+                prompt_meta["duplicate_sequence_candidates"] = list(
+                    dict.fromkeys(list(prompt_meta.get("duplicate_sequence_candidates", [])) + list(validation_result.get("duplicate_sequence_candidates", [])))
+                )
+                prompt_meta["duplicate_sequence_removed"] = list(
+                    dict.fromkeys(list(prompt_meta.get("duplicate_sequence_removed", [])) + list(validation_result.get("duplicate_sequence_removed", [])))
+                )
+                prompt_meta["duplicate_sequence_kept_reason"] = list(
+                    dict.fromkeys(list(prompt_meta.get("duplicate_sequence_kept_reason", [])) + list(validation_result.get("duplicate_sequence_kept_reason", [])))
+                )
+                prompt_meta["sanitized_prompt_applied"] = bool(
+                    prompt_meta.get("sanitized_prompt_applied", False)
+                    or validation_result.get("sanitized_prompt_applied", False)
+                )
+                prompt_meta["fallback_prompt_applied"] = bool(
+                    prompt_meta.get("fallback_prompt_applied", False)
+                    or validation_result.get("fallback_prompt_applied", False)
+                )
+                prompt_meta["prompt_blocks"] = dict(validation_result.get("prompt_blocks") or prompt_meta.get("prompt_blocks") or {})
+                prompt_meta["post_sanitize_prompt_length"] = int(validation_result.get("post_sanitize_prompt_length") or len(final_prompt))
+                prompt_meta["post_sanitize_validation_result"] = str(validation_result.get("post_sanitize_validation_result") or prompt_meta.get("post_sanitize_validation_result") or "")
+                prompt_meta["final_prompt_length"] = len(final_prompt)
             except PromptValidationError as exc:
                 duplicate_clauses = ", ".join(prompt_meta.get("duplicate_clauses", []) or []) or "-"
+                duplicate_sequence_candidates = ", ".join(prompt_meta.get("duplicate_sequence_candidates", []) or []) or "-"
+                duplicate_sequence_removed = ", ".join(prompt_meta.get("duplicate_sequence_removed", []) or []) or "-"
+                duplicate_sequence_kept_reason = ", ".join(prompt_meta.get("duplicate_sequence_kept_reason", []) or []) or "-"
                 logger.error(
-                    "publishing_plan prompt_validation_failed publication_id=%s scene=%s reason=%s outfit_source=%s scene_source=%s behavior_source=%s duplicate_clauses=%s sanitized_prompt_applied=%s final_prompt_length=%s prompt_mode=%s objects=%s",
+                    "publishing_plan prompt_validation_failed publication_id=%s scene=%s reason=%s outfit_source=%s scene_source=%s behavior_source=%s duplicate_clauses=%s duplicate_sequence_candidates=%s duplicate_sequence_removed=%s duplicate_sequence_kept_reason=%s sanitized_prompt_applied=%s final_prompt_length=%s post_sanitize_prompt_length=%s post_sanitize_validation_result=%s prompt_mode=%s objects=%s",
                     f"{package.date.isoformat()}-{idx+1:02d}",
                     scene.scene_moment or scene.description or "unknown_scene",
                     str(exc),
@@ -143,8 +184,13 @@ class PublishingPlanEngine:
                     prompt_meta.get("scene_source", ""),
                     prompt_meta.get("behavior_source", ""),
                     duplicate_clauses,
+                    duplicate_sequence_candidates,
+                    duplicate_sequence_removed,
+                    duplicate_sequence_kept_reason,
                     prompt_meta.get("sanitized_prompt_applied", False),
                     prompt_meta.get("final_prompt_length", 0),
+                    prompt_meta.get("post_sanitize_prompt_length", 0),
+                    prompt_meta.get("post_sanitize_validation_result", ""),
                     prompt_meta.get("prompt_mode", ""),
                     ", ".join(prompt_meta.get("objects_inserted", []) or []),
                 )
@@ -155,14 +201,22 @@ class PublishingPlanEngine:
                             f"prompt_validation_failed publication_id={package.date.isoformat()}-{idx+1:02d} "
                             f"reason={exc} outfit_source={prompt_meta.get('outfit_source', '')} "
                             f"scene_source={prompt_meta.get('scene_source', '')} behavior_source={prompt_meta.get('behavior_source', '')} "
-                            f"duplicate_clauses={duplicate_clauses} sanitized_prompt_applied={prompt_meta.get('sanitized_prompt_applied', False)}"
+                            f"duplicate_clauses={duplicate_clauses} duplicate_sequence_candidates={duplicate_sequence_candidates} "
+                            f"duplicate_sequence_removed={duplicate_sequence_removed} duplicate_sequence_kept_reason={duplicate_sequence_kept_reason} "
+                            f"sanitized_prompt_applied={prompt_meta.get('sanitized_prompt_applied', False)} "
+                            f"post_sanitize_validation_result={prompt_meta.get('post_sanitize_validation_result', '')}"
                         ),
                         outfit_source=prompt_meta.get("outfit_source", ""),
                         scene_source=prompt_meta.get("scene_source", ""),
                         behavior_source=prompt_meta.get("behavior_source", ""),
                         duplicate_clauses=duplicate_clauses,
+                        duplicate_sequence_candidates=duplicate_sequence_candidates,
+                        duplicate_sequence_removed=duplicate_sequence_removed,
+                        duplicate_sequence_kept_reason=duplicate_sequence_kept_reason,
                         sanitized_prompt_applied=prompt_meta.get("sanitized_prompt_applied", False),
                         final_prompt_length=prompt_meta.get("final_prompt_length", 0),
+                        post_sanitize_prompt_length=prompt_meta.get("post_sanitize_prompt_length", 0),
+                        post_sanitize_validation_result=prompt_meta.get("post_sanitize_validation_result", ""),
                         prompt_mode=prompt_meta.get("prompt_mode", ""),
                     )
                 raise

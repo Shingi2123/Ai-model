@@ -439,6 +439,50 @@ def test_validate_prompt_rejects_empty_outfit_placeholder():
         )
 
 
+def test_duplicate_sequence_sanitizer_repairs_adjacent_word_repeats():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["behavioral_context"] = BehaviorState(
+        energy_level="low",
+        social_mode="alone",
+        emotional_arc="routine",
+        habit="coffee_moment",
+        place_anchor="kitchen_corner",
+        objects=["coffee_cup", "bag"],
+        self_presentation="soft",
+    )
+    scene = Scene()
+    scene.scene_moment = "Slow first coffee in the kitchen corner before the day starts"
+    scene.description = "Slow first coffee in the kitchen corner before the day starts"
+    scene.location = "home kitchen"
+    scene.visual_focus = "coffee cup, bag"
+    scene.camera_archetype = "seated_table_shot"
+
+    prompt = (
+        "Identity: a a 22-year-old woman with soft oval face, and and natural skin texture.\n\n"
+        "waist-up seated candid shot from close table-side distance\n\n"
+        "Scene: first coffee in the kitchen corner, the light still low, nothing rushed yet, coffee cup in hand, bag resting beside her.\n\n"
+        "Outfit: soft knit top, relaxed straight trousers, comfortable sneakers, small shoulder bag; slightly relaxed fit with natural drape.\n\n"
+        "Environment: photorealistic home kitchen, lived-in detail, perspective and scale staying real, soft morning daylight working like available light.\n\n"
+        "Mood: calm in a way that reads lived-in, already happening by the time the camera catches it."
+    )
+
+    result = composer._sanitize_duplicate_sequences_in_canonical_prompt(
+        prompt,
+        scene,
+        context,
+        aggressive=True,
+        outfit_sentence=context.get("outfit_sentence", ""),
+        step="test_duplicate_sequence",
+    )
+
+    assert "a a" not in result["prompt"].lower()
+    assert "and and" not in result["prompt"].lower()
+    assert result["sanitized_prompt_applied"] is True
+    assert "a a" in [entry.lower() for entry in result["duplicate_sequence_candidates"]]
+    assert "a a" in [entry.lower() for entry in result["duplicate_sequence_removed"]]
+
+
 def test_behavior_influences_prompt_with_movement_mood_and_objects():
     composer = PromptComposer(DummyState())
     context = dict(BASE_CONTEXT)
@@ -471,6 +515,36 @@ def test_behavior_influences_prompt_with_movement_mood_and_objects():
     assert "soft background people only" in prompt
     assert "already happening by the time the camera catches it" in prompt
     assert composer._find_duplicate_clauses(package["final_prompt"]) == []
+
+
+def test_kitchen_coffee_scene_keeps_single_anchor_per_semantic_idea():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["behavioral_context"] = BehaviorState(
+        energy_level="low",
+        social_mode="alone",
+        emotional_arc="routine",
+        habit="coffee_moment",
+        place_anchor="kitchen_corner",
+        objects=["coffee_cup", "bag"],
+        self_presentation="soft",
+    )
+    scene = Scene()
+    scene.scene_moment = "Slow first coffee in the kitchen corner before the day starts"
+    scene.description = "Slow first coffee in the kitchen corner before the day starts"
+    scene.location = "home kitchen"
+    scene.visual_focus = "coffee cup, bag"
+    scene.camera_archetype = "seated_table_shot"
+
+    package = composer.compose_package(context, scene, "soft knit top, relaxed straight trousers, comfortable sneakers, small shoulder bag", "photo", ["top_1"])
+    prompt = package["final_prompt"].lower()
+    critical_candidates = [entry for entry in composer._detect_duplicate_sequence_candidates(package["final_prompt"]) if entry.get("critical")]
+
+    assert "before the day starts" not in prompt
+    assert "grounded routine mood" not in prompt
+    assert prompt.count("coffee cup") <= 1
+    assert composer._find_duplicate_clauses(package["final_prompt"]) == []
+    assert critical_candidates == []
 
 
 def test_scene_and_outfit_blocks_shift_from_description_to_in_the_moment_presence():

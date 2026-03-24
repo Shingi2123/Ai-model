@@ -380,7 +380,12 @@ class PipelineOrchestrator:
             f"scene_source={prompt_meta.get('scene_source', '-') or '-'} "
             f"behavior_source={prompt_meta.get('behavior_source', '-') or '-'} "
             f"duplicate_clauses={','.join(prompt_meta.get('duplicate_clauses', []) or []) or '-'} "
+            f"duplicate_sequence_candidates={','.join(prompt_meta.get('duplicate_sequence_candidates', []) or []) or '-'} "
+            f"duplicate_sequence_removed={','.join(prompt_meta.get('duplicate_sequence_removed', []) or []) or '-'} "
+            f"duplicate_sequence_kept_reason={','.join(prompt_meta.get('duplicate_sequence_kept_reason', []) or []) or '-'} "
             f"sanitized_prompt_applied={prompt_meta.get('sanitized_prompt_applied', False)} "
+            f"post_sanitize_prompt_length={prompt_meta.get('post_sanitize_prompt_length', 0)} "
+            f"post_sanitize_validation_result={prompt_meta.get('post_sanitize_validation_result', '')} "
             f"final_prompt_length={prompt_meta.get('final_prompt_length', 0)} {tone}",
             device_profile=short_text(str(prompt_meta.get("device_identity", "")), 84),
             camera_behavior_used=short_text(str(prompt_meta.get("camera_behavior_memory", "")), 72),
@@ -399,7 +404,12 @@ class PipelineOrchestrator:
             scene_source=prompt_meta.get("scene_source", ""),
             behavior_source=prompt_meta.get("behavior_source", ""),
             duplicate_clauses=", ".join(prompt_meta.get("duplicate_clauses", []) or []),
+            duplicate_sequence_candidates=", ".join(prompt_meta.get("duplicate_sequence_candidates", []) or []),
+            duplicate_sequence_removed=", ".join(prompt_meta.get("duplicate_sequence_removed", []) or []),
+            duplicate_sequence_kept_reason=", ".join(prompt_meta.get("duplicate_sequence_kept_reason", []) or []),
             sanitized_prompt_applied=prompt_meta.get("sanitized_prompt_applied", False),
+            post_sanitize_prompt_length=prompt_meta.get("post_sanitize_prompt_length", 0),
+            post_sanitize_validation_result=prompt_meta.get("post_sanitize_validation_result", ""),
             final_prompt_length=prompt_meta.get("final_prompt_length", 0),
         )
 

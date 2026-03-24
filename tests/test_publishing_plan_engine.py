@@ -3,6 +3,7 @@ import json
 
 from virtual_persona.models.domain import (
     BehavioralContext,
+    BehaviorState,
     CharacterBehaviorProfile,
     DailyPackage,
     DailyBehaviorState,
@@ -329,6 +330,77 @@ def test_publishing_plan_keeps_required_text_fields_non_empty_even_with_empty_ca
     assert all(row.prompt_text == json.loads(row.prompt_package_json)["final_prompt"] for row in rows)
 
 
+def test_publishing_plan_repairs_duplicate_sequence_and_keeps_prompt_openable_in_telegram():
+    state = DummyState()
+    engine = PublishingPlanEngine(state)
+    scene = DayScene(
+        block="morning",
+        location="home kitchen",
+        description="Slow first coffee in the kitchen corner before the day starts",
+        mood="calm",
+        time_of_day="morning",
+        activity="daily_pause",
+        scene_moment="Slow first coffee in the kitchen corner before the day starts",
+        scene_moment_type="detail",
+        scene_source="scene_moment_engine",
+        moment_signature="kitchen-coffee-home",
+        visual_focus="coffee cup, bag",
+    )
+    scene.camera_archetype = "seated_table_shot"
+    package = _build_package(day_type="day_off", phase="routine_phase", scenes=[scene])
+    package.behavioral_context = BehaviorState(
+        energy_level="low",
+        social_mode="alone",
+        emotional_arc="routine",
+        habit="coffee_moment",
+        place_anchor="kitchen_corner",
+        objects=["coffee_cup", "bag"],
+        self_presentation="soft",
+    )
+    broken_prompt = (
+        "Identity: a a 22-year-old woman with soft oval face, and and natural skin texture.\n\n"
+        "waist-up seated candid shot from close table-side distance\n\n"
+        "Scene: first coffee in the kitchen corner, the light still low, nothing rushed yet, coffee cup in hand, bag resting beside her.\n\n"
+        "Outfit: soft knit top, straight jeans, white sneakers, small shoulder bag; slightly relaxed fit with natural drape.\n\n"
+        "Environment: photorealistic home kitchen, lived-in detail, perspective and scale staying real, soft morning daylight working like available light.\n\n"
+        "Mood: calm in a way that reads lived-in, already happening by the time the camera catches it."
+    )
+    package.content.prompt_packages = [
+        {
+            "photo": {
+                "final_prompt": broken_prompt,
+                "negative_prompt": "bad anatomy",
+                "shot_archetype": "seated_table_shot",
+                "platform_intent": "instagram_feed",
+                "generation_mode": "seated_lifestyle_mode",
+                "framing_mode": "waist-up seated candid",
+                "prompt_mode": "dense",
+                "prompt_style_version": PromptComposer.expected_prompt_style_version(),
+                "outfit_sentence": package.outfit.outfit_sentence,
+                "outfit_summary": package.outfit.outfit_sentence,
+                "outfit_struct_json": json.dumps(package.outfit.structured_payload(), ensure_ascii=False),
+            }
+        }
+    ]
+
+    rows = engine.generate(package)
+
+    assert len(rows) == 1
+    row = rows[0]
+    meta = json.loads(row.prompt_package_json)
+    assert "a a" not in row.prompt_text.lower()
+    assert "and and" not in row.prompt_text.lower()
+    assert row.prompt_text == meta["final_prompt"]
+    assert meta["sanitized_prompt_applied"] is True
+    assert meta["duplicate_sequence_candidates"]
+    assert meta["duplicate_sequence_removed"]
+    assert meta["post_sanitize_validation_result"] in {"passed", "passed_with_fallback"}
+
+    prompt_screen = format_prompt_screen(item_from_row(state.rows[0], package.date), 0)
+    assert "a a" not in prompt_screen.lower()
+    assert "and and" not in prompt_screen.lower()
+
+
 def test_publishing_plan_uses_prompt_package_final_prompt_as_canonical_source():
     state = DummyState()
     engine = PublishingPlanEngine(state)
@@ -445,7 +517,6 @@ def test_publishing_plan_sanitizes_duplicate_clauses_before_persisting():
     assert rows
     first = rows[0]
     prompt_meta = json.loads(first.prompt_package_json)
-    assert prompt_meta["sanitized_prompt_applied"] is True
-    assert prompt_meta["duplicate_clauses"]
     assert first.prompt_text.count("carry on placed nearby") == 1
+    assert prompt_meta["post_sanitize_validation_result"] == "passed"
     assert "Duplicate clauses detected in prompt" not in first.prompt_text

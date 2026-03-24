@@ -121,6 +121,15 @@ class PromptComposer:
         "to",
         "with",
     )
+    DUPLICATE_SEQUENCE_STOPWORDS: tuple[str, ...] = CLAUSE_STOPWORDS + (
+        "already",
+        "just",
+        "only",
+        "still",
+        "there",
+        "yet",
+    )
+    DUPLICATE_SEQUENCE_SCAN_RANGE: tuple[int, ...] = tuple(range(12, 1, -1))
     REWRITE_FORBIDDEN_SCENE_PHRASES: tuple[str, ...] = (
         "before the day starts",
         "during the morning routine",
@@ -405,10 +414,16 @@ class PromptComposer:
         ordered_blocks["scene_source"] = str(getattr(scene, "scene_source", getattr(scene, "source", "unknown")) or "unknown")
         ordered_blocks["behavior_source"] = str(getattr(behavior, "source", "none") or "none")
         ordered_blocks["duplicate_clauses"] = list(prompt_payload.get("duplicate_clauses", []))
+        ordered_blocks["duplicate_sequence_candidates"] = list(prompt_payload.get("duplicate_sequence_candidates", []))
+        ordered_blocks["duplicate_sequence_removed"] = list(prompt_payload.get("duplicate_sequence_removed", []))
+        ordered_blocks["duplicate_sequence_kept_reason"] = list(prompt_payload.get("duplicate_sequence_kept_reason", []))
         ordered_blocks["sanitized_prompt_applied"] = bool(prompt_payload.get("sanitized_prompt_applied"))
         ordered_blocks["rewrite_pass_applied"] = bool(prompt_payload.get("rewrite_pass_applied"))
         ordered_blocks["rewrite_diagnostics"] = dict(prompt_payload.get("rewrite_diagnostics") or {})
+        ordered_blocks["fallback_prompt_applied"] = bool(prompt_payload.get("fallback_prompt_applied"))
         ordered_blocks["final_prompt_length"] = len(final_prompt)
+        ordered_blocks["post_sanitize_prompt_length"] = int(prompt_payload.get("post_sanitize_prompt_length") or len(final_prompt))
+        ordered_blocks["post_sanitize_validation_result"] = str(prompt_payload.get("post_sanitize_validation_result") or "")
         ordered_blocks["objects_inserted"] = list(self._behavior_object_terms(context))
         ordered_blocks["prompt_block_names"] = ["Identity", "Framing", "Scene", "Outfit", "Environment", "Mood"]
         ordered_blocks["prompt_blocks"] = dict(prompt_payload.get("prompt_blocks", {}))
@@ -1056,26 +1071,21 @@ class PromptComposer:
             block_map["Mood"],
         ]
         prompt = "\n\n".join(block.strip() for block in blocks if block.strip())
-        sanitized = self.sanitize_canonical_prompt(
+        raw_pre_rewrite_prompt = prompt
+        finalized = self.finalize_canonical_prompt(
             prompt,
             scene,
             context,
             outfit_sentence=outfit_sentence,
-            step="build_final_prompt",
-        )
-        raw_pre_rewrite_prompt = str(sanitized.get("prompt") or prompt)
-        rewritten = self.rewrite_canonical_prompt(
-            raw_pre_rewrite_prompt,
-            scene,
-            context,
             shot_archetype=shot_archetype,
+            step="build_final_prompt",
+            apply_rewrite=True,
+            allow_fallback=True,
         )
-        final_blocks = dict(rewritten.get("prompt_blocks") or sanitized.get("prompt_blocks") or {})
-        prompt = str(rewritten.get("prompt") or sanitized.get("prompt") or prompt)
-        sanitized["prompt_blocks"] = final_blocks
-        sanitized["rewrite_pass_applied"] = bool(rewritten.get("rewrite_pass_applied"))
-        sanitized["rewrite_diagnostics"] = dict(rewritten.get("rewrite_diagnostics") or {})
-        sanitized["prompt_style_version"] = self.PROMPT_STYLE_VERSION
+        prompt = str(finalized.get("prompt") or prompt)
+        final_blocks = dict(finalized.get("prompt_blocks") or {})
+        finalized["prompt_blocks"] = final_blocks
+        finalized["prompt_style_version"] = self.PROMPT_STYLE_VERSION
         logger.info(
             "prompt_rewrite_trace scene=%s raw_pre_rewrite_prompt=%r post_rewrite_prompt=%r prompt_style_version=%s",
             str(getattr(scene, "scene_moment", "") or getattr(scene, "description", "") or "unknown_scene"),
@@ -1083,9 +1093,8 @@ class PromptComposer:
             prompt,
             self.PROMPT_STYLE_VERSION,
         )
-        self._validate_canonical_prompt(prompt, scene, context)
-        sanitized["prompt"] = prompt
-        return sanitized
+        finalized["prompt"] = prompt
+        return finalized
 
     @classmethod
     def expected_prompt_style_version(cls) -> str:
@@ -1308,7 +1317,7 @@ class PromptComposer:
         if diagnostics["needs_softening"]:
             scene_clauses = self._prioritized_scene_clauses(scene_clauses, context, limit=9)
             scene_clauses = self._ensure_scene_extras(scene_clauses, protected_scene_extras, context, limit=9)
-        scene_body = ", ".join(self._dedupe_phrases(scene_clauses))
+        scene_body = ", ".join(self._dedupe_semantic_phrases(scene_clauses))
 
         outfit_body = self._soften_outfit_body(
             outfit_body,
@@ -1418,7 +1427,10 @@ class PromptComposer:
             if object_term and object_term.lower() not in scene_rewritten_body.lower()
         ]
         if missing_scene_phrases:
-            scene_rewritten_body = ", ".join(self._dedupe_phrases([scene_rewritten_body] + missing_scene_phrases))
+            scene_clauses = [clause["text"] for clause in self._extract_semantic_clauses("Scene", scene_rewritten_body)]
+            scene_rewritten_body = ", ".join(
+                self._dedupe_semantic_phrases(scene_clauses + missing_scene_phrases)
+            )
             transformed["Scene"] = f"Scene: {scene_rewritten_body}."
 
         diagnostics = self._rewrite_pass_diagnostics(transformed)
@@ -1461,6 +1473,8 @@ class PromptComposer:
         }
 
     def _in_the_moment_identity_body(self, identity_body: str) -> str:
+        if ";" not in identity_body and re.search(r"\ba\s+\d{2}(?:-year-old)?\s+woman\b", identity_body.lower()):
+            return self._repair_duplicate_sequences_in_text(identity_body, aggressive=True)
         clauses = [self._clean_fragment(chunk) for chunk in re.split(r"\s*;\s*", identity_body) if self._clean_fragment(chunk)]
         if not clauses or all(clause.lower() in {"stable", "same", "recognizable"} or len(clause.split()) <= 2 for clause in clauses):
             return "a 22-year-old woman with a recognizable face, relaxed shoulders, and an easy upright posture"
@@ -2056,7 +2070,7 @@ class PromptComposer:
             for cue in scene_presence:
                 if cue.lower() not in " ".join(pieces).lower():
                     pieces.append(cue)
-            return f"Scene: {', '.join(self._dedupe_phrases(pieces))}."
+            return f"Scene: {', '.join(self._dedupe_semantic_phrases(pieces))}."
 
         activity = str(getattr(scene, "activity", "") or "").strip().replace("_", " ")
         base_scene = self._ensure_english_fragment(self._strip_scene_noise(scene_desc), "")
@@ -2088,7 +2102,7 @@ class PromptComposer:
         for cue in scene_presence:
             if cue.lower() not in " ".join(pieces).lower():
                 pieces.append(cue)
-        return f"Scene: {', '.join(self._dedupe_phrases(pieces))}."
+        return f"Scene: {', '.join(self._dedupe_semantic_phrases(pieces))}."
 
     def _outfit_block(self, outfit_sentence: str) -> str:
         cleaned = self._normalize_outfit_sentence_for_prompt(outfit_sentence)
@@ -2152,7 +2166,7 @@ class PromptComposer:
             }.get(str(getattr(behavior, "emotional_arc", "routine") or "routine"), "")
             self_presentation = str(getattr(behavior, "self_presentation", "") or "").replace("_", " ")
             details = [base]
-            if arc_mood:
+            if arc_mood and not self._is_kitchen_coffee_scene(context, scene):
                 details.append(arc_mood)
             if self_presentation:
                 details.append(f"{self_presentation} self-presentation")
@@ -2461,6 +2475,290 @@ class PromptComposer:
         return result
 
     @staticmethod
+    def _sequence_key(sequence: str) -> str:
+        return PromptComposer._clean_fragment(str(sequence or "").lower())
+
+    @staticmethod
+    def _sequence_words(sequence: str) -> List[str]:
+        return re.findall(r"[a-z]+", str(sequence or "").lower())
+
+    def _sequence_content_words(self, sequence: str) -> List[str]:
+        return [
+            word
+            for word in self._sequence_words(sequence)
+            if len(word) > 2 and word not in self.DUPLICATE_SEQUENCE_STOPWORDS
+        ]
+
+    def _detect_duplicate_sequence_candidates(self, prompt: str) -> List[Dict[str, Any]]:
+        normalized_prompt = str(prompt or "").strip()
+        if not normalized_prompt:
+            return []
+
+        candidates: Dict[str, Dict[str, Any]] = {}
+        lowered = normalized_prompt.lower()
+
+        def _add_candidate(sequence: str, kind: str, *, count: int, critical: bool, kept_reason: str = "") -> None:
+            cleaned_sequence = self._clean_fragment(sequence)
+            if not cleaned_sequence:
+                return
+            key = f"{kind}:{self._sequence_key(cleaned_sequence)}"
+            current = candidates.get(key)
+            payload = {
+                "sequence": cleaned_sequence,
+                "kind": kind,
+                "count": count,
+                "critical": critical,
+                "kept_reason": kept_reason,
+            }
+            if current is None or (
+                int(payload["critical"]) > int(current["critical"])
+                or payload["count"] > current["count"]
+            ):
+                candidates[key] = payload
+
+        for match in re.finditer(r"\b([a-z]+)(?:\s+\1\b)+", lowered):
+            sequence = match.group(0)
+            content_words = self._sequence_content_words(sequence)
+            kept_reason = "" if content_words else "functional_word_repeat"
+            _add_candidate(
+                sequence,
+                "adjacent_word",
+                count=len(self._sequence_words(sequence)),
+                critical=bool(content_words),
+                kept_reason=kept_reason,
+            )
+
+        for size in self.DUPLICATE_SEQUENCE_SCAN_RANGE:
+            pattern = re.compile(
+                rf"\b((?:[a-z]+(?:\s+[a-z]+){{{size - 1}}}))\s+\1\b",
+                re.IGNORECASE,
+            )
+            for match in pattern.finditer(normalized_prompt):
+                sequence = match.group(1)
+                content_words = self._sequence_content_words(sequence)
+                kept_reason = "" if len(content_words) >= 2 else "short_or_functional_repeat"
+                _add_candidate(
+                    sequence,
+                    f"adjacent_ngram_{size}",
+                    count=2,
+                    critical=len(content_words) >= 2,
+                    kept_reason=kept_reason,
+                )
+
+        prompt_words = re.findall(r"[a-z]+", lowered)
+        for size in (2, 3):
+            counts: Dict[str, int] = {}
+            for idx in range(len(prompt_words) - size + 1):
+                phrase_words = prompt_words[idx : idx + size]
+                content_words = [
+                    word
+                    for word in phrase_words
+                    if len(word) > 2 and word not in self.DUPLICATE_SEQUENCE_STOPWORDS
+                ]
+                if len(content_words) < 2:
+                    continue
+                phrase = " ".join(phrase_words)
+                counts[phrase] = counts.get(phrase, 0) + 1
+            for phrase, count in counts.items():
+                if count < 2:
+                    continue
+                critical = count >= 3
+                kept_reason = "" if critical else "single_anchor_repeat"
+                _add_candidate(
+                    phrase,
+                    f"global_ngram_{size}",
+                    count=count,
+                    critical=critical,
+                    kept_reason=kept_reason,
+                )
+
+        return sorted(
+            candidates.values(),
+            key=lambda entry: (-int(bool(entry.get("critical"))), -int(entry.get("count") or 0), str(entry.get("sequence") or "")),
+        )
+
+    def _repair_duplicate_sequences_in_text(self, text: str, *, aggressive: bool) -> str:
+        repaired = str(text or "")
+        previous = None
+        while repaired != previous:
+            previous = repaired
+            repaired = re.sub(
+                r"\b([a-z]+)(?:\s+\1\b)+",
+                r"\1",
+                repaired,
+                flags=re.IGNORECASE,
+            )
+            for size in self.DUPLICATE_SEQUENCE_SCAN_RANGE:
+                repaired = re.sub(
+                    rf"\b((?:[a-z]+(?:\s+[a-z]+){{{size - 1}}}))\s+\1\b",
+                    r"\1",
+                    repaired,
+                    flags=re.IGNORECASE,
+                )
+        repaired = re.sub(r"\s{2,}", " ", repaired)
+        repaired = re.sub(r"\s+([,.;:])", r"\1", repaired)
+        repaired = re.sub(r"([,.;:]){2,}", r"\1", repaired)
+        repaired = re.sub(r"\s*\.\s*\.", ".", repaired)
+        repaired = repaired.strip()
+        if aggressive:
+            repaired = repaired.replace(", ,", ",")
+            repaired = repaired.replace(" and and ", " and ")
+        return repaired
+
+    def _sanitize_duplicate_sequences_in_canonical_prompt(
+        self,
+        prompt: str,
+        scene: Any,
+        context: Dict[str, Any],
+        *,
+        aggressive: bool,
+        outfit_sentence: str = "",
+        step: str = "",
+    ) -> Dict[str, Any]:
+        normalized_prompt = str(prompt or "").strip()
+        block_map = self._prompt_block_map(normalized_prompt)
+        before_candidates = self._detect_duplicate_sequence_candidates(normalized_prompt)
+        if not block_map:
+            return {
+                "prompt": self._repair_duplicate_sequences_in_text(normalized_prompt, aggressive=aggressive),
+                "duplicate_sequence_candidates": [entry["sequence"] for entry in before_candidates],
+                "duplicate_sequence_removed": [],
+                "duplicate_sequence_kept_reason": [
+                    f"{entry['sequence']}:{entry['kept_reason']}"
+                    for entry in before_candidates
+                    if entry.get("kept_reason")
+                ],
+                "sanitized_prompt_applied": False,
+                "prompt_blocks": {},
+                "sanitization_step": step,
+            }
+
+        prompt_blocks = dict(block_map)
+        for label in ["Identity", "Scene", "Outfit", "Environment", "Mood"]:
+            body = self._split_block_label(prompt_blocks[label])[1]
+            repaired_body = self._repair_duplicate_sequences_in_text(body, aggressive=aggressive)
+            if label == "Scene":
+                scene_clauses = [clause["text"] for clause in self._extract_semantic_clauses("Scene", repaired_body)]
+                for object_term in self._behavior_object_terms(context):
+                    if object_term and object_term.lower() not in ", ".join(scene_clauses).lower():
+                        scene_clauses.append(self._object_scene_phrase(object_term, scene))
+                repaired_body = ", ".join(self._dedupe_semantic_phrases(scene_clauses)) if scene_clauses else repaired_body
+            elif label == "Mood":
+                mood_clauses = [clause["text"] for clause in self._extract_semantic_clauses("Mood", repaired_body)]
+                repaired_body = ", ".join(self._dedupe_phrases(mood_clauses)) if mood_clauses else repaired_body
+            elif label == "Outfit":
+                preferred_outfit = self._clean_fragment(outfit_sentence) or repaired_body
+                try:
+                    repaired_body = self._normalize_outfit_sentence_for_prompt(repaired_body or preferred_outfit, scene, context)
+                except PromptValidationError:
+                    repaired_body = self._normalize_outfit_sentence_for_prompt(preferred_outfit, scene, context)
+            prompt_blocks[label] = (
+                prompt_blocks[label]
+                if label == "Framing"
+                else f"{label}: {self._clean_fragment(repaired_body)}."
+            )
+
+        repaired_prompt = "\n\n".join(
+            [
+                prompt_blocks["Identity"],
+                prompt_blocks["Framing"],
+                prompt_blocks["Scene"],
+                prompt_blocks["Outfit"],
+                prompt_blocks["Environment"],
+                prompt_blocks["Mood"],
+            ]
+        )
+        after_candidates = self._detect_duplicate_sequence_candidates(repaired_prompt)
+        before_keys = {self._sequence_key(entry["sequence"]) for entry in before_candidates}
+        after_keys = {self._sequence_key(entry["sequence"]) for entry in after_candidates}
+        removed = [
+            entry["sequence"]
+            for entry in before_candidates
+            if self._sequence_key(entry["sequence"]) not in after_keys
+        ]
+        kept = [
+            f"{entry['sequence']}:{entry['kept_reason'] or ('still_critical' if entry.get('critical') else 'kept')}"
+            for entry in after_candidates
+        ]
+        return {
+            "prompt": repaired_prompt,
+            "duplicate_sequence_candidates": [entry["sequence"] for entry in before_candidates],
+            "duplicate_sequence_removed": removed,
+            "duplicate_sequence_kept_reason": kept,
+            "sanitized_prompt_applied": repaired_prompt != normalized_prompt,
+            "prompt_blocks": prompt_blocks,
+            "sanitization_step": step,
+        }
+
+    def _build_safe_fallback_canonical_prompt(
+        self,
+        prompt: str,
+        scene: Any,
+        context: Dict[str, Any],
+        *,
+        outfit_sentence: str = "",
+        shot_archetype: str = "",
+    ) -> Dict[str, Any]:
+        block_map = self._prompt_block_map(prompt)
+        identity_body = self._split_block_label(block_map.get("Identity", ""))[1] if block_map else ""
+        scene_body = self._split_block_label(block_map.get("Scene", ""))[1] if block_map else ""
+        framing_block = block_map.get("Framing", "") if block_map else ""
+        resolved_shot = shot_archetype or self._resolve_shot_archetype(scene, context, context.get("recent_moment_memory") or [])
+        if not framing_block:
+            framing_block = self._framing_block(self._framing_mode(resolved_shot, self._resolve_generation_mode(scene, resolved_shot)), resolved_shot, scene)
+
+        if identity_body and ";" in identity_body:
+            identity_text = self._in_the_moment_identity_body(identity_body)
+        else:
+            identity_text = "a 22-year-old woman with a recognizable face, relaxed shoulders, and an easy upright posture"
+        scene_anchor = self._scene_presence_lead(scene, scene_body or self._minimal_scene_body(scene))
+        scene_clauses = self._dedupe_semantic_phrases(
+            [scene_anchor] + [self._object_scene_phrase(term, scene) for term in self._behavior_object_terms(context)[:2]]
+        )
+        preferred_outfit = self._clean_fragment(outfit_sentence) or self.extract_outfit_sentence(prompt) or self._contextual_outfit_fallback_sentence(scene, context)
+        outfit_text = self._normalize_outfit_sentence_for_prompt(preferred_outfit, scene, context)
+        try:
+            outfit_text = self._in_the_moment_outfit_body(
+                outfit_text,
+                scene=scene,
+                context=context,
+                shot_archetype=resolved_shot,
+            )
+        except PromptValidationError:
+            outfit_text = self._normalize_outfit_sentence_for_prompt(outfit_text, scene, context)
+        if any(entry.get("critical") for entry in self._detect_duplicate_sequence_candidates(outfit_text)):
+            outfit_text = self._in_the_moment_outfit_body(
+                self._contextual_outfit_fallback_sentence(scene, context),
+                scene=scene,
+                context=context,
+                shot_archetype=resolved_shot,
+            )
+
+        environment_text = self._in_the_moment_environment_body(self._minimal_environment_body(scene))
+        mood_text = self._fallback_mood_presence_phrase(scene, context)
+        prompt_blocks = {
+            "Identity": f"Identity: {identity_text}.",
+            "Framing": framing_block,
+            "Scene": f"Scene: {', '.join(scene_clauses[:3])}.",
+            "Outfit": f"Outfit: {outfit_text}.",
+            "Environment": f"Environment: {environment_text}.",
+            "Mood": f"Mood: {mood_text}.",
+        }
+        return {
+            "prompt": "\n\n".join(
+                [
+                    prompt_blocks["Identity"],
+                    prompt_blocks["Framing"],
+                    prompt_blocks["Scene"],
+                    prompt_blocks["Outfit"],
+                    prompt_blocks["Environment"],
+                    prompt_blocks["Mood"],
+                ]
+            ),
+            "prompt_blocks": prompt_blocks,
+        }
+
+    @staticmethod
     def _human_join(parts: List[str]) -> str:
         cleaned = [PromptComposer._clean_fragment(part) for part in parts if PromptComposer._clean_fragment(part)]
         if not cleaned:
@@ -2576,6 +2874,20 @@ class PromptComposer:
             return "Framing", block.strip()
         label, body = block.split(": ", 1)
         return label.strip(), body.strip().rstrip(".")
+
+    @staticmethod
+    def _prompt_block_map(prompt: str) -> Dict[str, str]:
+        raw_blocks = [block.strip() for block in str(prompt or "").split("\n\n") if block.strip()]
+        if len(raw_blocks) != 6:
+            return {}
+        return {
+            "Identity": raw_blocks[0],
+            "Framing": raw_blocks[1],
+            "Scene": raw_blocks[2],
+            "Outfit": raw_blocks[3],
+            "Environment": raw_blocks[4],
+            "Mood": raw_blocks[5],
+        }
 
     def _extract_semantic_clauses(self, block_name: str, body: str) -> List[Dict[str, Any]]:
         if block_name == "Framing":
@@ -3051,6 +3363,21 @@ class PromptComposer:
         objects = getattr(behavior, "objects", getattr(behavior, "recurring_objects", [])) or []
         return [self._natural_object_term(obj) for obj in objects if self._natural_object_term(obj)]
 
+    def _is_kitchen_coffee_scene(self, context: Dict[str, Any], scene: Any) -> bool:
+        behavior = context.get("behavioral_context")
+        if behavior is None:
+            return False
+        lowered_scene = self._scene_text(scene).lower()
+        place_anchor = str(getattr(behavior, "place_anchor", getattr(behavior, "familiar_place_anchor", "")) or "")
+        habit = str(getattr(behavior, "habit", getattr(behavior, "selected_habit", "")) or "")
+        object_terms = {term.lower() for term in self._behavior_object_terms(context)}
+        return (
+            place_anchor == "kitchen_corner"
+            and habit == "coffee_moment"
+            and "coffee cup" in object_terms
+            and any(token in lowered_scene for token in ["kitchen", "coffee", "morning"])
+        )
+
     def _behavior_scene_cues(self, context: Dict[str, Any], scene: Any) -> tuple[str, str, str]:
         behavior = context.get("behavioral_context")
         if behavior is None:
@@ -3077,6 +3404,9 @@ class PromptComposer:
             "transitional": "slight distance in the gaze with a thoughtful pause",
             "relaxed": "easy expression and natural posture",
         }.get(self_presentation, "")
+        if self._is_kitchen_coffee_scene(context, scene):
+            movement = ""
+            interaction = ""
         if "focused" in str(getattr(scene, "mood", "") or "").lower() and not expression:
             expression = "minimal facial expression with inward attention"
         return movement, interaction, expression
@@ -3106,7 +3436,258 @@ class PromptComposer:
             return "carry on rolling alongside her"
         return mapping.get(object_term, f"{object_term} visible in the scene")
 
-    def _validate_canonical_prompt(self, prompt: str, scene: Any, context: Dict[str, Any]) -> None:
+    def finalize_canonical_prompt(
+        self,
+        prompt: str,
+        scene: Any,
+        context: Dict[str, Any],
+        *,
+        outfit_sentence: str = "",
+        shot_archetype: str = "",
+        step: str = "",
+        apply_rewrite: bool,
+        allow_fallback: bool,
+    ) -> Dict[str, Any]:
+        normalized_prompt = str(prompt or "").strip()
+        diagnostics: Dict[str, Any] = {
+            "prompt": normalized_prompt,
+            "prompt_blocks": self._prompt_block_map(normalized_prompt),
+            "duplicate_clauses": [],
+            "duplicate_sequence_candidates": [],
+            "duplicate_sequence_removed": [],
+            "duplicate_sequence_kept_reason": [],
+            "sanitized_prompt_applied": False,
+            "rewrite_pass_applied": False,
+            "rewrite_diagnostics": {},
+            "fallback_prompt_applied": False,
+            "post_sanitize_prompt_length": len(normalized_prompt),
+            "post_sanitize_validation_result": "pending",
+            "sanitization_step": step,
+        }
+
+        working_prompt = normalized_prompt
+        preferred_outfit = self._clean_fragment(outfit_sentence) or self.extract_outfit_sentence(working_prompt)
+        if not apply_rewrite:
+            initial_candidates = self._detect_duplicate_sequence_candidates(working_prompt)
+            try:
+                self._validate_canonical_prompt_core(working_prompt, scene, context)
+                if not any(entry.get("critical") for entry in initial_candidates):
+                    if any(str(entry.get("kind") or "").startswith("adjacent_") for entry in initial_candidates):
+                        raise PromptValidationError("Adjacent duplicate sequence repair required")
+                    diagnostics["duplicate_sequence_candidates"] = [entry["sequence"] for entry in initial_candidates]
+                    diagnostics["duplicate_sequence_kept_reason"] = [
+                        f"{entry['sequence']}:{entry['kept_reason']}"
+                        for entry in initial_candidates
+                        if entry.get("kept_reason")
+                    ]
+                    diagnostics["rewrite_diagnostics"] = (
+                        self._rewrite_pass_diagnostics(diagnostics["prompt_blocks"])
+                        if diagnostics["prompt_blocks"]
+                        else {}
+                    )
+                    diagnostics["post_sanitize_prompt_length"] = len(working_prompt)
+                    diagnostics["post_sanitize_validation_result"] = "passed"
+                    return diagnostics
+            except PromptValidationError:
+                pass
+
+        clause_sanitized = self.sanitize_canonical_prompt(
+            working_prompt,
+            scene,
+            context,
+            outfit_sentence=preferred_outfit,
+            step=f"{step or 'finalize'}:duplicate_clauses",
+        )
+        working_prompt = str(clause_sanitized.get("prompt") or working_prompt).strip()
+        diagnostics["duplicate_clauses"] = list(clause_sanitized.get("duplicate_clauses", []))
+        diagnostics["sanitized_prompt_applied"] = bool(clause_sanitized.get("sanitized_prompt_applied"))
+        diagnostics["prompt_blocks"] = dict(clause_sanitized.get("prompt_blocks") or diagnostics["prompt_blocks"])
+
+        if apply_rewrite:
+            rewritten = self.rewrite_canonical_prompt(
+                working_prompt,
+                scene,
+                context,
+                shot_archetype=shot_archetype,
+            )
+            working_prompt = str(rewritten.get("prompt") or working_prompt).strip()
+            diagnostics["rewrite_pass_applied"] = bool(rewritten.get("rewrite_pass_applied"))
+            diagnostics["rewrite_diagnostics"] = dict(rewritten.get("rewrite_diagnostics") or {})
+            diagnostics["prompt_blocks"] = dict(rewritten.get("prompt_blocks") or diagnostics["prompt_blocks"])
+        elif diagnostics["prompt_blocks"]:
+            diagnostics["rewrite_diagnostics"] = self._rewrite_pass_diagnostics(diagnostics["prompt_blocks"])
+
+        last_error: PromptValidationError | None = None
+        for attempt_index, aggressive in enumerate((False, True), start=1):
+            sequence_sanitized = self._sanitize_duplicate_sequences_in_canonical_prompt(
+                working_prompt,
+                scene,
+                context,
+                aggressive=aggressive,
+                outfit_sentence=preferred_outfit,
+                step=f"{step or 'finalize'}:duplicate_sequence_attempt_{attempt_index}",
+            )
+            candidate_prompt = str(sequence_sanitized.get("prompt") or working_prompt).strip()
+            diagnostics["duplicate_sequence_candidates"] = self._dedupe_phrases(
+                diagnostics["duplicate_sequence_candidates"] + list(sequence_sanitized.get("duplicate_sequence_candidates", []))
+            )
+            diagnostics["duplicate_sequence_removed"] = self._dedupe_phrases(
+                diagnostics["duplicate_sequence_removed"] + list(sequence_sanitized.get("duplicate_sequence_removed", []))
+            )
+            diagnostics["duplicate_sequence_kept_reason"] = self._dedupe_phrases(
+                diagnostics["duplicate_sequence_kept_reason"] + list(sequence_sanitized.get("duplicate_sequence_kept_reason", []))
+            )
+            diagnostics["sanitized_prompt_applied"] = (
+                diagnostics["sanitized_prompt_applied"]
+                or bool(sequence_sanitized.get("sanitized_prompt_applied"))
+            )
+            if sequence_sanitized.get("prompt_blocks"):
+                diagnostics["prompt_blocks"] = dict(sequence_sanitized.get("prompt_blocks") or diagnostics["prompt_blocks"])
+
+            try:
+                self._validate_canonical_prompt_core(candidate_prompt, scene, context)
+                diagnostics["prompt"] = candidate_prompt
+                diagnostics["post_sanitize_prompt_length"] = len(candidate_prompt)
+                diagnostics["post_sanitize_validation_result"] = "passed"
+                diagnostics["prompt_blocks"] = self._prompt_block_map(candidate_prompt) or diagnostics["prompt_blocks"]
+                diagnostics["sanitized_prompt_applied"] = (
+                    diagnostics["sanitized_prompt_applied"]
+                    or candidate_prompt != normalized_prompt
+                    or bool(diagnostics["duplicate_sequence_removed"])
+                )
+                logger.info(
+                    "prompt_duplicate_sequence_trace scene=%s step=%s duplicate_sequence_candidates=%s duplicate_sequence_removed=%s duplicate_sequence_kept_reason=%s post_sanitize_prompt_length=%s post_sanitize_validation_result=%s",
+                    str(getattr(scene, "scene_moment", "") or getattr(scene, "description", "") or "unknown_scene"),
+                    step or "finalize",
+                    ", ".join(diagnostics["duplicate_sequence_candidates"]) or "-",
+                    ", ".join(diagnostics["duplicate_sequence_removed"]) or "-",
+                    ", ".join(diagnostics["duplicate_sequence_kept_reason"]) or "-",
+                    diagnostics["post_sanitize_prompt_length"],
+                    diagnostics["post_sanitize_validation_result"],
+                )
+                return diagnostics
+            except PromptValidationError as exc:
+                last_error = exc
+                diagnostics["post_sanitize_prompt_length"] = len(candidate_prompt)
+                diagnostics["post_sanitize_validation_result"] = f"retry_needed:{exc}"
+                working_prompt = candidate_prompt
+
+        if allow_fallback:
+            fallback = self._build_safe_fallback_canonical_prompt(
+                working_prompt,
+                scene,
+                context,
+                outfit_sentence=preferred_outfit,
+                shot_archetype=shot_archetype,
+            )
+            fallback_prompt = str(fallback.get("prompt") or working_prompt).strip()
+            fallback_sanitized = self._sanitize_duplicate_sequences_in_canonical_prompt(
+                fallback_prompt,
+                scene,
+                context,
+                aggressive=True,
+                outfit_sentence=preferred_outfit,
+                step=f"{step or 'finalize'}:fallback_duplicate_sequence",
+            )
+            fallback_prompt = str(fallback_sanitized.get("prompt") or fallback_prompt).strip()
+            diagnostics["duplicate_sequence_candidates"] = self._dedupe_phrases(
+                diagnostics["duplicate_sequence_candidates"] + list(fallback_sanitized.get("duplicate_sequence_candidates", []))
+            )
+            diagnostics["duplicate_sequence_removed"] = self._dedupe_phrases(
+                diagnostics["duplicate_sequence_removed"] + list(fallback_sanitized.get("duplicate_sequence_removed", []))
+            )
+            diagnostics["duplicate_sequence_kept_reason"] = self._dedupe_phrases(
+                diagnostics["duplicate_sequence_kept_reason"] + list(fallback_sanitized.get("duplicate_sequence_kept_reason", []))
+            )
+            diagnostics["sanitized_prompt_applied"] = (
+                diagnostics["sanitized_prompt_applied"]
+                or bool(fallback_sanitized.get("sanitized_prompt_applied"))
+            )
+            try:
+                self._validate_canonical_prompt_core(fallback_prompt, scene, context)
+                diagnostics["prompt"] = fallback_prompt
+                diagnostics["prompt_blocks"] = self._prompt_block_map(fallback_prompt) or dict(fallback.get("prompt_blocks") or {})
+                diagnostics["fallback_prompt_applied"] = True
+                diagnostics["sanitized_prompt_applied"] = True
+                diagnostics["post_sanitize_prompt_length"] = len(fallback_prompt)
+                diagnostics["post_sanitize_validation_result"] = "passed_with_fallback"
+                logger.warning(
+                    "prompt_duplicate_sequence_fallback_applied scene=%s step=%s duplicate_sequence_candidates=%s duplicate_sequence_removed=%s duplicate_sequence_kept_reason=%s post_sanitize_prompt_length=%s",
+                    str(getattr(scene, "scene_moment", "") or getattr(scene, "description", "") or "unknown_scene"),
+                    step or "finalize",
+                    ", ".join(diagnostics["duplicate_sequence_candidates"]) or "-",
+                    ", ".join(diagnostics["duplicate_sequence_removed"]) or "-",
+                    ", ".join(diagnostics["duplicate_sequence_kept_reason"]) or "-",
+                    diagnostics["post_sanitize_prompt_length"],
+                )
+                return diagnostics
+            except PromptValidationError as exc:
+                last_error = exc
+                diagnostics["post_sanitize_prompt_length"] = len(fallback_prompt)
+                diagnostics["post_sanitize_validation_result"] = f"fallback_failed:{exc}"
+
+        logger.warning(
+            "prompt_duplicate_sequence_unresolved scene=%s step=%s duplicate_sequence_candidates=%s duplicate_sequence_removed=%s duplicate_sequence_kept_reason=%s post_sanitize_prompt_length=%s post_sanitize_validation_result=%s",
+            str(getattr(scene, "scene_moment", "") or getattr(scene, "description", "") or "unknown_scene"),
+            step or "finalize",
+            ", ".join(diagnostics["duplicate_sequence_candidates"]) or "-",
+            ", ".join(diagnostics["duplicate_sequence_removed"]) or "-",
+            ", ".join(diagnostics["duplicate_sequence_kept_reason"]) or "-",
+            diagnostics["post_sanitize_prompt_length"],
+            diagnostics["post_sanitize_validation_result"],
+        )
+        if last_error is not None:
+            raise last_error
+        return diagnostics
+
+    def _validate_canonical_prompt(
+        self,
+        prompt: str,
+        scene: Any,
+        context: Dict[str, Any],
+        *,
+        allow_repair: bool = True,
+        allow_fallback: bool = False,
+        step: str = "validate_canonical_prompt",
+    ) -> Dict[str, Any]:
+        if allow_repair:
+            try:
+                self._validate_canonical_prompt_core(prompt, scene, context)
+            except PromptValidationError as exc:
+                repairable_markers = (
+                    "Duplicate ",
+                    "Required object missing",
+                    "Rewrite pass failed",
+                )
+                if not any(marker in str(exc) for marker in repairable_markers):
+                    raise
+            return self.finalize_canonical_prompt(
+                prompt,
+                scene,
+                context,
+                outfit_sentence=self.extract_outfit_sentence(prompt),
+                shot_archetype="",
+                step=step,
+                apply_rewrite=False,
+                allow_fallback=allow_fallback,
+            )
+        self._validate_canonical_prompt_core(prompt, scene, context)
+        return {
+            "prompt": str(prompt or "").strip(),
+            "prompt_blocks": self._prompt_block_map(prompt),
+            "duplicate_clauses": [],
+            "duplicate_sequence_candidates": [],
+            "duplicate_sequence_removed": [],
+            "duplicate_sequence_kept_reason": [],
+            "sanitized_prompt_applied": False,
+            "rewrite_pass_applied": False,
+            "rewrite_diagnostics": {},
+            "fallback_prompt_applied": False,
+            "post_sanitize_prompt_length": len(str(prompt or "").strip()),
+            "post_sanitize_validation_result": "passed",
+        }
+
+    def _validate_canonical_prompt_core(self, prompt: str, scene: Any, context: Dict[str, Any]) -> None:
         raw_blocks = [block.strip() for block in prompt.split("\n\n")]
         if len(raw_blocks) != 6 or any(not block for block in raw_blocks):
             raise PromptValidationError("Canonical prompt must contain exactly six non-empty blocks.")
@@ -3156,20 +3737,7 @@ class PromptComposer:
 
         duplicate_clauses = self._find_duplicate_clauses(prompt)
         if duplicate_clauses:
-            sanitized = self.sanitize_canonical_prompt(
-                prompt,
-                scene,
-                context,
-                outfit_sentence=self.extract_outfit_sentence(prompt),
-                step="validate_duplicate_clauses",
-            )
-            sanitized_prompt = str(sanitized.get("prompt") or "").strip()
-            if sanitized_prompt and sanitized_prompt != prompt and not self._find_duplicate_clauses(sanitized_prompt):
-                prompt = sanitized_prompt
-                blocks = [block.strip() for block in prompt.split("\n\n")]
-                lowered = prompt.lower()
-            else:
-                raise PromptValidationError("Duplicate clauses detected in prompt")
+            raise PromptValidationError("Duplicate clauses detected in prompt")
 
         if self._is_travel_walk(self._scene_text(scene).lower()):
             if blocks[1] != "3/4 body walking shot":
@@ -3189,7 +3757,8 @@ class PromptComposer:
             if object_term and object_term.lower() not in lowered:
                 raise PromptValidationError(f"Required object missing from prompt: {object_term}")
 
-        if re.search(r"\b([a-z]+)(?:\s+\1\b)+", lowered):
+        duplicate_sequence_candidates = self._detect_duplicate_sequence_candidates(prompt)
+        if any(entry.get("critical") for entry in duplicate_sequence_candidates):
             raise PromptValidationError("Duplicate word sequence detected in canonical prompt.")
 
     def _is_placeholder_body(self, text: str) -> bool:
