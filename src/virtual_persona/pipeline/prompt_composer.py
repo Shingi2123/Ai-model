@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import re
 from typing import Any, Dict, List, Mapping
@@ -232,6 +233,14 @@ class PromptComposer:
         normalized_outfit = self._normalize_outfit_sentence_for_prompt(outfit_bundle.outfit_sentence or outfit_bundle.sentence, scene, context)
         presence_layer = self._presence_layer(context, scene, outfit_bundle, shot_archetype, platform_behavior)
         perceived_outfit = self._perceived_outfit_sentence(outfit_bundle, normalized_outfit, scene, context)
+        imperfect_layer = self._imperfect_reality_layer(
+            context=context,
+            scene=scene,
+            outfit_bundle=outfit_bundle,
+            shot_archetype=shot_archetype,
+            platform_behavior=platform_behavior,
+            outfit_sentence=perceived_outfit,
+        )
         wardrobe_block = self._wardrobe_context(outfit_bundle, shot_archetype, item_ids_text)
         camera_block = self._camera_context(shot_archetype, context)
         realism_block = self._realism_cues(shot_archetype, scene_loc)
@@ -323,6 +332,7 @@ class PromptComposer:
             social_behavior=ordered_blocks["social_behavior"],
             scene_tags=scene_alignment.get("scene_tags", []),
             presence_layer=presence_layer,
+            imperfect_layer=imperfect_layer,
         )
         final_prompt = str(prompt_payload["prompt"])
         prompt_mode = self._prompt_mode(final_prompt)
@@ -968,23 +978,32 @@ class PromptComposer:
         social_behavior: str,
         scene_tags: List[str],
         presence_layer: Dict[str, Any],
+        imperfect_layer: Dict[str, Any],
     ) -> Dict[str, Any]:
         del prompt_mode, device_identity, social_behavior
 
-        identity_block = self._identity_block(identity_anchor=identity_anchor, body_anchor=body_anchor)
-        framing_block = self._framing_block(framing_mode, shot_archetype, scene, presence_layer.get("camera_distance", ""))
-        scene_block = self._scene_block(context, scene, scene_desc, scene_loc, scene_tags, presence_layer)
-        outfit_block = self._outfit_block(outfit_sentence)
-        environment_block = self._environment_block(context, scene, scene_loc, scene_tags, continuity_block)
-        mood_block = self._mood_block(context, scene, continuity_block, presence_layer)
-
+        block_map = {
+            "Identity": self._identity_block(identity_anchor=identity_anchor, body_anchor=body_anchor),
+            "Framing": self._framing_block(framing_mode, shot_archetype, scene, presence_layer.get("camera_distance", "")),
+            "Scene": self._scene_block(context, scene, scene_desc, scene_loc, scene_tags, presence_layer),
+            "Outfit": self._outfit_block(outfit_sentence),
+            "Environment": self._environment_block(context, scene, scene_loc, scene_tags, continuity_block),
+            "Mood": self._mood_block(context, scene, continuity_block, presence_layer),
+        }
+        block_map = self._apply_imperfect_reality_layer(
+            block_map,
+            scene=scene,
+            context=context,
+            shot_archetype=shot_archetype,
+            imperfect_layer=imperfect_layer,
+        )
         blocks = [
-            identity_block,
-            framing_block,
-            scene_block,
-            outfit_block,
-            environment_block,
-            mood_block,
+            block_map["Identity"],
+            block_map["Framing"],
+            block_map["Scene"],
+            block_map["Outfit"],
+            block_map["Environment"],
+            block_map["Mood"],
         ]
         prompt = "\n\n".join(block.strip() for block in blocks if block.strip())
         sanitized = self.sanitize_canonical_prompt(
@@ -998,6 +1017,367 @@ class PromptComposer:
         self._validate_canonical_prompt(prompt, scene, context)
         sanitized["prompt"] = prompt
         return sanitized
+
+    @staticmethod
+    def _stable_variation_index(*parts: Any, modulo: int) -> int:
+        if modulo <= 0:
+            return 0
+        seed = "||".join(str(part or "") for part in parts)
+        digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()
+        return int(digest[:12], 16) % modulo
+
+    def _stable_choice(self, options: List[str], *parts: Any) -> str:
+        cleaned = [self._clean_fragment(option) for option in options if self._clean_fragment(option)]
+        if not cleaned:
+            return ""
+        return cleaned[self._stable_variation_index(*parts, modulo=len(cleaned))]
+
+    def _imperfect_reality_layer(
+        self,
+        *,
+        context: Dict[str, Any],
+        scene: Any,
+        outfit_bundle: OutfitBundle,
+        shot_archetype: str,
+        platform_behavior: str,
+        outfit_sentence: str,
+    ) -> Dict[str, Any]:
+        object_terms = self._behavior_object_terms(context)
+        scene_text = self._scene_text(scene).lower()
+        behavior = context.get("behavioral_context")
+        energy = str(getattr(behavior, "energy_level", "medium") or "medium").lower() if behavior is not None else "medium"
+        signature_parts = [
+            scene_text,
+            outfit_sentence,
+            shot_archetype,
+            platform_behavior,
+            ",".join(object_terms),
+            energy,
+            getattr(scene, "moment_signature", ""),
+            getattr(outfit_bundle, "outfit_style", ""),
+        ]
+
+        scene_micro_pool = [
+            "head angle a fraction off level as if the moment was caught mid-adjustment",
+            "weight still settling onto one side instead of locking into a centered stance",
+            "one forearm resting a little farther forward than the other",
+            "torso turned a few degrees like the movement has not fully stopped yet",
+        ]
+        outfit_micro_pool = [
+            "one side sitting a touch higher from recent movement",
+            "fabric folding slightly off where a perfect styling pass would leave it",
+            "hem and layers settling a little unevenly in motion",
+            "strap or sleeve pulling the fabric a fraction off center",
+        ]
+        interaction_pool = [
+            "fingers not closing with showroom precision",
+            "grip staying natural with a small uneven pressure through the hand",
+            "wrist angle landing a little loose instead of perfectly squared",
+        ]
+        mood_pool = [
+            "attention landing somewhere just past the camera",
+            "already a beat into the moment rather than presenting for it",
+            "caught mid-thought with a little room left unsaid",
+        ]
+
+        if shot_archetype in {"front_selfie", "mirror_selfie"}:
+            scene_micro_pool.extend(
+                [
+                    "phone-side shoulder staying a touch higher than the other side",
+                    "chin tipped slightly instead of landing on a perfectly level line",
+                ]
+            )
+        if shot_archetype == "seated_table_shot" or any(token in scene_text for token in ["seated", "sitting", "table", "chair"]):
+            scene_micro_pool.extend(
+                [
+                    "back settling a little away from the chair line",
+                    "one elbow sitting slightly farther out than the other",
+                ]
+            )
+            interaction_pool.append("object placement staying a little off the neat center of the table")
+        if "coffee cup" in object_terms:
+            scene_micro_pool.extend(
+                [
+                    "cup tipped a fraction in her hand instead of sitting completely upright",
+                    "cup angle reading a little lived-in rather than carefully presented",
+                ]
+            )
+            interaction_pool.extend(
+                [
+                    "finger tension easing and tightening around the cup instead of fixing into one clean grip",
+                    "cup hold staying slightly uneven in a natural way",
+                ]
+            )
+        if "carry on" in object_terms:
+            scene_micro_pool.extend(
+                [
+                    "handle angle sitting slightly off straight as the wrist relaxes",
+                    "carry on line staying a touch imperfect beside her stride",
+                ]
+            )
+            interaction_pool.extend(
+                [
+                    "handle grip landing a little loose instead of perfectly centered in the palm",
+                    "bag and handle weight pulling one side a fraction higher",
+                ]
+            )
+        if "bag" in object_terms:
+            outfit_micro_pool.extend(
+                [
+                    "bag weight shifting the line of the layer slightly on one side",
+                    "strap tension leaving a small off-center pull in the fabric",
+                ]
+            )
+        if any(token in scene_text for token in ["hotel", "home", "kitchen", "living room"]):
+            mood_pool.append("the frame feeling lightly interrupted rather than fully arranged")
+        if platform_behavior == "story_lifestyle":
+            mood_pool.append("a little less resolved, like the camera arrived in the middle of it")
+
+        interaction_anchor = self._presence_interaction_cue(outfit_bundle, object_terms, shot_archetype)
+        if "coffee cup" in object_terms:
+            interaction_anchor = "coffee cup held with a relaxed uneven grip and light finger pressure"
+        elif "carry on" in object_terms:
+            interaction_anchor = "carry on handle held without perfect alignment"
+        elif "bag" in object_terms:
+            interaction_anchor = "bag strap sitting naturally so the clothing shifts slightly under it"
+
+        return {
+            "scene_micro": self._stable_choice(scene_micro_pool, *signature_parts, "scene_micro"),
+            "outfit_micro": self._stable_choice(outfit_micro_pool, *signature_parts, "outfit_micro"),
+            "asymmetry_anchor": self._presence_asymmetry_cue(object_terms, shot_archetype),
+            "interaction_anchor": interaction_anchor,
+            "interaction_micro": self._stable_choice(interaction_pool, *signature_parts, "interaction_micro"),
+            "mood_micro": self._stable_choice(mood_pool, *signature_parts, "mood_micro"),
+        }
+
+    def _apply_imperfect_reality_layer(
+        self,
+        block_map: Dict[str, str],
+        *,
+        scene: Any,
+        context: Dict[str, Any],
+        shot_archetype: str,
+        imperfect_layer: Dict[str, Any],
+    ) -> Dict[str, str]:
+        softened = dict(block_map)
+        diagnostics = self._detect_perfection_patterns(softened)
+
+        scene_body = self._split_block_label(softened["Scene"])[1].replace("small detail: ", "")
+        outfit_body = self._split_block_label(softened["Outfit"])[1]
+        mood_body = self._split_block_label(softened["Mood"])[1]
+        original_mood_body = mood_body
+
+        if diagnostics["needs_softening"]:
+            scene_body = self._soften_scene_body(scene_body, context)
+            mood_body = self._soften_mood_body(mood_body)
+
+        scene_clauses = [clause["text"] for clause in self._extract_semantic_clauses("Scene", scene_body)]
+        protected_scene_extras: List[str] = []
+        for extra in [
+            imperfect_layer.get("asymmetry_anchor", ""),
+            imperfect_layer.get("interaction_anchor", ""),
+            imperfect_layer.get("scene_micro", ""),
+            imperfect_layer.get("interaction_micro", ""),
+        ]:
+            cleaned = self._clean_fragment(str(extra or ""))
+            if cleaned and cleaned.lower() not in scene_body.lower():
+                scene_clauses.append(cleaned)
+                protected_scene_extras.append(cleaned)
+        if diagnostics["needs_softening"]:
+            scene_clauses = self._prioritized_scene_clauses(scene_clauses, context, limit=9)
+            scene_clauses = self._ensure_scene_extras(scene_clauses, protected_scene_extras, context, limit=9)
+        scene_body = ", ".join(self._dedupe_phrases(scene_clauses))
+
+        outfit_body = self._soften_outfit_body(
+            outfit_body,
+            scene=scene,
+            context=context,
+            shot_archetype=shot_archetype,
+            imperfect_layer=imperfect_layer,
+            allow_drop=diagnostics["needs_softening"],
+        )
+
+        mood_clauses = [clause["text"] for clause in self._extract_semantic_clauses("Mood", mood_body)]
+        mood_micro = self._clean_fragment(str(imperfect_layer.get("mood_micro") or ""))
+        if "in-the-moment presence" in original_mood_body.lower() and not any(
+            clause.lower() == "in-the-moment presence" for clause in mood_clauses
+        ):
+            mood_clauses.append("in-the-moment presence")
+        if mood_micro and mood_micro.lower() not in mood_body.lower():
+            mood_clauses.append(mood_micro)
+        if diagnostics["needs_softening"]:
+            base_mood = mood_clauses[:1]
+            priority: List[str] = []
+            for clause in mood_clauses:
+                lowered = clause.lower()
+                if lowered in {"in-the-moment presence", "transitional mood"} or "in-the-moment presence" in lowered:
+                    priority.append(clause)
+            mood_clauses = self._dedupe_phrases(base_mood + priority + mood_clauses[1:3] + ([mood_micro] if mood_micro else []))
+        mood_body = ", ".join(self._dedupe_phrases(mood_clauses))
+
+        softened["Scene"] = f"Scene: {scene_body}."
+        softened["Outfit"] = f"Outfit: {outfit_body}."
+        softened["Mood"] = f"Mood: {mood_body}."
+        return softened
+
+    def _detect_perfection_patterns(self, block_map: Dict[str, str]) -> Dict[str, bool]:
+        scene_body = self._split_block_label(block_map.get("Scene", ""))[1]
+        outfit_body = self._split_block_label(block_map.get("Outfit", ""))[1]
+        mood_body = self._split_block_label(block_map.get("Mood", ""))[1]
+        scene_count = len(self._extract_semantic_clauses("Scene", scene_body))
+        outfit_count = len(self._extract_semantic_clauses("Outfit", outfit_body))
+        mood_count = len(self._extract_semantic_clauses("Mood", mood_body))
+        counts = [count for count in [scene_count, outfit_count, mood_count] if count]
+
+        too_symmetrical = bool(counts) and min(counts) >= 4 and (max(counts) - min(counts) <= 1)
+        too_complete = scene_count >= 7 or outfit_count >= 6 or sum(counts) >= 14
+        lowered = " ".join([scene_body.lower(), outfit_body.lower(), mood_body.lower()])
+        too_clean = any(
+            token in lowered
+            for token in ["small detail:", "carefully arranged", "perfectly aligned", "fully styled", "precisely placed"]
+        )
+        return {
+            "too_symmetrical": too_symmetrical,
+            "too_complete": too_complete,
+            "too_clean": too_clean,
+            "needs_softening": too_symmetrical or too_complete or too_clean,
+        }
+
+    def _prioritized_scene_clauses(self, clauses: List[str], context: Dict[str, Any], limit: int) -> List[str]:
+        required_objects = self._behavior_object_terms(context)
+        cleaned = self._dedupe_phrases(clauses)
+        if len(cleaned) <= limit:
+            return cleaned
+        kept: List[str] = []
+        deferred: List[str] = []
+        for idx, clause in enumerate(cleaned):
+            lowered = clause.lower()
+            is_required = idx == 0 or any(obj in lowered for obj in required_objects)
+            is_micro = any(
+                token in lowered
+                for token in ["slight", "slightly", "fraction", "uneven", "loose", "mid-thought", "finger tension", "grip", "wrist"]
+            )
+            is_behavioral = any(
+                token in lowered
+                for token in [
+                    "posture",
+                    "pause",
+                    "holding",
+                    "walking",
+                    "handling",
+                    "measured steps",
+                    "movement",
+                    "thoughtful pause",
+                    "boarding screen",
+                    "uneven grip",
+                    "finger pressure",
+                    "sleeve brushing",
+                ]
+            )
+            if is_required or is_micro or is_behavioral:
+                kept.append(clause)
+            else:
+                deferred.append(clause)
+        return self._dedupe_phrases(kept + deferred)[:limit]
+
+    def _soften_scene_body(self, scene_body: str, context: Dict[str, Any]) -> str:
+        clauses = [clause["text"] for clause in self._extract_semantic_clauses("Scene", scene_body)]
+        return ", ".join(self._prioritized_scene_clauses(clauses, context, limit=8))
+
+    def _ensure_scene_extras(self, clauses: List[str], extras: List[str], context: Dict[str, Any], limit: int) -> List[str]:
+        selected = self._dedupe_phrases(clauses)
+        required_objects = self._behavior_object_terms(context)
+        for extra in self._dedupe_phrases(extras):
+            if extra in selected:
+                continue
+            while len(selected) >= limit:
+                removable_index = next(
+                    (
+                        idx
+                        for idx, clause in enumerate(selected[::-1])
+                        if idx >= 0
+                        and not any(obj in clause.lower() for obj in required_objects)
+                        and "boarding screen" not in clause.lower()
+                        and "holding " not in clause.lower()
+                        and "posture" not in clause.lower()
+                        and clause != selected[0]
+                    ),
+                    None,
+                )
+                if removable_index is None:
+                    break
+                actual_index = len(selected) - 1 - removable_index
+                selected.pop(actual_index)
+            if len(selected) < limit:
+                selected.append(extra)
+        return self._dedupe_phrases(selected[:limit])
+
+    def _soften_mood_body(self, mood_body: str) -> str:
+        clauses = [clause["text"] for clause in self._extract_semantic_clauses("Mood", mood_body)]
+        return ", ".join(self._dedupe_phrases(clauses[:3]))
+
+    def _soften_outfit_body(
+        self,
+        outfit_body: str,
+        *,
+        scene: Any,
+        context: Dict[str, Any],
+        shot_archetype: str,
+        imperfect_layer: Dict[str, Any],
+        allow_drop: bool,
+    ) -> str:
+        clothing_text, _, detail_text = self._clean_fragment(outfit_body).partition(";")
+        clothing = self._dedupe_phrases(
+            [chunk for chunk in re.split(r"\s*(?:,| and )\s*", clothing_text) if self._clean_fragment(chunk)]
+        )
+        details = self._dedupe_phrases(
+            [chunk for chunk in re.split(r"\s*,\s*", detail_text) if self._clean_fragment(chunk)]
+        )
+
+        outfit_micro = self._clean_fragment(str(imperfect_layer.get("outfit_micro") or ""))
+        if outfit_micro and outfit_micro.lower() not in ", ".join(details).lower():
+            details.append(outfit_micro)
+
+        if allow_drop and shot_archetype not in {"front_selfie", "mirror_selfie"}:
+            clothing = self._drop_nonessential_outfit_item(clothing, context, scene)
+        if allow_drop and len(details) > 2:
+            details = self._dedupe_phrases(details[:1] + details[-1:])
+
+        rebuilt = ", ".join(clothing)
+        if details:
+            rebuilt = f"{rebuilt}; {', '.join(self._dedupe_phrases(details))}" if rebuilt else ", ".join(self._dedupe_phrases(details))
+        try:
+            return self._normalize_outfit_sentence_for_prompt(rebuilt, scene, context)
+        except PromptValidationError:
+            return self._normalize_outfit_sentence_for_prompt(outfit_body, scene, context)
+
+    def _drop_nonessential_outfit_item(self, clothing: List[str], context: Dict[str, Any], scene: Any) -> List[str]:
+        if len(clothing) <= 3:
+            return clothing
+        required_objects = {obj.lower() for obj in self._behavior_object_terms(context)}
+        drop_candidates: List[str] = []
+        for item in clothing:
+            lowered = item.lower()
+            category = self._outfit_category(item)
+            protected = (
+                category == "shoes"
+                or ("bag" in lowered and "bag" in required_objects)
+                or (("carry on" in lowered or "carry-on" in lowered) and "carry on" in required_objects)
+            )
+            if protected:
+                continue
+            if category in {"accessory", "outerwear"}:
+                drop_candidates.append(item)
+        if not drop_candidates:
+            return clothing
+        to_drop = self._stable_choice(
+            drop_candidates,
+            self._scene_text(scene),
+            ",".join(clothing),
+            ",".join(sorted(required_objects)),
+            "drop_nonessential_outfit_item",
+        )
+        return [item for item in clothing if self._normalize_phrase_key(item) != self._normalize_phrase_key(to_drop)]
 
     @staticmethod
     def _parse_anchor_values(anchor: str, prefix: str) -> Dict[str, str]:

@@ -478,6 +478,85 @@ def test_negative_prompt_prefers_anti_model_symmetry_terms():
     assert "fashion catalog" not in negative
 
 
+def test_imperfect_reality_detection_flags_overdescribed_scene_outfit_and_mood():
+    composer = PromptComposer(DummyState())
+    diagnostics = composer._detect_perfection_patterns(
+        {
+            "Scene": "Scene: quiet morning at the cafe, with coffee cup in hand, bag resting beside her, phone kept close, soft background movement, small detail: notebook left half-open, shoulders relaxed.",
+            "Outfit": "Outfit: soft knit top, straight jeans, white sneakers, light cardigan, small shoulder bag; slightly relaxed fit, natural drape, subtle texture.",
+            "Mood": "Mood: composed focus, grounded routine mood, soft observational restraint, in-the-moment presence.",
+        }
+    )
+
+    assert diagnostics["too_complete"] is True
+    assert diagnostics["too_clean"] is True
+    assert diagnostics["needs_softening"] is True
+
+
+def test_imperfect_reality_layer_softens_explicit_detail_and_adds_micro_irregularity():
+    composer = PromptComposer(DummyState())
+    softened = composer._apply_imperfect_reality_layer(
+        {
+            "Identity": "Identity: stable.",
+            "Framing": "candid 3/4 body shot",
+            "Scene": "Scene: quiet cafe pause, at cafe interior, with coffee cup in hand, bag resting beside her, phone visible in the scene, small detail: notebook left half-open, shoulders relaxed.",
+            "Outfit": "Outfit: soft knit top, straight jeans, white sneakers, light cardigan, small shoulder bag; slightly relaxed fit with natural drape, slightly shifted and not perfectly arranged.",
+            "Environment": "Environment: photorealistic cafe interior; lived-in environmental detail; accurate perspective and scale; soft morning daylight behaving as natural available light.",
+            "Mood": "Mood: composed focus, grounded routine mood, relaxed body language that feels lived-in rather than arranged, in-the-moment presence.",
+        },
+        scene=Scene(),
+        context=BASE_CONTEXT,
+        shot_archetype="friend_shot",
+        imperfect_layer={
+            "scene_micro": "cup tipped a fraction in her hand instead of sitting completely upright",
+            "outfit_micro": "one side sitting a touch higher from recent movement",
+            "interaction_micro": "finger tension easing and tightening around the cup instead of fixing into one clean grip",
+            "mood_micro": "caught mid-thought with a little room left unsaid",
+        },
+    )
+
+    scene_body = softened["Scene"].lower()
+    outfit_body = softened["Outfit"].lower()
+    mood_body = softened["Mood"].lower()
+
+    assert "small detail:" not in scene_body
+    assert "cup tipped a fraction" in scene_body
+    assert "finger tension easing and tightening" in scene_body
+    assert "one side sitting a touch higher from recent movement" in outfit_body
+    assert "caught mid-thought with a little room left unsaid" in mood_body
+
+
+def test_imperfect_reality_layer_keeps_required_bag_visible_in_outfit_when_behavior_needs_it():
+    composer = PromptComposer(DummyState())
+    context = dict(BASE_CONTEXT)
+    context["behavioral_context"] = BehaviorState(
+        energy_level="medium",
+        social_mode="light_public",
+        emotional_arc="transition",
+        habit="packing",
+        place_anchor="terminal_gate",
+        objects=["carry_on", "bag"],
+        self_presentation="transitional",
+    )
+    scene = Scene()
+    scene.location = "airport terminal"
+    scene.activity = "walking"
+    scene.scene_moment = "Walking to the gate before boarding"
+    scene.description = "Walking to the gate before boarding"
+
+    package = composer.compose_package(
+        context,
+        scene,
+        "light knit top, practical straight trousers, comfortable sneakers, compact everyday bag, carry on",
+        "photo",
+        ["top_1"],
+    )
+    outfit_block = package["final_prompt"].split("\n\n")[3].lower()
+
+    assert "carry on" in outfit_block
+    assert "bag" in outfit_block
+
+
 def test_override_hint_pushes_presence_and_camera_distance():
     composer = PromptComposer(DummyState())
     context = dict(BASE_CONTEXT)
