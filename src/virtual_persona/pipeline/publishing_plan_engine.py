@@ -80,6 +80,7 @@ class PublishingPlanEngine:
             scene = ranked_moment.scene
             content_type = content_types[idx]
             prompt_meta = dict(self._pick_prompt_package(package, scene, content_type))
+            scene_validation_context = dict(validation_context)
             canonical_outfit_sentence = str(
                 prompt_meta.get("outfit_sentence")
                 or package.outfit.prompt_sentence()
@@ -88,7 +89,7 @@ class PublishingPlanEngine:
             canonical_outfit_sentence = prompt_validator._normalize_outfit_sentence_for_prompt(
                 canonical_outfit_sentence,
                 scene,
-                validation_context,
+                scene_validation_context,
             )
             prompt_meta["outfit_sentence"] = canonical_outfit_sentence
             prompt_meta["outfit_summary"] = str(prompt_meta.get("outfit_summary") or canonical_outfit_sentence)
@@ -97,13 +98,14 @@ class PublishingPlanEngine:
                 prompt_meta.get("outfit_struct_json")
                 or json.dumps(prompt_meta["outfit_struct"], ensure_ascii=False)
             )
+            scene_validation_context["outfit_struct"] = prompt_meta["outfit_struct"]
 
             raw_prompt = str(prompt_meta.get("final_prompt") or "").strip()
             final_prompt = PromptComposer.repair_outfit_block(raw_prompt, canonical_outfit_sentence) if canonical_outfit_sentence else raw_prompt
             finalized = prompt_validator.finalize_canonical_prompt(
                 final_prompt,
                 scene,
-                validation_context,
+                scene_validation_context,
                 outfit_sentence=canonical_outfit_sentence,
                 step="publishing_plan_generate",
                 shot_archetype=str(prompt_meta.get("shot_archetype") or ""),
@@ -132,6 +134,12 @@ class PublishingPlanEngine:
             prompt_meta["prompt_blocker_demoted_to_warning"] = bool(finalized.get("prompt_blocker_demoted_to_warning"))
             prompt_meta["safe_fallback_used"] = bool(finalized.get("safe_fallback_used"))
             prompt_meta["validation_severity"] = str(finalized.get("validation_severity") or "pending")
+            prompt_meta["outfit_validation_status"] = str(finalized.get("outfit_validation_status") or "pending")
+            prompt_meta["outfit_repair_applied"] = bool(finalized.get("outfit_repair_applied"))
+            prompt_meta["outfit_fallback_used"] = bool(finalized.get("outfit_fallback_used"))
+            prompt_meta["outfit_fallback_reason"] = str(finalized.get("outfit_fallback_reason") or "")
+            prompt_meta["outfit_recovery_source"] = str(finalized.get("outfit_recovery_source") or "primary")
+            prompt_meta["user_facing_prompt_placeholder_used"] = bool(finalized.get("user_facing_prompt_placeholder_used"))
             prompt_meta["post_sanitize_prompt_length"] = int(finalized.get("post_sanitize_prompt_length") or len(final_prompt))
             prompt_meta["post_sanitize_validation_result"] = str(finalized.get("post_sanitize_validation_result") or "")
             prompt_meta["prompt_blocks"] = dict(finalized.get("prompt_blocks") or {})
@@ -140,7 +148,7 @@ class PublishingPlanEngine:
             prompt_meta["scene_source"] = str(prompt_meta.get("scene_source") or scene.scene_source or scene.source or "scene_library")
             prompt_meta["behavior_source"] = str(prompt_meta.get("behavior_source") or getattr(behavior, "source", "none") or "none")
             prompt_meta["objects_inserted"] = list(
-                prompt_meta.get("objects_inserted") or prompt_validator._behavior_object_terms(validation_context, scene)
+                prompt_meta.get("objects_inserted") or prompt_validator._behavior_object_terms(scene_validation_context, scene)
             )
             try:
                 if not final_prompt:
@@ -148,7 +156,7 @@ class PublishingPlanEngine:
                 validation_result = prompt_validator._validate_canonical_prompt(
                     final_prompt,
                     scene,
-                    validation_context,
+                    scene_validation_context,
                     allow_repair=True,
                     allow_fallback=True,
                     step="publishing_plan_post_finalize_validate",
@@ -198,6 +206,33 @@ class PublishingPlanEngine:
                     validation_result.get("validation_severity")
                     or prompt_meta.get("validation_severity")
                     or "pending"
+                )
+                prompt_meta["outfit_validation_status"] = str(
+                    validation_result.get("outfit_validation_status")
+                    or prompt_meta.get("outfit_validation_status")
+                    or "pending"
+                )
+                prompt_meta["outfit_repair_applied"] = bool(
+                    prompt_meta.get("outfit_repair_applied", False)
+                    or validation_result.get("outfit_repair_applied", False)
+                )
+                prompt_meta["outfit_fallback_used"] = bool(
+                    prompt_meta.get("outfit_fallback_used", False)
+                    or validation_result.get("outfit_fallback_used", False)
+                )
+                prompt_meta["outfit_fallback_reason"] = str(
+                    validation_result.get("outfit_fallback_reason")
+                    or prompt_meta.get("outfit_fallback_reason")
+                    or ""
+                )
+                prompt_meta["outfit_recovery_source"] = str(
+                    validation_result.get("outfit_recovery_source")
+                    or prompt_meta.get("outfit_recovery_source")
+                    or "primary"
+                )
+                prompt_meta["user_facing_prompt_placeholder_used"] = bool(
+                    prompt_meta.get("user_facing_prompt_placeholder_used", False)
+                    or validation_result.get("user_facing_prompt_placeholder_used", False)
                 )
                 prompt_meta["post_sanitize_prompt_length"] = int(validation_result.get("post_sanitize_prompt_length") or len(final_prompt))
                 prompt_meta["post_sanitize_validation_result"] = str(validation_result.get("post_sanitize_validation_result") or prompt_meta.get("post_sanitize_validation_result") or "")
@@ -367,7 +402,21 @@ class PublishingPlanEngine:
             )
             prompt_meta["final_prompt"] = item.prompt_text
             prompt_meta["final_prompt_length"] = len(item.prompt_text)
+            prompt_meta["user_facing_prompt_placeholder_used"] = False
             item.prompt_style_version = str(prompt_meta.get("prompt_style_version") or "")
+            item.generation_diagnostics = json.dumps(
+                {
+                    "outfit_validation_status": prompt_meta.get("outfit_validation_status", "pending"),
+                    "outfit_repair_applied": prompt_meta.get("outfit_repair_applied", False),
+                    "outfit_fallback_used": prompt_meta.get("outfit_fallback_used", False),
+                    "outfit_fallback_reason": prompt_meta.get("outfit_fallback_reason", ""),
+                    "outfit_recovery_source": prompt_meta.get("outfit_recovery_source", "primary"),
+                    "user_facing_prompt_placeholder_used": prompt_meta.get("user_facing_prompt_placeholder_used", False),
+                    "validation_severity": prompt_meta.get("validation_severity", "pending"),
+                    "finalization_path": prompt_meta.get("finalization_path", "main"),
+                },
+                ensure_ascii=False,
+            )
             item.prompt_package_json = json.dumps(prompt_meta, ensure_ascii=False)
             logger.info(
                 "publishing_plan_prompt_trace publication_id=%s raw_pre_rewrite_prompt=%r post_rewrite_prompt=%r saved_prompt_text=%r prompt_style_version=%s",

@@ -314,6 +314,43 @@ def test_publishing_plan_row_contains_timezone_and_decision_metadata():
     assert json.loads(first.prompt_package_json)["outfit_sentence"] == first.outfit_sentence
 
 
+def test_publishing_plan_recovers_invalid_outfit_prompt_and_persists_real_prompt():
+    state = DummyState()
+    engine = PublishingPlanEngine(state)
+    package = _build_package(day_type="travel_day", phase="transition_phase")
+
+    broken_meta = package.content.prompt_packages[0]["photo"]
+    broken_meta["final_prompt"] = (
+        "Identity: stable identity with realistic facial cues, natural skin texture, soft brows, and grounded body proportions.\n\n"
+        "friend-shot, 3/4 body, natural social distance\n\n"
+        "Scene: waiting by the gate with the boarding screen nearby, shoulders slightly turned, carry on kept in the scene instead of the outfit, public life staying secondary.\n\n"
+        "Outfit: carry on, boarding pass.\n\n"
+        "Environment: photorealistic airport gate, real terminal architecture, physically plausible spatial depth, accurate perspective and scale, morning light behaving as natural available light, soft background people only.\n\n"
+        "Mood: like she is between one thing and the next, held together without turning it into a pose, already happening by the time the camera catches it."
+    )
+    broken_meta["outfit_sentence"] = "carry on, boarding pass"
+    broken_meta["outfit_summary"] = "carry on, boarding pass"
+    broken_meta["outfit_struct_json"] = json.dumps({"accessories": "carry on, boarding pass"})
+
+    rows = engine.generate(package)
+
+    assert rows
+    first = rows[0]
+    persisted = state.rows[0]
+    prompt_meta = json.loads(first.prompt_package_json)
+
+    assert PromptComposer.USER_FACING_OUTFIT_PLACEHOLDER not in first.prompt_text
+    assert "Outfit: carry on" not in first.prompt_text
+    assert any(token in first.prompt_text.lower() for token in ["sneakers", "flat shoes", "indoor shoes", "shoes"])
+    assert prompt_meta["final_prompt"] == first.prompt_text
+    assert prompt_meta["outfit_validation_status"] in {"recoverable", "degraded"}
+    assert prompt_meta["outfit_repair_applied"] is True
+    assert prompt_meta["user_facing_prompt_placeholder_used"] is False
+    assert persisted["prompt_text"] == first.prompt_text
+    assert json.loads(persisted["prompt_package_json"])["final_prompt"] == first.prompt_text
+    assert first.prompt_mode == PromptComposer._prompt_mode(first.prompt_text)
+
+
 def test_publishing_plan_keeps_required_text_fields_non_empty_even_with_empty_caption():
     state = DummyState()
     engine = PublishingPlanEngine(state)

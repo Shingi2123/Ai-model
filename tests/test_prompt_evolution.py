@@ -436,6 +436,7 @@ def test_validate_prompt_rejects_empty_outfit_placeholder():
             "Identity: soft oval face.\n\nmirror selfie head-and-shoulders shot\n\nScene: morning routine.\n\nOutfit: .\n\nEnvironment: photorealistic room; accurate perspective.\n\nMood: calm ease.",
             Scene(),
             BASE_CONTEXT,
+            allow_repair=False,
         )
 
 

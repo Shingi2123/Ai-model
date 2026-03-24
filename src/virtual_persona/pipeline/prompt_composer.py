@@ -36,6 +36,7 @@ class PromptComposer:
     state_store: Any
     CANONICAL_PROMPT_VERSION = "v6"
     PROMPT_STYLE_VERSION = "rewrite_v2"
+    USER_FACING_OUTFIT_PLACEHOLDER = "Prompt is unavailable because outfit validation failed"
     COMPACT_PROMPT_THRESHOLD = 740
     DENSE_PROMPT_MIN_LENGTH = 728
     DENSE_PROMPT_EXPANDED_BLOCKS = 4
@@ -4152,13 +4153,331 @@ class PromptComposer:
         has_detail = any(token in lowered for token in PromptComposer.OUTFIT_DETAIL_KEYWORDS)
         return has_detail and not has_clothing
 
-    def _contextual_outfit_fallback_sentence(self, scene: Any, context: Dict[str, Any]) -> str:
+    @staticmethod
+    def _outfit_validation_status_for_reason(reason: str) -> str:
+        lowered = str(reason or "").strip().lower()
+        if not lowered:
+            return "recoverable"
+        fatal_markers = (
+            "empty",
+            "english only",
+            "contain english clothing text",
+            "actual clothing pieces",
+            "placeholder",
+        )
+        if any(marker in lowered for marker in fatal_markers):
+            return "fatal"
+        return "recoverable"
+
+    def _build_structured_outfit_sentence(
+        self,
+        outfit_struct: Mapping[str, Any] | None,
+        *,
+        scene: Any,
+        context: Dict[str, Any],
+        coherence: PlaceCoherenceState | None = None,
+    ) -> str:
+        struct = self._coerce_outfit_struct(outfit_struct)
+        if not struct:
+            return ""
+
+        fallback_struct = self._outfit_struct_from_sentence(
+            self._safe_fallback_outfit_sentence(scene, context, coherence=coherence)
+        )
+        coherence = coherence or self._resolve_place_coherence(context, scene)
+
+        top = self._clean_fragment(str(struct.get("top") or fallback_struct.get("top") or ""))
+        bottom = self._clean_fragment(str(struct.get("bottom") or fallback_struct.get("bottom") or ""))
+        outerwear = self._clean_fragment(str(struct.get("outerwear") or fallback_struct.get("outerwear") or ""))
+        shoes = self._clean_fragment(str(struct.get("shoes") or fallback_struct.get("shoes") or ""))
+        accessories = self._clean_fragment(str(struct.get("accessories") or fallback_struct.get("accessories") or ""))
+
+        clothing = [piece for piece in [top, bottom, outerwear, shoes] if piece]
+        if accessories and self._outfit_item_allowed_for_place(accessories, scene=scene, context=context, coherence=coherence):
+            clothing.append(accessories)
+        clothing = self._normalize_outfit_clothing_items(clothing)
+
+        details = self._dedupe_phrases(
+            [
+                self._clean_fragment(str(struct.get("fit") or fallback_struct.get("fit") or "")),
+                self._clean_fragment(str(struct.get("fabric") or fallback_struct.get("fabric") or "")),
+                self._clean_fragment(str(struct.get("condition") or fallback_struct.get("condition") or "")),
+                self._clean_fragment(str(struct.get("styling") or fallback_struct.get("styling") or "")),
+            ]
+        )
+        detail_phrase = self._grounded_outfit_detail_phrase(details)
+        rebuilt = ", ".join(clothing)
+        if detail_phrase:
+            rebuilt = f"{rebuilt}; {detail_phrase}" if rebuilt else detail_phrase
+        return self._clean_fragment(rebuilt)
+
+    def _safe_fallback_outfit_sentence(
+        self,
+        scene: Any,
+        context: Dict[str, Any],
+        *,
+        coherence: PlaceCoherenceState | None = None,
+    ) -> str:
         lowered = self._scene_text(scene).lower()
+        behavior = context.get("behavioral_context")
         place_anchor = str(
-            getattr(context.get("behavioral_context"), "place_anchor", "")
-            or getattr(context.get("behavioral_context"), "familiar_place_anchor", "")
+            getattr(behavior, "place_anchor", "")
+            or getattr(behavior, "familiar_place_anchor", "")
             or ""
         ).lower()
+        social_presence = str(
+            getattr(behavior, "social_mode", "")
+            or getattr(behavior, "social_presence_mode", "")
+            or getattr(getattr(behavior, "daily_state", None), "social_presence_mode", "")
+            or ""
+        ).lower()
+        day_type = self._context_day_type(context)
+        time_of_day = str(getattr(scene, "time_of_day", "") or "").lower()
+        coherence = coherence or self._resolve_place_coherence(context, scene)
+
+        allow_bag = coherence.allow_wearable_bag and self._bag_is_legitimate(context, scene, coherence)
+        everyday_bag = ", and a small everyday bag" if allow_bag else ""
+
+        if any(token in lowered for token in ["airport", "terminal", "gate", "boarding"]) or place_anchor == "terminal_gate":
+            seated = any(token in lowered for token in ["waiting", "seated", "window", "chair", "table"]) or "waiting" in str(getattr(scene, "scene_moment_type", "") or "").lower()
+            if seated or day_type == "work_day":
+                return (
+                    "soft knit layer, straight trousers, comfortable sneakers"
+                    f"{everyday_bag}; practical travel-ready fit with natural fabric folds"
+                )
+            return (
+                "light knit top, light jacket, practical straight trousers, comfortable sneakers"
+                f"{everyday_bag}; travel-ready fit with soft layers and natural fabric folds"
+            )
+
+        if (
+            any(token in lowered for token in ["kitchen", "home", "living room", "hotel"])
+            or place_anchor in {"kitchen_corner", "hotel_window"}
+        ):
+            indoor_shoes = "comfortable indoor shoes" if any(token in lowered for token in ["home", "kitchen", "living room"]) else "comfortable flat shoes"
+            light_layer = "light cardigan" if time_of_day in {"morning", "evening", "night"} or "hotel" in lowered else "soft overshirt"
+            return (
+                f"soft casual knit top, relaxed straight trousers, {indoor_shoes}, and a {light_layer}; "
+                "easy indoor fit with natural fabric texture"
+            )
+
+        if any(token in lowered for token in ["cafe", "street", "sidewalk", "city", "urban"]):
+            outer_layer = "light jacket" if "street" in lowered or social_presence in {"light_public", "social", "alone_but_in_public"} else "soft layer"
+            return (
+                f"soft everyday top, straight jeans, comfortable sneakers, and a {outer_layer}; "
+                "casual urban fit with easy layering"
+            )
+
+        return (
+            "soft knit top, straight trousers, comfortable sneakers"
+            f"{everyday_bag}; practical fit with natural fabric folds"
+        )
+
+    def recover_outfit_sentence(
+        self,
+        outfit_sentence: str,
+        *,
+        scene: Any,
+        context: Dict[str, Any],
+        outfit_struct: Mapping[str, Any] | None = None,
+        shot_archetype: str = "",
+        apply_in_the_moment: bool = False,
+    ) -> Dict[str, Any]:
+        struct = self._coerce_outfit_struct(outfit_struct)
+        cleaned = self._clean_fragment(outfit_sentence)
+        coherence = self._resolve_place_coherence(context, scene, outfit_body=cleaned)
+        diagnostics: Dict[str, Any] = {
+            "sentence": "",
+            "outfit_validation_status": "fatal",
+            "outfit_repair_applied": False,
+            "outfit_fallback_used": False,
+            "outfit_fallback_reason": "",
+            "outfit_recovery_source": "primary",
+            "primary_validation_error": "",
+            "user_facing_prompt_placeholder_used": False,
+        }
+
+        def _finalize(candidate: str, *, status: str, source: str, repair: bool, fallback: bool, reason: str = "") -> Dict[str, Any]:
+            normalized = self.validate_outfit_sentence(candidate)
+            if apply_in_the_moment:
+                normalized = self.validate_outfit_sentence(
+                    self._in_the_moment_outfit_body(
+                        normalized,
+                        scene=scene,
+                        context=context,
+                        shot_archetype=shot_archetype,
+                    )
+                )
+            diagnostics.update(
+                {
+                    "sentence": normalized,
+                    "outfit_validation_status": status,
+                    "outfit_repair_applied": repair,
+                    "outfit_fallback_used": fallback,
+                    "outfit_fallback_reason": reason,
+                    "outfit_recovery_source": source,
+                }
+            )
+            return diagnostics
+
+        if cleaned:
+            try:
+                primary = self.validate_outfit_sentence(cleaned, outfit_struct=struct)
+                coherent_primary = self._coherent_outfit_sentence(
+                    primary,
+                    scene=scene,
+                    context=context,
+                    shot_archetype=shot_archetype,
+                    coherence=coherence,
+                    apply_in_the_moment=apply_in_the_moment,
+                )
+                if coherent_primary == primary:
+                    return _finalize(primary, status="passed", source="primary", repair=False, fallback=False)
+                return _finalize(coherent_primary, status="recoverable", source="repaired", repair=True, fallback=False)
+            except PromptValidationError as exc:
+                diagnostics["primary_validation_error"] = str(exc)
+                diagnostics["outfit_validation_status"] = self._outfit_validation_status_for_reason(str(exc))
+
+        repair_candidate = ""
+        if cleaned:
+            compacted = self._compact_outfit_phrase_clusters(cleaned, aggressive=False)
+            compacted_sentence = self._clean_fragment(str(compacted.get("outfit_sentence") or cleaned))
+            clothing, details, _props = self._split_outfit_scene_props(compacted_sentence)
+            clothing = self._normalize_outfit_clothing_items(clothing)
+            details, _ = self._compact_outfit_details(details, aggressive=False)
+            repair_candidate = ", ".join(clothing)
+            if details:
+                repair_candidate = f"{repair_candidate}; {', '.join(self._dedupe_phrases(details))}" if repair_candidate else ", ".join(self._dedupe_phrases(details))
+
+        for candidate in [repair_candidate, self._build_structured_outfit_sentence(struct, scene=scene, context=context, coherence=coherence)]:
+            normalized_candidate = self._clean_fragment(candidate)
+            if not normalized_candidate:
+                continue
+            try:
+                coherent_candidate = self._coherent_outfit_sentence(
+                    normalized_candidate,
+                    scene=scene,
+                    context=context,
+                    shot_archetype=shot_archetype,
+                    coherence=coherence,
+                    apply_in_the_moment=apply_in_the_moment,
+                )
+                return _finalize(
+                    coherent_candidate,
+                    status="recoverable",
+                    source="repaired",
+                    repair=True,
+                    fallback=False,
+                )
+            except PromptValidationError:
+                continue
+
+        fallback_reason = diagnostics["primary_validation_error"] or "repair_failed"
+        for candidate in [
+            self._safe_fallback_outfit_sentence(scene, context, coherence=coherence),
+            "soft knit top, straight trousers, comfortable sneakers; practical fit with natural fabric folds",
+        ]:
+            normalized_candidate = self._clean_fragment(candidate)
+            if not normalized_candidate:
+                continue
+            try:
+                return _finalize(
+                    normalized_candidate,
+                    status="degraded",
+                    source="fallback",
+                    repair=True,
+                    fallback=True,
+                    reason=fallback_reason,
+                )
+            except PromptValidationError:
+                continue
+
+        diagnostics["outfit_fallback_used"] = True
+        diagnostics["outfit_fallback_reason"] = fallback_reason or "critical_outfit_failure"
+        return diagnostics
+
+    def recover_prompt_outfit_block(
+        self,
+        prompt: str,
+        scene: Any,
+        context: Dict[str, Any],
+        *,
+        outfit_sentence: str = "",
+        outfit_struct: Mapping[str, Any] | None = None,
+        shot_archetype: str = "",
+        apply_in_the_moment: bool = True,
+    ) -> Dict[str, Any]:
+        normalized_prompt = str(prompt or "").strip()
+        prompt_blocks = self._prompt_block_map(normalized_prompt)
+        diagnostics: Dict[str, Any] = {
+            "prompt": normalized_prompt,
+            "prompt_blocks": prompt_blocks,
+            "changed": False,
+            "outfit_sentence": self.extract_outfit_sentence(normalized_prompt),
+            "outfit_validation_status": "fatal" if normalized_prompt else "pending",
+            "outfit_repair_applied": False,
+            "outfit_fallback_used": False,
+            "outfit_fallback_reason": "",
+            "outfit_recovery_source": "primary",
+            "user_facing_prompt_placeholder_used": False,
+        }
+        if not prompt_blocks:
+            return diagnostics
+
+        current_outfit = self._split_block_label(prompt_blocks["Outfit"])[1] or self._clean_fragment(outfit_sentence)
+        recovered_outfit = self.recover_outfit_sentence(
+            current_outfit,
+            scene=scene,
+            context=context,
+            outfit_struct=outfit_struct,
+            shot_archetype=shot_archetype,
+            apply_in_the_moment=False,
+        )
+        resolved_outfit = self._clean_fragment(str(recovered_outfit.get("sentence") or current_outfit or outfit_sentence))
+        if not resolved_outfit:
+            return diagnostics
+
+        updated_blocks = dict(prompt_blocks)
+        updated_blocks["Outfit"] = f"Outfit: {resolved_outfit}."
+        updated_prompt = "\n\n".join(
+            [
+                updated_blocks["Identity"],
+                updated_blocks["Framing"],
+                updated_blocks["Scene"],
+                updated_blocks["Outfit"],
+                updated_blocks["Environment"],
+                updated_blocks["Mood"],
+            ]
+        )
+        coherent = self._apply_place_coherence_to_prompt(
+            updated_prompt,
+            scene,
+            context,
+            outfit_sentence=resolved_outfit,
+            shot_archetype=shot_archetype,
+            apply_in_the_moment=apply_in_the_moment,
+        )
+        final_prompt = str(coherent.get("prompt") or updated_prompt).strip()
+        final_outfit = self.extract_outfit_sentence(final_prompt) or resolved_outfit
+
+        diagnostics.update(
+            {
+                "prompt": final_prompt,
+                "prompt_blocks": dict(coherent.get("prompt_blocks") or self._prompt_block_map(final_prompt) or updated_blocks),
+                "changed": final_prompt != normalized_prompt or bool(recovered_outfit.get("outfit_repair_applied")),
+                "outfit_sentence": final_outfit,
+                "outfit_validation_status": str(recovered_outfit.get("outfit_validation_status") or "recoverable"),
+                "outfit_repair_applied": bool(recovered_outfit.get("outfit_repair_applied")),
+                "outfit_fallback_used": bool(recovered_outfit.get("outfit_fallback_used")),
+                "outfit_fallback_reason": str(recovered_outfit.get("outfit_fallback_reason") or ""),
+                "outfit_recovery_source": str(recovered_outfit.get("outfit_recovery_source") or "primary"),
+                "user_facing_prompt_placeholder_used": False,
+            }
+        )
+        return diagnostics
+
+    def _contextual_outfit_fallback_sentence(self, scene: Any, context: Dict[str, Any]) -> str:
+        lowered = self._scene_text(scene).lower()
         style_intensity = str(context.get("style_intensity") or "").lower()
         outfit_style = str(context.get("outfit_style") or "").lower()
         bold_evening_hotel = (
@@ -4171,35 +4490,7 @@ class PromptComposer:
                 "fitted knit dress, light cardigan, and comfortable flat slides; "
                 "soft body lines with natural drape"
             )
-        if any(token in lowered for token in ["airport", "terminal", "gate", "boarding"]) or place_anchor == "terminal_gate":
-            if any(token in lowered for token in ["waiting", "coffee", "seated", "window"]) or str(getattr(scene, "scene_moment_type", "") or "").lower() == "waiting_before_boarding":
-                return (
-                    "soft layered knitwear, relaxed straight trousers, comfortable sneakers, and an everyday bag; "
-                    "travel-ready seated airport fit with natural fabric folds"
-                )
-            return (
-                "light knit top, practical straight trousers, comfortable sneakers, and a compact everyday bag; "
-                "travel-ready fit with soft layers and natural fabric folds"
-            )
-        if "hotel" in lowered or place_anchor == "hotel_window":
-            return (
-                "soft knit top, easy relaxed trousers, comfortable indoor shoes, and a light cardigan; "
-                "relaxed indoor fit with natural drape"
-            )
-        if "cafe" in lowered or place_anchor == "cafe_corner":
-            return (
-                "soft top, straight jeans, comfortable sneakers, and a small everyday bag; "
-                "casual urban fit with natural fabric folds"
-            )
-        if any(token in lowered for token in ["home", "kitchen", "living room"]) or place_anchor == "kitchen_corner":
-            return (
-                "soft everyday top, relaxed trousers, comfortable house shoes, and a light layer; "
-                "easy home fit with natural fabric folds"
-            )
-        return (
-            "soft knit top, straight trousers, comfortable sneakers, and a small everyday bag; "
-            "practical fit with natural fabric folds"
-        )
+        return self._safe_fallback_outfit_sentence(scene, context)
 
     def _minimal_scene_body(self, scene: Any) -> str:
         scene_moment = self._clean_fragment(str(getattr(scene, "scene_moment", "") or getattr(scene, "description", "") or "daily moment"))
@@ -4383,7 +4674,22 @@ class PromptComposer:
         normalized_prompt = str(prompt or "").strip()
         if not normalized_prompt:
             return normalized_prompt
-        cleaned_sentence = cls.validate_outfit_sentence(outfit_sentence)
+        try:
+            cleaned_sentence = cls.validate_outfit_sentence(outfit_sentence)
+        except PromptValidationError:
+            composer = cls(None)
+            fallback_sentence = composer._clean_fragment(outfit_sentence)
+            if fallback_sentence:
+                try:
+                    cleaned_sentence = composer.validate_outfit_sentence(fallback_sentence)
+                except PromptValidationError:
+                    cleaned_sentence = composer.validate_outfit_sentence(
+                        "soft knit top, straight trousers, comfortable sneakers; practical fit with natural fabric folds"
+                    )
+            else:
+                cleaned_sentence = composer.validate_outfit_sentence(
+                    "soft knit top, straight trousers, comfortable sneakers; practical fit with natural fabric folds"
+                )
         blocks = [block.strip() for block in normalized_prompt.split("\n\n") if block.strip()]
         if len(blocks) < 4 or not blocks[3].startswith("Outfit: "):
             return normalized_prompt
@@ -4832,6 +5138,12 @@ class PromptComposer:
             "quality_floor_met": False,
             "quality_recovery_reasons": [],
             "validation_severity": "pending",
+            "outfit_validation_status": "pending",
+            "outfit_repair_applied": False,
+            "outfit_fallback_used": False,
+            "outfit_fallback_reason": "",
+            "outfit_recovery_source": "primary",
+            "user_facing_prompt_placeholder_used": False,
             "post_sanitize_prompt_length": len(normalized_prompt),
             "post_sanitize_validation_result": "pending",
             "sanitization_step": step,
@@ -4867,6 +5179,34 @@ class PromptComposer:
             or bool(coherent_prompt.get("changed"))
         )
         diagnostics["rewrite_diagnostics"] = self._rewrite_pass_diagnostics(diagnostics["prompt_blocks"]) if diagnostics["prompt_blocks"] else {}
+
+        if self.prompt_has_invalid_outfit(working_prompt):
+            recovered_outfit_prompt = self.recover_prompt_outfit_block(
+                working_prompt,
+                scene,
+                context,
+                outfit_sentence=preferred_outfit,
+                outfit_struct=context.get("outfit_struct"),
+                shot_archetype=resolved_shot,
+                apply_in_the_moment=True,
+            )
+            working_prompt = str(recovered_outfit_prompt.get("prompt") or working_prompt).strip()
+            preferred_outfit = self._clean_fragment(
+                str(recovered_outfit_prompt.get("outfit_sentence") or preferred_outfit or self.extract_outfit_sentence(working_prompt))
+            )
+            diagnostics["prompt_blocks"] = dict(recovered_outfit_prompt.get("prompt_blocks") or diagnostics["prompt_blocks"])
+            diagnostics["sanitized_prompt_applied"] = (
+                diagnostics["sanitized_prompt_applied"]
+                or bool(recovered_outfit_prompt.get("changed"))
+            )
+            diagnostics["outfit_validation_status"] = str(recovered_outfit_prompt.get("outfit_validation_status") or "pending")
+            diagnostics["outfit_repair_applied"] = bool(recovered_outfit_prompt.get("outfit_repair_applied"))
+            diagnostics["outfit_fallback_used"] = bool(recovered_outfit_prompt.get("outfit_fallback_used"))
+            diagnostics["outfit_fallback_reason"] = str(recovered_outfit_prompt.get("outfit_fallback_reason") or "")
+            diagnostics["outfit_recovery_source"] = str(recovered_outfit_prompt.get("outfit_recovery_source") or "primary")
+            diagnostics["user_facing_prompt_placeholder_used"] = False
+        else:
+            diagnostics["outfit_validation_status"] = "passed"
 
         clause_sanitized = self.sanitize_canonical_prompt(
             working_prompt,
@@ -5003,6 +5343,12 @@ class PromptComposer:
                     diagnostics["garment_phrase_compaction_applied"]
                     or self.extract_outfit_sentence(candidate_prompt) != self.extract_outfit_sentence(normalized_prompt)
                 )
+                if (
+                    diagnostics["outfit_validation_status"] == "passed"
+                    and self.extract_outfit_sentence(candidate_prompt) != self.extract_outfit_sentence(normalized_prompt)
+                ):
+                    diagnostics["outfit_validation_status"] = "recoverable"
+                    diagnostics["outfit_repair_applied"] = True
                 diagnostics["sanitized_prompt_applied"] = (
                     diagnostics["sanitized_prompt_applied"]
                     or candidate_prompt != normalized_prompt
@@ -5146,6 +5492,11 @@ class PromptComposer:
                 diagnostics["finalization_path"] = "fallback"
                 diagnostics["safe_fallback_used"] = True
                 diagnostics["validation_severity"] = "hard_fallback"
+                diagnostics["outfit_validation_status"] = "degraded"
+                diagnostics["outfit_repair_applied"] = True
+                diagnostics["outfit_fallback_used"] = True
+                diagnostics["outfit_recovery_source"] = "fallback"
+                diagnostics["outfit_fallback_reason"] = diagnostics["outfit_fallback_reason"] or diagnostics["fatal_validation_reason"] or "fallback_prompt_path"
                 diagnostics["quality_floor_met"] = True
                 diagnostics["garment_phrase_compaction_applied"] = (
                     diagnostics["garment_phrase_compaction_applied"]
@@ -5203,6 +5554,7 @@ class PromptComposer:
                     "Required object missing",
                     "Rewrite pass failed",
                     "Place coherence conflict",
+                    "Outfit block",
                 )
                 if not any(marker in str(exc) for marker in repairable_markers):
                     raise
@@ -5238,6 +5590,12 @@ class PromptComposer:
             "quality_floor_met": True,
             "quality_recovery_reasons": [],
             "validation_severity": "clean",
+            "outfit_validation_status": "passed",
+            "outfit_repair_applied": False,
+            "outfit_fallback_used": False,
+            "outfit_fallback_reason": "",
+            "outfit_recovery_source": "primary",
+            "user_facing_prompt_placeholder_used": False,
             "post_sanitize_prompt_length": len(str(prompt or "").strip()),
             "post_sanitize_validation_result": "passed",
         }

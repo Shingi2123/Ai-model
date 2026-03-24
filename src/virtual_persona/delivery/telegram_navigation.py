@@ -10,12 +10,11 @@ from virtual_persona.delivery.publishing_plan_normalizer import (
     item_from_payload,
     load_prompt_meta,
     resolve_canonical_prompt,
-    resolve_outfit_sentence,
     resolve_prompt_mode,
     resolve_prompt_style_version,
 )
 from virtual_persona.models.domain import PublishingPlanItem
-from virtual_persona.pipeline.prompt_composer import PromptComposer, PromptValidationError
+from virtual_persona.pipeline.prompt_composer import PromptComposer
 
 
 logger = logging.getLogger(__name__)
@@ -281,7 +280,6 @@ def format_post_screen(context: PlanScreenContext, item: PublishingPlanItem, pos
 
 def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
     prompt_value, prompt_source, legacy_detected, prompt_style_version = resolve_canonical_prompt(item)
-    outfit_sentence, outfit_source = resolve_outfit_sentence(item)
     prompt = (prompt_value or "").strip()
     if not prompt:
         prompt = str(item.prompt_text or "").strip()
@@ -293,15 +291,6 @@ def format_prompt_screen(item: PublishingPlanItem, post_index: int) -> str:
         if prompt:
             prompt_source = "prompt_package_json.final_prompt_fallback"
             prompt_style_version = resolve_prompt_style_version(item, prompt_meta=prompt_meta)
-    if prompt and PromptComposer.prompt_has_invalid_outfit(prompt):
-        if outfit_sentence:
-            try:
-                prompt = PromptComposer.repair_outfit_block(prompt, outfit_sentence)
-                prompt_source = f"{prompt_source}+{outfit_source}"
-            except PromptValidationError:
-                prompt = "Prompt is unavailable because outfit validation failed"
-        else:
-            prompt = "Prompt is unavailable because outfit validation failed"
     prompt = _display_value(prompt, "Промпт для этого поста не сохранён.")
     caption = _display_value(item.caption_text, "Подпись не сохранена.")
     short_caption = _display_value(item.short_caption or item.caption_text, "Короткая подпись не сохранена.")

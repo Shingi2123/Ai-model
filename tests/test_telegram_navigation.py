@@ -1,6 +1,7 @@
 import json
 from datetime import date
 
+from virtual_persona.delivery.publishing_plan_normalizer import resolve_canonical_prompt
 from virtual_persona.delivery.telegram_navigation import (
     PlanScreenContext,
     build_detail_keyboard,
@@ -252,7 +253,41 @@ def test_prompt_screen_repairs_invalid_outfit_block_from_canonical_outfit_senten
     text = format_prompt_screen(item, 0)
 
     assert "Outfit: ." not in text
-    assert item.outfit_sentence in text
+    assert "soft knit top" in text
+    assert "straight jeans" in text
+    assert "white sneakers" in text
+
+
+def test_prompt_screen_recovers_invalid_outfit_without_user_placeholder():
+    item = _item()
+    item.prompt_text = ""
+    item.outfit_sentence = "carry on, boarding pass"
+    item.prompt_package_json = json.dumps(
+        {
+            "final_prompt": (
+                "Identity: stable identity with realistic facial cues, natural skin texture, soft brows, and grounded body proportions.\n\n"
+                "friend-shot, 3/4 body, natural social distance\n\n"
+                "Scene: waiting by the gate with the boarding screen nearby, shoulders slightly turned, carry on kept in the scene instead of the outfit, public life staying secondary.\n\n"
+                "Outfit: carry on, boarding pass.\n\n"
+                "Environment: photorealistic airport gate, real terminal architecture, physically plausible spatial depth, accurate perspective and scale, morning light behaving as natural available light, soft background people only.\n\n"
+                "Mood: like she is between one thing and the next, held together without turning it into a pose, already happening by the time the camera catches it."
+            ),
+            "outfit_sentence": "carry on, boarding pass",
+            "shot_archetype": "friend_shot",
+            "framing_mode": "friend-shot, 3/4 body",
+            "generation_mode": "full-body_mode",
+            "prompt_style_version": PromptComposer.PROMPT_STYLE_VERSION,
+        }
+    )
+
+    text = format_prompt_screen(item, 0)
+    resolved_prompt = resolve_canonical_prompt(item)[0]
+
+    assert PromptComposer.USER_FACING_OUTFIT_PLACEHOLDER not in text
+    assert "Outfit: carry on" not in text
+    assert any(token in text.lower() for token in ["sneakers", "flat shoes", "indoor shoes", "shoes"])
+    assert PromptComposer._prompt_mode(resolved_prompt) != "compact"
+    assert f"- {ui_label('Prompt mode')}: dense" in text
 
 
 def test_prompt_screen_localizes_ui_and_keeps_generation_blocks_english():

@@ -5,6 +5,7 @@ import logging
 import re
 from dataclasses import asdict, is_dataclass
 from datetime import date
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 from virtual_persona.models.domain import PublishingPlanItem
@@ -296,6 +297,71 @@ def resolve_outfit_sentence(
     return "", "missing"
 
 
+def _normalize_social_mode(value: str) -> str:
+    lowered = str(value or "").strip().lower()
+    if not lowered:
+        return "alone"
+    if "social" in lowered:
+        return "social"
+    if "public" in lowered or "light" in lowered:
+        return "light_public"
+    return "alone"
+
+
+def _infer_time_of_day(post_time: str) -> str:
+    raw = str(post_time or "").strip()
+    try:
+        hour = int(raw.split(":", 1)[0])
+    except (TypeError, ValueError, IndexError):
+        return "day"
+    if hour < 12:
+        return "morning"
+    if hour < 18:
+        return "day"
+    if hour < 22:
+        return "evening"
+    return "night"
+
+
+def _prompt_recovery_inputs(
+    source: Mapping[str, Any] | PublishingPlanItem | Any,
+    *,
+    prompt_meta: Mapping[str, Any] | None = None,
+) -> tuple[Any, dict[str, Any]]:
+    row = _to_mapping(source)
+    meta = dict(prompt_meta or load_prompt_meta(row))
+    objects_raw = _extract_value(row, "objects", "recurring_objects_in_scene")
+    objects = [chunk.strip().replace(" ", "_") for chunk in re.split(r"\s*,\s*", objects_raw) if chunk.strip()]
+    behavior = SimpleNamespace(
+        place_anchor=_extract_value(row, "place_anchor") or _extract_value(row, "familiar_place_anchor"),
+        familiar_place_anchor=_extract_value(row, "familiar_place_anchor"),
+        social_mode=_normalize_social_mode(_extract_value(row, "social_presence_mode")),
+        self_presentation=_extract_value(row, "self_presentation", "self_presentation_mode"),
+        habit=_extract_value(row, "habit", "habit_used"),
+        selected_habit=_extract_value(row, "habit_used", "habit"),
+        objects=objects,
+        recurring_objects=objects,
+    )
+    scene = SimpleNamespace(
+        location=_extract_value(row, "city") or _extract_value(meta, "place") or "everyday location",
+        description=_extract_value(row, "scene_moment", "moment") or "daily moment",
+        scene_moment=_extract_value(row, "scene_moment", "moment") or "daily moment",
+        activity=_extract_value(row, "activity_type"),
+        time_of_day=_infer_time_of_day(_extract_value(row, "post_time")),
+        scene_moment_type=_extract_value(row, "scene_moment_type"),
+        visual_focus=_extract_value(row, "visual_focus"),
+        social_presence=_normalize_social_mode(_extract_value(row, "social_presence_mode")),
+    )
+    context = {
+        "city": _extract_value(row, "city"),
+        "day_type": _extract_value(row, "day_type"),
+        "behavioral_context": behavior,
+        "life_state": SimpleNamespace(day_type=_extract_value(row, "day_type")),
+        "outfit_struct": meta.get("outfit_struct") or {},
+    }
+    return scene, context
+
+
 def is_legacy_prompt(
     text: str,
     *,
@@ -339,6 +405,37 @@ def resolve_canonical_prompt(
     row_prompt = _extract_value(row, "prompt_text")
     meta_prompt = _extract_value(prompt_meta, "final_prompt")
     prompt_style_version = resolve_prompt_style_version(row, prompt_meta=prompt_meta)
+    placeholder_text = PromptComposer.USER_FACING_OUTFIT_PLACEHOLDER.lower()
+    if meta_prompt.strip().lower() == placeholder_text:
+        meta_prompt = ""
+    if row_prompt.strip().lower() == placeholder_text:
+        row_prompt = ""
+    composer = PromptComposer(None)
+    scene, context = _prompt_recovery_inputs(row, prompt_meta=prompt_meta)
+    shot_archetype = _extract_value(row, "shot_archetype") or _extract_value(prompt_meta, "shot_archetype")
+    outfit_struct = prompt_meta.get("outfit_struct") or prompt_meta.get("outfit_struct_json") or row.get("outfit_struct_json")
+    if meta_prompt and PromptComposer.prompt_has_invalid_outfit(meta_prompt):
+        repaired = composer.recover_prompt_outfit_block(
+            meta_prompt,
+            scene,
+            context,
+            outfit_sentence=outfit_sentence,
+            outfit_struct=outfit_struct,
+            shot_archetype=shot_archetype,
+            apply_in_the_moment=True,
+        )
+        meta_prompt = str(repaired.get("prompt") or meta_prompt).strip()
+    if row_prompt and PromptComposer.prompt_has_invalid_outfit(row_prompt):
+        repaired = composer.recover_prompt_outfit_block(
+            row_prompt,
+            scene,
+            context,
+            outfit_sentence=outfit_sentence,
+            outfit_struct=outfit_struct,
+            shot_archetype=shot_archetype,
+            apply_in_the_moment=True,
+        )
+        row_prompt = str(repaired.get("prompt") or row_prompt).strip()
     meta_legacy = is_legacy_prompt(
         meta_prompt,
         row=row,
@@ -373,13 +470,20 @@ def resolve_canonical_prompt(
     else:
         resolved_prompt = default
 
-    if resolved_prompt and outfit_sentence and PromptComposer.prompt_has_invalid_outfit(resolved_prompt):
-        try:
-            repaired_prompt = PromptComposer.repair_outfit_block(resolved_prompt, outfit_sentence)
-        except Exception:
-            repaired_prompt = resolved_prompt
+    if resolved_prompt and PromptComposer.prompt_has_invalid_outfit(resolved_prompt):
+        repaired = composer.recover_prompt_outfit_block(
+            resolved_prompt,
+            scene,
+            context,
+            outfit_sentence=outfit_sentence,
+            outfit_struct=outfit_struct,
+            shot_archetype=shot_archetype,
+            apply_in_the_moment=True,
+        )
+        repaired_prompt = str(repaired.get("prompt") or resolved_prompt).strip()
         if repaired_prompt != resolved_prompt:
-            prompt_source = f"{prompt_source}+{outfit_source}"
+            suffix = "outfit_recovery" if repaired.get("outfit_recovery_source") else outfit_source
+            prompt_source = f"{prompt_source}+{suffix}"
             resolved_prompt = repaired_prompt
 
     return resolved_prompt, prompt_source, (meta_legacy or row_legacy), prompt_style_version
