@@ -216,7 +216,8 @@ def test_mood_block_uses_controlled_emotional_vocabulary_only():
     mood_block = package["final_prompt"].split("\n\n")[5]
 
     assert mood_block.startswith("Mood: composed focus")
-    assert "in-the-moment presence" in mood_block
+    assert "already happening by the time the camera catches it" in mood_block
+    assert "in-the-moment presence" not in mood_block
 
 
 def test_positive_prompt_contains_only_english_ascii_letters_from_scene_payload():
@@ -304,7 +305,8 @@ def test_compose_package_uses_canonical_outfit_sentence_from_context_without_reb
     assert "relaxed straight trousers" in outfit_block
     assert "comfortable sneakers" in outfit_block
     assert "small crossbody bag" in outfit_block
-    assert "slightly shifted and not perfectly arranged" in outfit_block
+    assert "one side sitting a little off from recent movement" in outfit_block
+    assert ";" not in outfit_block
 
 
 def test_canonical_outfit_sentence_wins_over_legacy_summary_in_final_prompt(monkeypatch):
@@ -354,7 +356,7 @@ def test_manual_outfit_override_is_inserted_without_regeneration():
     assert "light cardigan" in lowered
     assert "flat slides" in lowered
     assert "small overnight bag" in lowered
-    assert "slightly shifted and not perfectly arranged" in lowered
+    assert "one side sitting a little off from recent movement" in lowered
 
 
 def test_invalid_manual_outfit_override_raises_validation_error():
@@ -452,18 +454,28 @@ def test_behavior_influences_prompt_with_movement_mood_and_objects():
     package = composer.compose_package(context, scene, "cream cardigan + denim", "photo", ["top_1"])
     prompt = package["final_prompt"].lower()
 
-    assert "natural pause moment" in prompt or "still posture" in prompt
-    assert "holding cup naturally" in prompt
+    assert "still for a second, not frozen" in prompt or "a pause already underway" in prompt
+    assert "coffee cup in hand" in prompt
     assert "coffee cup" in prompt
     assert "carry on" in prompt
     assert "bag" in prompt
     assert "checking the boarding screen occasionally" in prompt
-    assert "transitional mood" in prompt
+    assert "like she is between one thing and the next" in prompt
+    assert "transitional mood" not in prompt
     assert "soft background people only" in prompt
-    assert "relaxed uneven grip" in prompt
-    assert "one hand sitting a little higher around the cup" in prompt or "one shoulder sitting slightly higher" in prompt
-    assert "in-the-moment presence" in prompt
+    assert "already happening by the time the camera catches it" in prompt
     assert composer._find_duplicate_clauses(package["final_prompt"]) == []
+
+
+def test_scene_and_outfit_blocks_shift_from_description_to_in_the_moment_presence():
+    package = _compose()
+    scene_block = package["final_prompt"].split("\n\n")[2].lower()
+    outfit_block = package["final_prompt"].split("\n\n")[3].lower()
+
+    assert "before heading out" not in scene_block
+    assert "door still a later problem" in scene_block or "camera cut in a second late" in scene_block or "nothing in it trying too hard" in scene_block
+    assert ";" not in outfit_block
+    assert "sits naturally" in outfit_block or "fall straight without trying too hard" in outfit_block or "worn in" in outfit_block
 
 
 def test_negative_prompt_prefers_anti_model_symmetry_terms():

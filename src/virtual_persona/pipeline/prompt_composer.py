@@ -1013,7 +1013,27 @@ class PromptComposer:
             outfit_sentence=outfit_sentence,
             step="build_final_prompt",
         )
-        prompt = str(sanitized["prompt"])
+        final_blocks = dict(sanitized.get("prompt_blocks") or {})
+        if final_blocks:
+            final_blocks = self._apply_in_the_moment_phrasing_layer(
+                final_blocks,
+                scene=scene,
+                context=context,
+                shot_archetype=shot_archetype,
+            )
+            sanitized["prompt_blocks"] = final_blocks
+            prompt = "\n\n".join(
+                [
+                    final_blocks["Identity"],
+                    final_blocks["Framing"],
+                    final_blocks["Scene"],
+                    final_blocks["Outfit"],
+                    final_blocks["Environment"],
+                    final_blocks["Mood"],
+                ]
+            )
+        else:
+            prompt = str(sanitized["prompt"])
         self._validate_canonical_prompt(prompt, scene, context)
         sanitized["prompt"] = prompt
         return sanitized
@@ -1220,6 +1240,37 @@ class PromptComposer:
         softened["Mood"] = f"Mood: {mood_body}."
         return softened
 
+    def _apply_in_the_moment_phrasing_layer(
+        self,
+        block_map: Dict[str, str],
+        *,
+        scene: Any,
+        context: Dict[str, Any],
+        shot_archetype: str,
+    ) -> Dict[str, str]:
+        transformed = dict(block_map)
+
+        scene_body = self._split_block_label(transformed["Scene"])[1]
+        outfit_body = self._split_block_label(transformed["Outfit"])[1]
+        environment_body = self._split_block_label(transformed["Environment"])[1]
+        mood_body = self._split_block_label(transformed["Mood"])[1]
+
+        transformed["Scene"] = f"Scene: {self._in_the_moment_scene_body(scene_body, scene)}."
+        transformed["Environment"] = f"Environment: {self._in_the_moment_environment_body(environment_body)}."
+        transformed["Mood"] = f"Mood: {self._in_the_moment_mood_body(mood_body)}."
+
+        in_the_moment_outfit = self._in_the_moment_outfit_body(
+            outfit_body,
+            scene=scene,
+            context=context,
+            shot_archetype=shot_archetype,
+        )
+        try:
+            transformed["Outfit"] = f"Outfit: {self.validate_outfit_sentence(in_the_moment_outfit)}."
+        except PromptValidationError:
+            transformed["Outfit"] = f"Outfit: {self._normalize_outfit_sentence_for_prompt(outfit_body, scene, context)}."
+        return transformed
+
     def _detect_perfection_patterns(self, block_map: Dict[str, str]) -> Dict[str, bool]:
         scene_body = self._split_block_label(block_map.get("Scene", ""))[1]
         outfit_body = self._split_block_label(block_map.get("Outfit", ""))[1]
@@ -1242,6 +1293,279 @@ class PromptComposer:
             "too_clean": too_clean,
             "needs_softening": too_symmetrical or too_complete or too_clean,
         }
+
+    def _in_the_moment_scene_body(self, scene_body: str, scene: Any) -> str:
+        clauses = [clause["text"] for clause in self._extract_semantic_clauses("Scene", scene_body)]
+        rewritten_raw: List[str] = []
+        for clause in clauses:
+            rewritten_clause = self._rewrite_scene_clause_for_presence(clause, scene)
+            if rewritten_clause:
+                rewritten_raw.append(rewritten_clause)
+        rewritten = self._dedupe_phrases(rewritten_raw)
+        joined = " ".join(rewritten).lower()
+        if len(rewritten) >= 4:
+            tail = self._stable_choice(
+                [
+                    "the rest of it still carrying on outside the frame",
+                    "like the camera cut in a second late",
+                    "nothing in it trying too hard",
+                ],
+                scene_body,
+                self._scene_text(scene),
+                getattr(scene, "moment_signature", ""),
+                "scene_tail",
+            )
+            if tail and tail.lower() not in joined:
+                rewritten.append(tail)
+        return ", ".join(rewritten[:6]) if rewritten else self._minimal_scene_body(scene)
+
+    def _rewrite_scene_clause_for_presence(self, clause: str, scene: Any) -> str:
+        cleaned = self._grounded_phrase(clause)
+        if not cleaned:
+            return ""
+
+        activity = str(getattr(scene, "activity", "") or "").replace("_", " ").strip().lower()
+        if activity and cleaned.lower() == activity:
+            return ""
+
+        replacements = [
+            (r"\bbefore the day starts\b", "with the day not fully started yet"),
+            (r"\bduring the morning routine\b", "with the morning still settling"),
+            (r"\bin a calm moment\b", "with the quiet still hanging there"),
+            (r"\bbefore heading out\b", "with the door still a later problem"),
+            (r"\bbefore boarding\b", "with boarding still ahead"),
+            (r"\bbefore breakfast\b", "before anything feels fully started"),
+            (r"\bholding cup naturally\b", "coffee cup in hand"),
+            (r"\bresting hands naturally\b", "hands left alone"),
+            (r"\btouching the window lightly\b", "fingers near the window"),
+            (r"\bminimal facial expression with inward attention\b", "more inward than expressive"),
+            (r"\bmeasured expression and upright posture\b", "held together without looking posed"),
+            (r"\bgentle expression and relaxed shoulders\b", "relaxed shoulders and an expression left soft"),
+            (r"\bnatural pause moment\b", "a pause already underway"),
+            (r"\bstill posture\b", "still for a second, not frozen"),
+            (r"\bslow relaxed movement\b", "movement just slow enough to still be in it"),
+            (r"\bsmall detail:\s*", ""),
+        ]
+        for pattern, replacement in replacements:
+            cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
+        if cleaned.lower().startswith("at "):
+            cleaned = f"in {cleaned[3:]}"
+        if cleaned.lower().startswith("with coffee cup in hand"):
+            cleaned = cleaned[5:]
+
+        if cleaned.lower().startswith("with the quiet still hanging there"):
+            cleaned = cleaned.replace("with the quiet still hanging there", "quiet still hanging there", 1)
+        return self._decapitalize_fragment(cleaned)
+
+    def _in_the_moment_environment_body(self, environment_body: str) -> str:
+        clauses = [clause["text"] for clause in self._extract_semantic_clauses("Environment", environment_body)]
+        rewritten: List[str] = []
+        for clause in clauses:
+            cleaned = self._grounded_phrase(clause)
+            lowered = cleaned.lower()
+            if lowered.startswith("physically plausible spatial depth"):
+                cleaned = "real spatial depth"
+            elif lowered == "accurate perspective and scale":
+                cleaned = "perspective and scale staying real"
+            elif "behaving as natural available light" in lowered:
+                cleaned = re.sub(r"\s*behaving as natural available light", " working like available light", cleaned, flags=re.IGNORECASE)
+            elif lowered == "lived-in environmental detail":
+                cleaned = "lived-in detail"
+            rewritten.append(cleaned)
+        return ", ".join(self._dedupe_phrases(rewritten)) if rewritten else self._grounded_phrase(environment_body)
+
+    def _in_the_moment_mood_body(self, mood_body: str) -> str:
+        clauses = [clause["text"] for clause in self._extract_semantic_clauses("Mood", mood_body)]
+        rewritten_raw: List[str] = []
+        for clause in clauses:
+            rewritten_clause = self._rewrite_mood_clause_for_presence(clause)
+            if rewritten_clause:
+                rewritten_raw.append(rewritten_clause)
+        rewritten = self._dedupe_phrases(rewritten_raw)
+        return ", ".join(rewritten[:4]) if rewritten else "quiet confidence"
+
+    def _rewrite_mood_clause_for_presence(self, clause: str) -> str:
+        cleaned = self._grounded_phrase(clause)
+        lowered = cleaned.lower()
+
+        exact = {
+            "grounded routine mood": "the rhythm staying ordinary and unforced",
+            "transitional mood": "like she is between one thing and the next",
+            "calm arrival mood": "just settled into the place",
+            "focused before-leaving mood": "already half ready to move again",
+            "in-the-moment presence": "already happening by the time the camera catches it",
+            "unposed asymmetry kept in the frame": "small imbalance left in the frame",
+            "soft observational restraint": "more observant than expressive",
+        }
+        if lowered in exact:
+            return exact[lowered]
+        if lowered.endswith(" self-presentation"):
+            token = lowered.replace(" self-presentation", "").strip()
+            return {
+                "transitional": "still a little between places",
+                "soft": "easy in the face and shoulders",
+                "focused": "more inward than performative",
+                "composed": "held together without putting it on",
+                "relaxed": "easy in the body",
+            }.get(token, "")
+        if "relaxed body language" in lowered and "lived-in" in lowered:
+            return "relaxed body language, lived-in and not tidied up for the frame"
+        if "quietly intimate body language" in lowered:
+            return "quietly intimate body language, a little more open through the posture"
+        if "quietly confident body language" in lowered:
+            return "quiet confidence without the posed part"
+        if "natural body language with no posed look" in lowered:
+            return "natural body language with nothing performed for the camera"
+        return cleaned
+
+    def _in_the_moment_outfit_body(
+        self,
+        outfit_body: str,
+        *,
+        scene: Any,
+        context: Dict[str, Any],
+        shot_archetype: str,
+    ) -> str:
+        clothing_text, _, detail_text = self._clean_fragment(outfit_body).partition(";")
+        details = self._dedupe_phrases([chunk for chunk in re.split(r"\s*,\s*", detail_text) if self._clean_fragment(chunk)])
+        clothing: List[str] = []
+        for chunk in [chunk for chunk in re.split(r"\s*(?:,| and )\s*", clothing_text) if self._clean_fragment(chunk)]:
+            if self._is_outfit_detail_only_clause(chunk):
+                details.append(chunk)
+            else:
+                clothing.append(chunk)
+        clothing = self._dedupe_phrases(clothing)
+        details = self._dedupe_phrases(details)
+
+        if shot_archetype not in {"front_selfie", "mirror_selfie"} and len(clothing) > 4:
+            clothing = self._drop_nonessential_outfit_item(clothing, context, scene)
+
+        phrase_candidates: List[str] = []
+        for item in clothing:
+            rewritten_item = self._rewrite_outfit_item_for_presence(item)
+            if rewritten_item:
+                phrase_candidates.append(rewritten_item)
+        phrases = self._dedupe_phrases(phrase_candidates)
+        detail_phrase = self._grounded_outfit_detail_phrase(details)
+        if detail_phrase and detail_phrase.lower() not in " ".join(phrases).lower():
+            phrases.append(detail_phrase)
+        rebuilt = ", ".join(phrases[:5])
+        return rebuilt or self._normalize_outfit_sentence_for_prompt(outfit_body, scene, context)
+
+    def _rewrite_outfit_item_for_presence(self, item: str) -> str:
+        cleaned = self._grounded_phrase(item)
+        lowered = cleaned.lower()
+        clothing_tokens = (
+            "dress",
+            "jeans",
+            "trousers",
+            "pants",
+            "skirt",
+            "shorts",
+            "denim",
+            "sneakers",
+            "boots",
+            "loafers",
+            "sandals",
+            "slides",
+            "shoes",
+            "trainers",
+            "coat",
+            "jacket",
+            "cardigan",
+            "blazer",
+            "hoodie",
+            "trench",
+            "top",
+            "blouse",
+            "shirt",
+            "sweater",
+            "knit",
+            "knitwear",
+            "tank",
+            "tee",
+            "bag",
+            "carry on",
+            "carry-on",
+        )
+        if len(lowered.split()) <= 3 and not any(token in lowered for token in clothing_tokens):
+            return ""
+        category = self._outfit_category(cleaned)
+
+        if category == "dress":
+            if "knit" in lowered:
+                return f"{cleaned} following the body without looking styled"
+            return f"{cleaned} worn like the day is already underway"
+        if category == "bottom":
+            if "trousers" in lowered or "pants" in lowered:
+                return f"{cleaned} that fall straight without trying too hard"
+            if "jeans" in lowered or "denim" in lowered:
+                return f"{cleaned} worn in enough to feel real"
+            return f"{cleaned} moving easy with her"
+        if category == "shoes":
+            if any(token in lowered for token in ["sneakers", "trainers"]):
+                return f"{cleaned} a little worn in"
+            if any(token in lowered for token in ["slides", "sandals"]):
+                return f"{cleaned} that look actually used"
+            return f"{cleaned} kept easy and grounded"
+        if category == "outerwear":
+            if "cardigan" in lowered:
+                return f"{cleaned} left open and shifting a little"
+            return f"{cleaned} falling into its own lines"
+        if category == "accessory":
+            if "carry on" in lowered or "carry-on" in lowered:
+                return "carry on close by with the handle a little off straight"
+            if "bag" in lowered:
+                return f"{cleaned} kept close with the strap pulling one side slightly off center"
+            return f"{cleaned} looking actually carried"
+        if "knitwear" in lowered:
+            return f"{cleaned} sitting naturally with a few real folds"
+        if "knit" in lowered:
+            return f"{cleaned} that sits naturally"
+        return f"{cleaned} worn without looking overthought"
+
+    def _grounded_outfit_detail_phrase(self, details: List[str]) -> str:
+        for detail in reversed(details):
+            cleaned = self._grounded_phrase(detail)
+            lowered = cleaned.lower()
+            if len(lowered.split()) <= 1:
+                continue
+            if "not perfectly arranged" in lowered or "not too arranged" in lowered or "shifted" in lowered:
+                return "one side sitting a little off from recent movement"
+            if any(token in lowered for token in ["drape", "soft body lines", "relaxed fit"]):
+                return "the fabric falling easy instead of too clean"
+            if any(token in lowered for token in ["fold", "wrinkle", "crease", "texture"]):
+                return "fabric keeping a few real folds in it"
+            if any(token in lowered for token in ["pull", "off center", "uneven", "higher"]):
+                return cleaned
+        return ""
+
+    @staticmethod
+    def _decapitalize_fragment(text: str) -> str:
+        cleaned = PromptComposer._clean_fragment(text)
+        if len(cleaned) < 2:
+            return cleaned.lower()
+        if cleaned[0].isupper() and cleaned[1].islower():
+            return cleaned[0].lower() + cleaned[1:]
+        return cleaned
+
+    @staticmethod
+    def _grounded_phrase(text: str) -> str:
+        cleaned = PromptComposer._clean_fragment(text)
+        replacements = [
+            ("slightly", "a little"),
+            ("rather than", "not"),
+            ("feels lived-in", "lands lived-in"),
+            ("without perfect alignment", "without lining up too neatly"),
+            ("not perfectly arranged", "not too arranged"),
+            ("perfectly aligned", "too aligned"),
+            ("perfectly squared", "too squared"),
+        ]
+        for old, new in replacements:
+            cleaned = re.sub(re.escape(old), new, cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bsoft observational restraint\b", "more observant than expressive", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        return cleaned.strip(" ,;:.")
 
     def _prioritized_scene_clauses(self, clauses: List[str], context: Dict[str, Any], limit: int) -> List[str]:
         required_objects = self._behavior_object_terms(context)
@@ -2395,7 +2719,7 @@ class PromptComposer:
             return "shoes"
         if any(token in lowered for token in ["coat", "jacket", "blazer", "cardigan", "hoodie", "trench"]):
             return "outerwear"
-        if any(token in lowered for token in ["bag", "tote", "scarf", "watch", "glasses", "sunglasses", "jewelry", "necklace", "earrings", "cap", "belt"]):
+        if any(token in lowered for token in ["bag", "tote", "scarf", "watch", "glasses", "sunglasses", "jewelry", "necklace", "earrings", "cap", "belt", "carry on", "carry-on"]):
             return "accessory"
         return "top"
 
